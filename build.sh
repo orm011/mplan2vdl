@@ -12,8 +12,6 @@
 declare -r GHC_VERSION=7.8.2
 declare -r TOP="$(git rev-parse --show-toplevel)"
 
-declare -r GREP="grep --quiet --no-messages"
-
 function have {
     type "$1" &>/dev/null
 }
@@ -40,5 +38,5 @@ HAPPY_DEBUG="-g --debug --info "
 HAPPY_REL=""
 
 cabal install \
-    --enable-library-profiling --enable-executable-profiling \
+    --enable-library-profiling --enable-profiling \
     --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=$HAPPY_REL
