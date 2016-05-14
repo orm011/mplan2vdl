@@ -13,7 +13,7 @@ maintainer:          orm@csail.mit.edu
 category:            Database
 build-type:          Simple
 -- extra-source-files:
-cabal-version:       >=1.10
+cabal-version:       >=1.20
 
 executable mplan2vd
   main-is:             Main.hs
