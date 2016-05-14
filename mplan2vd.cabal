@@ -19,12 +19,19 @@ executable mplan2vd
   main-is:             Main.hs
   other-modules:       Parser
                      , Scanner
+                     , Configuration
+                     , Configuration.Types
+                     , CLI
   other-extensions:
   build-depends:       base >=4.7 && <4.8
                      , MissingH==1.3.0.*
                      , containers==0.5.*
                      , groom==0.1.*
                      , hashmap==1.3.0.*
+                     , split==0.2.*
+                     , array==0.5.*
+                     , transformers==0.4.0.*
+--really needs transformers 0.4, for Except
   hs-source-dirs:      src
   ghc-options:         -Wall -O2 -rtsopts
   extensions:          NamedFieldPuns DeriveGeneric
