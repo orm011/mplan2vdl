@@ -9,7 +9,7 @@
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the X11 license for more details.
 
-declare -r GHC_VERSION=7.8.2
+declare -r GHC_VERSION=7.8.4
 declare -r TOP="$(git rev-parse --show-toplevel)"
 
 function have {
@@ -34,9 +34,11 @@ for package in alex happy; do
     fi
 done
 
-HAPPY_DEBUG="-g --debug --info "
-HAPPY_REL=""
+HAPPY="" #"-g --debug --info "
 
 cabal install \
     --enable-library-profiling --enable-profiling \
-    --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=$HAPPY_REL
+    --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=$HAPPY
+
+cabal test \
+    --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=$HAPPY
