@@ -2,7 +2,8 @@ module Process with
 import Parser (fromString)
 
 {- stronger types for each kind of operation -}
-data BinaryOp = Gt | Lt | Leq | Geq
+data BinaryOp =
+  Gt | Lt | Leq | Geq {- rel -}
   | Eq | Neq {- comp -}
   | Sub | Add | Div | Mul | Mod {- arith -}
   | LogAnd | LogOr {- only used in where clause, it seems -}
@@ -17,9 +18,9 @@ data RelExpr  = Table { name :: Name, columns :: [(ScalarExpr, Maybe Name)] }
 
 data RelOp = OpSelect
            | OpProject
-           | OpGroupBy
-           | OpTopK
-           | OpCrossProduct
+           | OpGroup
+           | OpTopN
+           | OpCross
            | OpJoin
            | OpSemiJoin
            | OpAntiJoin
