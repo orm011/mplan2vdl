@@ -10,12 +10,13 @@
 -- WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 -- FOR A PARTICULAR PURPOSE.  See the X11 license for more details.
 {
-module Parser ( parse
+module Parser ( parse,
+                fromString
               ) where
 
 import Text.Printf (printf)
-
-import Scanner (ScannedToken(..), Token(..))
+import Data.Either(isRight,partitionEithers)
+import Scanner (ScannedToken(..), Token(..), scan)
 
 }
 
@@ -142,4 +143,11 @@ parseError toks =
         lineNo = Scanner.line firstBadToken
         columnNo = Scanner.column firstBadToken
         badTokenText = concatMap (show . extractRawToken) toks
+
+fromString :: String -> Either String Rel
+fromString str =
+  let (errs, okays) = partitionEithers $ Scanner.scan str
+  in
+    if errs /= [] then Left $ "Token error: " ++ (show $ head errs)
+    else parse okays
 }

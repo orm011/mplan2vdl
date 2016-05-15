@@ -1,21 +1,19 @@
-
+module Process with
+import Parser (fromString)
 
 {- stronger types for each kind of operation -}
-
 data BinaryOp = Gt | Lt | Leq | Geq
   | Eq | Neq {- comp -}
   | Sub | Add | Div | Mul | Mod {- arith -}
-  | LogAnd | LogOr
+  | LogAnd | LogOr {- only used in where clause, it seems -}
   | BitAnd | BitOr deriving (Eq, Show)
 
-
-{- custom types for each expression, used after checking parsed contents -}
+{- custom variants for each relational expression, with tighter constraints -}
 data RelExpr  = Table { name :: Name, columns :: [(ScalarExpr, Maybe Name)] }
     | Select { rel :: RelExpr, predicate :: ScalarExpr }
     | Project { rel :: RelExpr, values :: [(ScalarExpr, Maybe Name)] }
     | GroupBy { rel :: RelExpr, keys :: [(String, Maybe Name)], values :: [(ScalarExpr, Maybe Name)]  }
     deriving (Eq,Show)
-
 
 data RelOp = OpSelect
            | OpProject
@@ -26,3 +24,4 @@ data RelOp = OpSelect
            | OpSemiJoin
            | OpAntiJoin
            deriving (Eq,Show)
+

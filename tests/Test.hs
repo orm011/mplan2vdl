@@ -2,7 +2,7 @@ import Test.Tasty
 {- import Test.Tasty.SmallCheck as SC
 import Test.Tasty.QuickCheck as QC -}
 import Test.Tasty.HUnit
-import Parser(parse)
+import Parser(parse, fromString)
 import Scanner(scan)
 import Data.Either(isRight,partitionEithers)
 import qualified Data.Text as T
@@ -17,9 +17,7 @@ main = do x <- readFile "tests/monet_test_cases.txt"
 
 toTestCase :: (String, String) -> TestTree
 toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
-  let (ls, rs) = partitionEithers $ traceShowId $ scan b
-      prs = parse rs
-  in (traceShowId ls) == [] && isRight (traceShowId prs) @? (case prs of Left str -> str)
+  let prs = fromString b in (isRight $ traceShowId prs)  @? show prs
   )
 
 get_test_cases :: String  -> [TestTree]
