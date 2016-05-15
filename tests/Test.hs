@@ -14,7 +14,7 @@ main = do x <- readFile "tests/monet_test_cases.txt"
             in defaultMain $ testGroup "Tests" [unitTests, testGroup "FileTests" file_cases]
 
 toTestCase :: (String, String) -> TestTree
-toTestCase (a, b)  = testCase (a ++ ":\n\n" ++ b) (
+toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
   let r = parse defaultConfiguration b
   in isRight r @? (case r of Left str -> str)
   )
