@@ -41,16 +41,9 @@ import Scanner (ScannedToken(..), Token(..))
   {- as long as the queries dont use these words within the columns names
 or within table names, this should work alright -}
   COUNT      { ScannedToken _ _ ( Word "COUNT") }
-  table      { ScannedToken _ _ ( Word "table" ) }
-  select     { ScannedToken _ _ ( Word "select") }
-  project    { ScannedToken _ _ ( Word "project") }
-  groupby    { ScannedToken _ _ ( Word "group by") }
-  topN       { ScannedToken _ _ ( Word "top N") }
-  join       { ScannedToken _ _ ( Word "join"  ) }
   NOTNULL    { ScannedToken _ _ ( Word "NOT NULL") }
   notnil     { ScannedToken _ _ ( Word "no nil") }
-  antijoin   { ScannedToken _ _ ( Word "antijoin"  ) }
-  cross      { ScannedToken _ _ ( Word "crossproduct" ) }
+  table     { ScannedToken _ _ ( Word "table") }
   as         { ScannedToken _ _ ( Word "as") }
   {- anthing not matched  by the previous special words is dealt with as an identifier -}
   identifier { ScannedToken _ _ ( Word $$  )  }
@@ -69,20 +62,12 @@ Leaf
   { Leaf { source=$3, columns=$6 }  }
 
 Node
-: RelOp '(' NodeListNE ')' BracketListNE { Node { op = $1, children = $3, arg_lists = $5 } }
+: identifier '(' NodeListNE ')' BracketListNE { Node { relop = $1, children = $3, arg_lists = $5 } }
 
 BracketListNE
 : '[' ExprList ']' {  ($2 : []) :: [[(ScalarExpr, Maybe Name)]] }
 | '[' ExprList ']' BracketListNE  { $2  : $4 }
 
-RelOp
-: select { OpSelect }
-| project { OpProject }
-| groupby { OpGroupBy }
-| topN   {  OpTopK }
-| join { OpJoin }
-| antijoin { OpAntiJoin }
-| cross { OpCrossProduct }
 
 NodeListNE
 : Tree { $1 : [] }
@@ -134,17 +119,7 @@ data ScalarExpr =  Literal { tname:: Name,  value::String }
                    | Infix { infixop :: String, left :: ScalarExpr, right :: ScalarExpr }
                      deriving (Eq, Show)
 
-data RelOp = OpSelect
-           | OpProject
-           | OpGroupBy
-           | OpTopK
-           | OpCrossProduct
-           | OpJoin
-           | OpSemiJoin
-           | OpAntiJoin
-           deriving (Eq,Show)
-
-data Rel = Node { op ::RelOp
+data Rel = Node { relop :: String {- relational op like join -}
                 , children :: [Rel]
                 , arg_lists :: [[(ScalarExpr, Maybe Name)]]  }
            | Leaf { source :: Name, columns :: [(ScalarExpr, Maybe Name)] }
