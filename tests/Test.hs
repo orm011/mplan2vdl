@@ -11,9 +11,11 @@ import Text.Groom
 import Debug.Trace
 
 main :: IO ()
-main = do x <- readFile "tests/monet_test_cases.txt"
-          let file_cases = get_test_cases x
-            in defaultMain $ testGroup "Tests" [unitTests, testGroup "FileTests" file_cases]
+main = do base <- readFile "tests/monet_test_cases.txt"
+          tpch <- readFile "tests/tpch_query_plans.txt"
+          defaultMain $ testGroup "Tests" [testGroup "AdHocTests" (get_test_cases base),
+                                           testGroup "TPCHTests" (get_test_cases tpch)
+                                           ]
 
 toTestCase :: (String, String) -> TestTree
 toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
@@ -23,18 +25,18 @@ toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
 get_test_cases :: String  -> [TestTree]
 get_test_cases s = {- the first element after split is a "", because we start with a plan, so must do tail -}
   let raw_pairs =
-        case (T.splitOn (T.pack "plan") (T.pack s)) of
+        case (T.splitOn (T.pack "--TEST--") (T.pack s)) of
           [] -> []
           _ : rest -> rest
       to_pairs [x,y] = (T.unpack . T.strip $ x, T.unpack . T.strip $ y)
   in map (toTestCase . to_pairs . (T.splitOn (T.pack ";"))) raw_pairs
 
 
-unitTests = testGroup "Unit tests"
-  [ -- testCase "List comparison (different length)" $
-  --     [1, 2, 3] `compare` [1,2] @?= GT
+-- unitTests = testGroup "Unit tests"
+--   [ -- testCase "List comparison (different length)" $
+--   --     [1, 2, 3] `compare` [1,2] @?= GT
 
-  -- -- the following test does not hold
-  -- , testCase "List comparison (same length)" $
-  --     [1, 2, 3] `compare` [1,2,2] @?= LT
-  ]
+--   -- -- the following test does not hold
+--   -- , testCase "List comparison (same length)" $
+--   --     [1, 2, 3] `compare` [1,2,2] @?= LT
+--   ]

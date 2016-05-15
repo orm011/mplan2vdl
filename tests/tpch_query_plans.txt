@@ -1,0 +1,495 @@
+--TEST-- /scratch/TPCH/01.sql;
+project (
+| group by (
+| | select (
+| | | table(sys.lineitem) [ lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_tax NOT NULL, lineitem.l_returnflag NOT NULL, lineitem.l_linestatus NOT NULL, lineitem.l_shipdate NOT NULL ] COUNT 
+| | ) [ lineitem.l_shipdate NOT NULL <= sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000") ]
+| ) [ lineitem.l_returnflag NOT NULL, lineitem.l_linestatus NOT NULL ] [ lineitem.l_returnflag NOT NULL, lineitem.l_linestatus NOT NULL, sys.sum no nil (lineitem.l_quantity NOT NULL) NOT NULL as L1.L1, sys.sum no nil (lineitem.l_extendedprice NOT NULL) NOT NULL as L2.L2, sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL))) as L3.L3, sys.sum no nil (sys.sql_mul(sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL)), sys.sql_add(decimal(15,2)[tinyint "1"], lineitem.l_tax NOT NULL))) as L4.L4, sys.avg no nil (double[lineitem.l_quantity NOT NULL] as lineitem.l_quantity) as L5.L5, sys.avg no nil (double[lineitem.l_extendedprice NOT NULL] as lineitem.l_extendedprice) as L6.L6, sys.avg no nil (double[lineitem.l_discount NOT NULL] as lineitem.l_discount) as L7.L7, sys.count() NOT NULL as L10.L10 ]
+) [ lineitem.l_returnflag NOT NULL, lineitem.l_linestatus NOT NULL, L1 NOT NULL as L1.sum_qty, L2 NOT NULL as L2.sum_base_price, L3 as L3.sum_disc_price, L4 as L4.sum_charge, L5 as L5.avg_qty, L6 as L6.avg_price, L7 as L7.avg_disc, L10 NOT NULL as L10.count_order ] [ lineitem.l_returnflag ASC NOT NULL, lineitem.l_linestatus ASC NOT NULL ]
+--TEST-- /scratch/TPCH/02.sql;
+top N (
+| project (
+| | project (
+| | | select (
+| | | | group by (
+| | | | | join (
+| | | | | | join (
+| | | | | | | join (
+| | | | | | | | join (
+| | | | | | | | | table(sys.nation) [ nation.%TID% NOT NULL as L4.%TID%, nation.%nation_fk1 NOT NULL as L4.%nation_fk1 ] COUNT ,
+| | | | | | | | | select (
+| | | | | | | | | | table(sys.region) [ region.r_name NOT NULL as L5.r_name, region.%TID% NOT NULL as L5.%TID% ] COUNT 
+| | | | | | | | | ) [ L5.r_name NOT NULL = char(25)[char(6) "EUROPE"] ]
+| | | | | | | | ) [ L4.%nation_fk1 NOT NULL = L5.%TID% NOT NULL JOINIDX sys.nation.nation_fk1 ],
+| | | | | | | | table(sys.supplier) [ supplier.%TID% NOT NULL as L3.%TID%, supplier.%supplier_fk1 NOT NULL as L3.%supplier_fk1 ] COUNT 
+| | | | | | | ) [ L3.%supplier_fk1 NOT NULL = L4.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ],
+| | | | | | | table(sys.partsupp) [ partsupp.ps_partkey NOT NULL as L2.ps_partkey, partsupp.ps_supplycost NOT NULL as L2.ps_supplycost, partsupp.%partsupp_fk1 NOT NULL as L2.%partsupp_fk1 ] COUNT 
+| | | | | | ) [ L2.%partsupp_fk1 NOT NULL = L3.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ],
+| | | | | | project (
+| | | | | | | join (
+| | | | | | | | join (
+| | | | | | | | | join (
+| | | | | | | | | | join (
+| | | | | | | | | | | table(sys.partsupp) [ partsupp.ps_supplycost NOT NULL, partsupp.%partsupp_fk1 NOT NULL JOINIDX sys.partsupp.partsupp_fk1, partsupp.%partsupp_fk2 NOT NULL JOINIDX sys.partsupp.partsupp_fk2 ] COUNT ,
+| | | | | | | | | | | select (
+| | | | | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, part.%TID% NOT NULL ] COUNT 
+| | | | | | | | | | | ) [ part.p_size NOT NULL = int[tinyint "15"], char[part.p_type NOT NULL] FILTER like (char[char(6) "%BRASS"], char "") ]
+| | | | | | | | | | ) [ partsupp.%partsupp_fk2 NOT NULL = part.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk2 ],
+| | | | | | | | | | table(sys.supplier) [ supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, supplier.%TID% NOT NULL, supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT 
+| | | | | | | | | ) [ partsupp.%partsupp_fk1 NOT NULL = supplier.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ],
+| | | | | | | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL, nation.%nation_fk1 NOT NULL JOINIDX sys.nation.nation_fk1 ] COUNT 
+| | | | | | | | ) [ supplier.%supplier_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ],
+| | | | | | | | select (
+| | | | | | | | | table(sys.region) [ region.r_name NOT NULL, region.%TID% NOT NULL ] COUNT 
+| | | | | | | | ) [ region.r_name NOT NULL = char(25)[char(6) "EUROPE"] ]
+| | | | | | | ) [ nation.%nation_fk1 NOT NULL = region.%TID% NOT NULL JOINIDX sys.nation.nation_fk1 ]
+| | | | | | ) [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, partsupp.ps_supplycost NOT NULL, nation.n_name NOT NULL, sys.identity(part.p_partkey NOT NULL HASHCOL ) HASHCOL  as L6.L6 ]
+| | | | | ) [ part.p_partkey NOT NULL = L2.ps_partkey NOT NULL HASHCOL  ]
+| | | | ) [ L6.L6 ] [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, partsupp.ps_supplycost NOT NULL, nation.n_name NOT NULL, L6.L6 HASHCOL , sys.min no nil (L2.ps_supplycost NOT NULL as partsupp.ps_supplycost) NOT NULL as L1.L1 ]
+| | | ) [ partsupp.ps_supplycost NOT NULL = L1 NOT NULL ]
+| | ) [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, partsupp.ps_supplycost NOT NULL, nation.n_name NOT NULL, L1 NOT NULL as L1.L1 ]
+| ) [ supplier.s_acctbal NOT NULL, supplier.s_name NOT NULL, nation.n_name NOT NULL, part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_comment NOT NULL ] [ supplier.s_acctbal NOT NULL, nation.n_name ASC NOT NULL, supplier.s_name ASC NOT NULL, part.p_partkey ASC NOT NULL HASHCOL  ]
+) [ wrd "100" ]
+--TEST-- /scratch/TPCH/03.sql;
+project (
+| group by (
+| | join (
+| | | join (
+| | | | select (
+| | | | | table(sys.orders) [ orders.o_orderdate NOT NULL, orders.o_shippriority NOT NULL, orders.%TID% NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | ) [ orders.o_orderdate NOT NULL < date "1995-03-15" ],
+| | | | select (
+| | | | | table(sys.customer) [ customer.c_mktsegment NOT NULL, customer.%TID% NOT NULL ] COUNT 
+| | | | ) [ customer.c_mktsegment NOT NULL = char(10)[char(8) "BUILDING"] ]
+| | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1 ],
+| | | select (
+| | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_shipdate NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ] COUNT 
+| | | ) [ lineitem.l_shipdate NOT NULL > date "1995-03-15" ]
+| | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ]
+| ) [ lineitem.l_orderkey NOT NULL HASHCOL , orders.o_shippriority NOT NULL, orders.o_orderdate NOT NULL ] [ lineitem.l_orderkey NOT NULL HASHCOL , orders.o_orderdate NOT NULL, orders.o_shippriority NOT NULL, sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL))) as L1.L1 ]
+) [ lineitem.l_orderkey NOT NULL, L1 as L1.revenue, orders.o_orderdate NOT NULL, orders.o_shippriority NOT NULL ] [ L1.revenue ]
+--TEST-- /scratch/TPCH/04.sql;
+project (
+| group by (
+| | semijoin (
+| | | project (
+| | | | select (
+| | | | | table(sys.orders) [ orders.o_orderkey NOT NULL HASHCOL , orders.o_orderdate NOT NULL, orders.o_orderpriority NOT NULL ] COUNT 
+| | | | ) [ date "1993-07-01" <= orders.o_orderdate NOT NULL < sys.sql_add(date "1993-07-01", month_interval "3") ]
+| | | ) [ orders.o_orderkey NOT NULL HASHCOL , orders.o_orderpriority NOT NULL ],
+| | | select (
+| | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL as L2.l_orderkey, lineitem.l_commitdate NOT NULL as L2.l_commitdate, lineitem.l_receiptdate NOT NULL as L2.l_receiptdate ] COUNT 
+| | | ) [ L2.l_commitdate NOT NULL < L2.l_receiptdate NOT NULL ]
+| | ) [ L2.l_orderkey NOT NULL HASHCOL  = orders.o_orderkey NOT NULL ]
+| ) [ orders.o_orderpriority NOT NULL ] [ orders.o_orderpriority NOT NULL, sys.count() NOT NULL as L1.L1 ]
+) [ orders.o_orderpriority NOT NULL, L1 NOT NULL as L1.order_count ] [ orders.o_orderpriority ASC NOT NULL ]
+--TEST-- /scratch/TPCH/05.sql;
+project (
+| group by (
+| | join (
+| | | join (
+| | | | join (
+| | | | | join (
+| | | | | | join (
+| | | | | | | table(sys.lineitem) [ lineitem.l_suppkey NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ] COUNT ,
+| | | | | | | select (
+| | | | | | | | table(sys.orders) [ orders.o_orderdate NOT NULL, orders.%TID% NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | | | ) [ date "1994-01-01" <= orders.o_orderdate NOT NULL < sys.sql_add(date "1994-01-01", month_interval "12") ]
+| | | | | | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ],
+| | | | | | table(sys.customer) [ customer.c_nationkey NOT NULL, customer.%TID% NOT NULL ] COUNT 
+| | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1 ],
+| | | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.s_nationkey NOT NULL, supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT 
+| | | | ) [ lineitem.l_suppkey NOT NULL = supplier.s_suppkey NOT NULL HASHCOL , customer.c_nationkey NOT NULL = supplier.s_nationkey NOT NULL ],
+| | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL, nation.%nation_fk1 NOT NULL JOINIDX sys.nation.nation_fk1 ] COUNT 
+| | | ) [ supplier.%supplier_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ],
+| | | select (
+| | | | table(sys.region) [ region.r_name NOT NULL, region.%TID% NOT NULL ] COUNT 
+| | | ) [ region.r_name NOT NULL = char(25)[char(4) "ASIA"] ]
+| | ) [ nation.%nation_fk1 NOT NULL = region.%TID% NOT NULL JOINIDX sys.nation.nation_fk1 ]
+| ) [ nation.n_name NOT NULL ] [ nation.n_name NOT NULL, sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL))) as L1.L1 ]
+) [ nation.n_name NOT NULL, L1 as L1.revenue ] [ L1.revenue ]
+--TEST-- /scratch/TPCH/06.sql;
+project (
+| group by (
+| | select (
+| | | table(sys.lineitem) [ lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_shipdate NOT NULL ] COUNT 
+| | ) [ date "1994-01-01" <= lineitem.l_shipdate NOT NULL < sys.sql_add(date "1994-01-01", month_interval "12"), decimal(15,2)[sys.sql_sub(decimal(3,2)[decimal(2,2) "6"], decimal(3,2) "1")] <= lineitem.l_discount NOT NULL <= decimal(15,2)[sys.sql_add(decimal(3,2)[decimal(2,2) "6"], decimal(3,2) "1")], lineitem.l_quantity NOT NULL < decimal(15,2)[tinyint "24"] ]
+| ) [  ] [ sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL)) as L1.L1 ]
+) [ L1 as L1.revenue ]
+--TEST-- /scratch/TPCH/07.sql;
+project (
+| group by (
+| | project (
+| | | select (
+| | | | join (
+| | | | | join (
+| | | | | | join (
+| | | | | | | join (
+| | | | | | | | join (
+| | | | | | | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT ,
+| | | | | | | | | select (
+| | | | | | | | | | table(sys.lineitem) [ lineitem.l_suppkey NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_shipdate NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ] COUNT 
+| | | | | | | | | ) [ date "1995-01-01" <= lineitem.l_shipdate NOT NULL <= date "1996-12-31" ]
+| | | | | | | | ) [ supplier.s_suppkey NOT NULL HASHCOL  = lineitem.l_suppkey NOT NULL ],
+| | | | | | | | table(sys.orders) [ orders.%TID% NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | | | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ],
+| | | | | | | select (
+| | | | | | | | table(sys.nation) [ nation.n_name NOT NULL as n1.n_name, nation.%TID% NOT NULL as n1.%TID% ] COUNT 
+| | | | | | | ) [ n1.n_name NOT NULL in (char(25)[char(6) "FRANCE"], char(25)[char(7) "GERMANY"]) ]
+| | | | | | ) [ supplier.%supplier_fk1 NOT NULL = n1.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ],
+| | | | | | table(sys.customer) [ customer.%TID% NOT NULL, customer.%customer_fk1 NOT NULL JOINIDX sys.customer.customer_fk1 ] COUNT 
+| | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1 ],
+| | | | | select (
+| | | | | | table(sys.nation) [ nation.n_name NOT NULL as n2.n_name, nation.%TID% NOT NULL as n2.%TID% ] COUNT 
+| | | | | ) [ n2.n_name NOT NULL in (char(25)[char(7) "GERMANY"], char(25)[char(6) "FRANCE"]) ]
+| | | | ) [ customer.%customer_fk1 NOT NULL = n2.%TID% NOT NULL JOINIDX sys.customer.customer_fk1 ]
+| | | ) [ (n1.n_name NOT NULL = char(25)[char(6) "FRANCE"], n2.n_name NOT NULL = char(25)[char(7) "GERMANY"]) or (n1.n_name NOT NULL = char(25)[char(7) "GERMANY"], n2.n_name NOT NULL = char(25)[char(6) "FRANCE"]) ]
+| | ) [ n1.n_name NOT NULL as shipping.supp_nation, n2.n_name NOT NULL as shipping.cust_nation, sys.year(lineitem.l_shipdate NOT NULL) as shipping.l_year, sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL)) as shipping.volume ]
+| ) [ shipping.supp_nation NOT NULL, shipping.cust_nation NOT NULL, shipping.l_year ] [ shipping.supp_nation NOT NULL, shipping.cust_nation NOT NULL, shipping.l_year, sys.sum no nil (shipping.volume) as L1.L1 ]
+) [ shipping.supp_nation NOT NULL, shipping.cust_nation NOT NULL, shipping.l_year, L1 as L1.revenue ] [ shipping.cust_nation ASC NOT NULL ]
+--TEST-- /scratch/TPCH/08.sql;
+project (
+| group by (
+| | project (
+| | | join (
+| | | | join (
+| | | | | join (
+| | | | | | join (
+| | | | | | | join (
+| | | | | | | | join (
+| | | | | | | | | join (
+| | | | | | | | | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL, lineitem.l_suppkey NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ] COUNT ,
+| | | | | | | | | | select (
+| | | | | | | | | | | table(sys.orders) [ orders.o_orderdate NOT NULL, orders.%TID% NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | | | | | | ) [ date "1995-01-01" <= orders.o_orderdate NOT NULL <= date "1996-12-31" ]
+| | | | | | | | | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ],
+| | | | | | | | | select (
+| | | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_type NOT NULL ] COUNT 
+| | | | | | | | | ) [ part.p_type NOT NULL = varchar(25)[char(22) "ECONOMY ANODIZED STEEL"] ]
+| | | | | | | | ) [ part.p_partkey NOT NULL HASHCOL  = lineitem.l_partkey NOT NULL ],
+| | | | | | | | table(sys.customer) [ customer.%TID% NOT NULL, customer.%customer_fk1 NOT NULL JOINIDX sys.customer.customer_fk1 ] COUNT 
+| | | | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1 ],
+| | | | | | | table(sys.nation) [ nation.%TID% NOT NULL as n1.%TID%, nation.%nation_fk1 NOT NULL JOINIDX sys.nation.nation_fk1 as n1.%nation_fk1 ] COUNT 
+| | | | | | ) [ customer.%customer_fk1 NOT NULL = n1.%TID% NOT NULL JOINIDX sys.customer.customer_fk1 ],
+| | | | | | select (
+| | | | | | | table(sys.region) [ region.r_name NOT NULL, region.%TID% NOT NULL ] COUNT 
+| | | | | | ) [ region.r_name NOT NULL = char(25)[char(7) "AMERICA"] ]
+| | | | | ) [ n1.%nation_fk1 NOT NULL = region.%TID% NOT NULL JOINIDX sys.nation.nation_fk1 ],
+| | | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT 
+| | | | ) [ supplier.s_suppkey NOT NULL HASHCOL  = lineitem.l_suppkey NOT NULL ],
+| | | | table(sys.nation) [ nation.n_name NOT NULL as n2.n_name, nation.%TID% NOT NULL as n2.%TID% ] COUNT 
+| | | ) [ supplier.%supplier_fk1 NOT NULL = n2.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ]
+| | ) [ sys.year(orders.o_orderdate NOT NULL) as all_nations.o_year, sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL)) as all_nations.volume, n2.n_name NOT NULL as all_nations.nation, sys.ifthenelse(sys.ifthenelse(sys.isnull(sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])), boolean "false", sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])), all_nations.volume, decimal(19,4)[tinyint "0"]) as L1.L1 ]
+| ) [ all_nations.o_year ] [ all_nations.o_year, sys.sum no nil (L1.L1) as L2.L2, sys.sum no nil (all_nations.volume) as L3.L3 ]
+) [ all_nations.o_year, sys.sql_div(decimal(19,8)[L2] as L2, L3) as L3.mkt_share ] [ all_nations.o_year ASC ]
+--TEST-- /scratch/TPCH/09.sql;
+project (
+| group by (
+| | project (
+| | | join (
+| | | | join (
+| | | | | join (
+| | | | | | join (
+| | | | | | | join (
+| | | | | | | | select (
+| | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_name NOT NULL ] COUNT 
+| | | | | | | | ) [ char[part.p_name NOT NULL] FILTER like (char[char(7) "%green%"], char "") ],
+| | | | | | | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL, lineitem.l_suppkey NOT NULL, lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1, lineitem.%lineitem_fk2 NOT NULL JOINIDX sys.lineitem.lineitem_fk2 ] COUNT 
+| | | | | | | ) [ part.p_partkey NOT NULL HASHCOL  = lineitem.l_partkey NOT NULL ],
+| | | | | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT 
+| | | | | | ) [ supplier.s_suppkey NOT NULL HASHCOL  = lineitem.l_suppkey NOT NULL ],
+| | | | | | table(sys.partsupp) [ partsupp.ps_supplycost NOT NULL, partsupp.%TID% NOT NULL ] COUNT 
+| | | | | ) [ lineitem.%lineitem_fk2 NOT NULL = partsupp.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk2 ],
+| | | | | table(sys.orders) [ orders.o_orderdate NOT NULL, orders.%TID% NOT NULL ] COUNT 
+| | | | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ],
+| | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL ] COUNT 
+| | | ) [ supplier.%supplier_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ]
+| | ) [ nation.n_name NOT NULL as profit.nation, sys.year(orders.o_orderdate NOT NULL) as profit.o_year, sys.sql_sub(sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL)), sys.sql_mul(partsupp.ps_supplycost NOT NULL, lineitem.l_quantity NOT NULL)) as profit.amount ]
+| ) [ profit.nation NOT NULL, profit.o_year ] [ profit.nation NOT NULL, profit.o_year, sys.sum no nil (profit.amount) as L1.L1 ]
+) [ profit.nation NOT NULL, profit.o_year, L1 as L1.sum_profit ] [ profit.nation ASC NOT NULL, profit.o_year ]
+--TEST-- /scratch/TPCH/10.sql;
+top N (
+| project (
+| | project (
+| | | join (
+| | | | group by (
+| | | | | join (
+| | | | | | join (
+| | | | | | | join (
+| | | | | | | | select (
+| | | | | | | | | table(sys.lineitem) [ lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_returnflag NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ] COUNT 
+| | | | | | | | ) [ lineitem.l_returnflag NOT NULL = char(1) "R" ],
+| | | | | | | | select (
+| | | | | | | | | table(sys.orders) [ orders.o_orderdate NOT NULL, orders.%TID% NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | | | | ) [ date "1993-10-01" <= orders.o_orderdate NOT NULL < sys.sql_add(date "1993-10-01", month_interval "3") ]
+| | | | | | | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ],
+| | | | | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL , customer.%TID% NOT NULL, customer.%customer_fk1 NOT NULL JOINIDX sys.customer.customer_fk1 ] COUNT 
+| | | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1 ],
+| | | | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL ] COUNT 
+| | | | | ) [ customer.%customer_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.customer.customer_fk1 ]
+| | | | ) [ nation.n_name NOT NULL, customer.c_custkey NOT NULL HASHCOL  ] [ customer.c_custkey NOT NULL HASHCOL , nation.n_name NOT NULL, sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL))) as L1.L1 ],
+| | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL  as L2.c_custkey, customer.c_name NOT NULL as L2.c_name, customer.c_address NOT NULL as L2.c_address, customer.c_phone NOT NULL as L2.c_phone, customer.c_acctbal NOT NULL as L2.c_acctbal, customer.c_comment NOT NULL as L2.c_comment ] COUNT 
+| | | ) [ customer.c_custkey NOT NULL = L2.c_custkey NOT NULL HASHCOL  FETCH  ]
+| | ) [ customer.c_custkey NOT NULL HASHCOL , L2.c_name NOT NULL as customer.c_name, L2.c_acctbal NOT NULL as customer.c_acctbal, L2.c_phone NOT NULL as customer.c_phone, nation.n_name NOT NULL, L2.c_address NOT NULL as customer.c_address, L2.c_comment NOT NULL as customer.c_comment, L1.L1 ]
+| ) [ customer.c_custkey NOT NULL, customer.c_name NOT NULL, L1 as L1.revenue, customer.c_acctbal NOT NULL, nation.n_name NOT NULL, customer.c_address NOT NULL, customer.c_phone NOT NULL, customer.c_comment NOT NULL ] [ L1.revenue ]
+) [ wrd "20" ]
+--TEST-- /scratch/TPCH/11.sql;
+project (
+| semijoin (
+| | group by (
+| | | join (
+| | | | join (
+| | | | | table(sys.supplier) [ supplier.%TID% NOT NULL, supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT ,
+| | | | | select (
+| | | | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL ] COUNT 
+| | | | | ) [ nation.n_name NOT NULL = char(25)[char(7) "GERMANY"] ]
+| | | | ) [ supplier.%supplier_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ],
+| | | | table(sys.partsupp) [ partsupp.ps_partkey NOT NULL HASHCOL , partsupp.ps_availqty NOT NULL, partsupp.ps_supplycost NOT NULL, partsupp.%partsupp_fk1 NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ] COUNT 
+| | | ) [ partsupp.%partsupp_fk1 NOT NULL = supplier.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ]
+| | ) [ partsupp.ps_partkey NOT NULL HASHCOL  ] [ partsupp.ps_partkey NOT NULL HASHCOL , sys.sum no nil (sys.sql_mul(partsupp.ps_supplycost NOT NULL, partsupp.ps_availqty NOT NULL)) as L1.L1, L1.L1 as L2.L2 ],
+| | project (
+| | | group by (
+| | | | join (
+| | | | | join (
+| | | | | | table(sys.supplier) [ supplier.%TID% NOT NULL, supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT ,
+| | | | | | select (
+| | | | | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL ] COUNT 
+| | | | | | ) [ nation.n_name NOT NULL = char(25)[char(7) "GERMANY"] ]
+| | | | | ) [ supplier.%supplier_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ],
+| | | | | table(sys.partsupp) [ partsupp.ps_availqty NOT NULL, partsupp.ps_supplycost NOT NULL, partsupp.%partsupp_fk1 NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ] COUNT 
+| | | | ) [ partsupp.%partsupp_fk1 NOT NULL = supplier.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ]
+| | | ) [  ] [ sys.sum no nil (sys.sql_mul(partsupp.ps_supplycost NOT NULL, partsupp.ps_availqty NOT NULL)) as L3.L3 ]
+| | ) [ sys.sql_mul(L3, decimal(4,3) "10") as L4.L4 ]
+| ) [ L2 > decimal(19,2)[L4.L4] ]
+) [ partsupp.ps_partkey NOT NULL, L1 as L1.value ] [ L1.value ]
+--TEST-- /scratch/TPCH/12.sql;
+project (
+| group by (
+| | join (
+| | | select (
+| | | | table(sys.lineitem) [ lineitem.l_shipdate NOT NULL, lineitem.l_commitdate NOT NULL, lineitem.l_receiptdate NOT NULL, lineitem.l_shipmode NOT NULL, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ] COUNT 
+| | | ) [ lineitem.l_shipdate NOT NULL < lineitem.l_commitdate NOT NULL < lineitem.l_receiptdate NOT NULL, date "1994-01-01" <= lineitem.l_receiptdate NOT NULL < sys.sql_add(date "1994-01-01", month_interval "12"), lineitem.l_shipmode NOT NULL in (char(10)[char(4) "MAIL"], char(10)[char(4) "SHIP"]) ],
+| | | table(sys.orders) [ orders.o_orderpriority NOT NULL, orders.%TID% NOT NULL ] COUNT 
+| | ) [ lineitem.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ]
+| ) [ lineitem.l_shipmode NOT NULL ] [ lineitem.l_shipmode NOT NULL, sys.sum no nil (sys.ifthenelse(sys.ifthenelse(sys.isnull(sys.or(sys.=(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.=(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), boolean "false", sys.or(sys.=(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.=(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), tinyint "1", tinyint "0")) as L1.L1, sys.sum no nil (sys.ifthenelse(sys.ifthenelse(sys.isnull(sys.and(sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), boolean "false", sys.and(sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), tinyint "1", tinyint "0")) as L2.L2 ]
+) [ lineitem.l_shipmode NOT NULL, L1 as L1.high_line_count, L2 as L2.low_line_count ] [ lineitem.l_shipmode ASC NOT NULL ]
+--TEST-- /scratch/TPCH/13.sql;
+project (
+| group by (
+| | project (
+| | | group by (
+| | | | project (
+| | | | | left outer join (
+| | | | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL , customer.%TID% NOT NULL ] COUNT ,
+| | | | | | table(sys.orders) [ orders.o_orderkey NOT NULL HASHCOL , orders.o_comment NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1, char[orders.o_comment NOT NULL] ! FILTER like (char[char(18) "%special%requests%"], char "") ]
+| | | | ) [ customer.c_custkey NOT NULL HASHCOL , orders.o_orderkey HASHCOL  ]
+| | | ) [ customer.c_custkey NOT NULL HASHCOL  ] [ customer.c_custkey NOT NULL HASHCOL , sys.count no nil (orders.o_orderkey HASHCOL ) as L1.L1 ]
+| | ) [ L1 as c_orders.c_count ]
+| ) [ c_orders.c_count ] [ c_orders.c_count, sys.count() NOT NULL as L2.L2 ]
+) [ c_orders.c_count, L2 NOT NULL as L2.custdist ] [ L2.custdist NOT NULL, c_orders.c_count ]
+--TEST-- /scratch/TPCH/14.sql;
+project (
+| group by (
+| | join (
+| | | select (
+| | | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_shipdate NOT NULL ] COUNT 
+| | | ) [ date "1995-09-01" <= lineitem.l_shipdate NOT NULL < sys.sql_add(date "1995-09-01", month_interval "1") ],
+| | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_type NOT NULL ] COUNT 
+| | ) [ lineitem.l_partkey NOT NULL = part.p_partkey NOT NULL HASHCOL  ]
+| ) [  ] [ sys.sum no nil (sys.ifthenelse(sys.ifthenelse(sys.isnull(sys.like(part.p_type NOT NULL, char[char(6) "PROMO%"])), boolean "false", sys.like(part.p_type NOT NULL, char[char(6) "PROMO%"])), sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL)), decimal(19,4)[tinyint "0"])) as L1.L1, sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL))) as L2.L2 ]
+) [ sys.sql_mul(decimal(4,1) "1", sys.sql_div(decimal(19,8)[L1] as L1, L2)) as L2.promo_revenue ]
+--TEST-- /scratch/TPCH/15.sql;
+ddl
+| table(sys.revenue0) [ revenue0.supplier_no, revenue0.total_revenue, revenue0.%TID% NOT NULL ] COUNT 
+--TEST-- /scratch/TPCH/16.sql;
+project (
+| group by (
+| | group by (
+| | | project (
+| | | | join (
+| | | | | antijoin (
+| | | | | | table(sys.partsupp) [ partsupp.ps_suppkey NOT NULL, partsupp.%partsupp_fk2 NOT NULL JOINIDX sys.partsupp.partsupp_fk2 ] COUNT ,
+| | | | | | project (
+| | | | | | | select (
+| | | | | | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.s_comment NOT NULL ] COUNT 
+| | | | | | | ) [ char[supplier.s_comment NOT NULL] FILTER like (char[char(21) "%Customer%Complaints%"], char "") ]
+| | | | | | ) [ supplier.s_suppkey NOT NULL HASHCOL  as L3.L2 ]
+| | | | | ) [ partsupp.ps_suppkey NOT NULL = L3.L2 NOT NULL HASHCOL  ],
+| | | | | select (
+| | | | | | table(sys.part) [ part.p_brand NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, part.%TID% NOT NULL ] COUNT 
+| | | | | ) [ part.p_brand NOT NULL != char(10)[char(8) "Brand#45"], char[part.p_type NOT NULL] ! FILTER like (char[char(16) "MEDIUM POLISHED%"], char ""), part.p_size NOT NULL in (int[tinyint "49"], int[tinyint "14"], int[tinyint "23"], int[tinyint "45"], int[tinyint "19"], int[tinyint "3"], int[tinyint "36"], int[tinyint "9"]) ]
+| | | | ) [ partsupp.%partsupp_fk2 NOT NULL = part.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk2 ]
+| | | ) [ partsupp.ps_suppkey NOT NULL, part.p_brand NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL ]
+| | ) [ part.p_brand NOT NULL, partsupp.ps_suppkey NOT NULL as L5.L5, part.p_size NOT NULL, part.p_type NOT NULL ] [ part.p_brand NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, L5.L5 NOT NULL ]
+| ) [ part.p_brand NOT NULL, part.p_size NOT NULL, part.p_type NOT NULL ] [ part.p_brand NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, sys.count no nil (L5.L5 NOT NULL) NOT NULL as L4.L4 ]
+) [ part.p_brand NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, L4 NOT NULL as L4.supplier_cnt ] [ L4.supplier_cnt NOT NULL, part.p_brand ASC NOT NULL, part.p_type ASC NOT NULL, part.p_size ASC NOT NULL ]
+--TEST-- /scratch/TPCH/17.sql;
+project (
+| group by (
+| | select (
+| | | project (
+| | | | group by (
+| | | | | join (
+| | | | | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL as L4.l_partkey, lineitem.l_quantity NOT NULL as L4.l_quantity ] COUNT ,
+| | | | | | project (
+| | | | | | | join (
+| | | | | | | | select (
+| | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_brand NOT NULL, part.p_container NOT NULL ] COUNT 
+| | | | | | | | ) [ part.p_brand NOT NULL = char(10)[char(8) "Brand#23"], part.p_container NOT NULL = char(10)[char(7) "MED BOX"] ],
+| | | | | | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_partkey NOT NULL, lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL ] COUNT 
+| | | | | | | ) [ part.p_partkey NOT NULL HASHCOL  = lineitem.l_partkey NOT NULL ]
+| | | | | | ) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, part.p_partkey NOT NULL HASHCOL , sys.identity(lineitem.l_orderkey NOT NULL HASHCOL ) HASHCOL  as L5.L5 ]
+| | | | | ) [ L4.l_partkey NOT NULL = part.p_partkey NOT NULL ]
+| | | | ) [ L5.L5 ] [ lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, L5.L5 HASHCOL , sys.avg no nil (double[L4.l_quantity NOT NULL] as lineitem.l_quantity) as L1.L1 ]
+| | | ) [ lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, sys.sql_mul(double(53,1)[decimal(2,1) "2"], L1) as L2.L2 ]
+| | ) [ lineitem.l_quantity NOT NULL < decimal(15,2)[L2.L2] ]
+| ) [  ] [ sys.sum no nil (lineitem.l_extendedprice NOT NULL) NOT NULL as L3.L3 ]
+) [ sys.sql_div(decimal(18,5)[L3 NOT NULL] as L3, decimal(15,2)[decimal(2,1) "70"]) as L3.avg_yearly ]
+--TEST-- /scratch/TPCH/18.sql;
+top N (
+| project (
+| | project (
+| | | join (
+| | | | project (
+| | | | | join (
+| | | | | | group by (
+| | | | | | | project (
+| | | | | | | | join (
+| | | | | | | | | join (
+| | | | | | | | | | semijoin (
+| | | | | | | | | | | table(sys.orders) [ orders.o_orderkey NOT NULL HASHCOL , orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT ,
+| | | | | | | | | | | project (
+| | | | | | | | | | | | select (
+| | | | | | | | | | | | | group by (
+| | | | | | | | | | | | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_quantity NOT NULL ] COUNT 
+| | | | | | | | | | | | | ) [ lineitem.l_orderkey NOT NULL HASHCOL  ] [ lineitem.l_orderkey NOT NULL HASHCOL , sys.sum no nil (lineitem.l_quantity NOT NULL) NOT NULL as L3.L3 ]
+| | | | | | | | | | | | ) [ L3 NOT NULL > decimal(15,2)[smallint "300"] ]
+| | | | | | | | | | | ) [ lineitem.l_orderkey NOT NULL as L5.L4 ]
+| | | | | | | | | | ) [ orders.o_orderkey NOT NULL HASHCOL  = L5.L4 NOT NULL ],
+| | | | | | | | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_quantity NOT NULL ] COUNT 
+| | | | | | | | | ) [ orders.o_orderkey NOT NULL HASHCOL  = lineitem.l_orderkey NOT NULL HASHCOL  ],
+| | | | | | | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL , customer.%TID% NOT NULL ] COUNT 
+| | | | | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1 ]
+| | | | | | | ) [ customer.c_custkey NOT NULL HASHCOL , orders.o_orderkey NOT NULL HASHCOL , lineitem.l_quantity NOT NULL ]
+| | | | | | ) [ orders.o_orderkey NOT NULL HASHCOL , customer.c_custkey NOT NULL HASHCOL  ] [ customer.c_custkey NOT NULL HASHCOL , orders.o_orderkey NOT NULL HASHCOL , sys.sum no nil (lineitem.l_quantity NOT NULL) NOT NULL as L6.L6 ],
+| | | | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL  as L10.c_custkey, customer.c_name NOT NULL as L10.c_name ] COUNT 
+| | | | | ) [ customer.c_custkey NOT NULL = L10.c_custkey NOT NULL HASHCOL  FETCH  ]
+| | | | ) [ L10.c_name NOT NULL as customer.c_name, customer.c_custkey NOT NULL HASHCOL , orders.o_orderkey NOT NULL HASHCOL , L6.L6 NOT NULL ],
+| | | | project (
+| | | | | table(sys.orders) [ orders.o_orderkey NOT NULL HASHCOL  as L7.o_orderkey, orders.o_totalprice NOT NULL as L7.o_totalprice, orders.o_orderdate NOT NULL as L7.o_orderdate ] COUNT 
+| | | | ) [ L7.o_orderkey NOT NULL, L7.o_orderdate NOT NULL as orders.o_orderdate, L7.o_totalprice NOT NULL as orders.o_totalprice ]
+| | | ) [ orders.o_orderkey NOT NULL = L7.o_orderkey NOT NULL FETCH  ]
+| | ) [ customer.c_name NOT NULL, customer.c_custkey NOT NULL, orders.o_orderkey NOT NULL, orders.o_orderdate NOT NULL, orders.o_totalprice NOT NULL, L6.L6 NOT NULL ]
+| ) [ customer.c_name NOT NULL, customer.c_custkey NOT NULL, orders.o_orderkey NOT NULL, orders.o_orderdate NOT NULL, orders.o_totalprice NOT NULL, L6 NOT NULL as L6.L6 ] [ orders.o_totalprice NOT NULL, orders.o_orderdate ASC NOT NULL ]
+) [ wrd "100" ]
+--TEST-- /scratch/TPCH/19.sql;
+project (
+| group by (
+| | select (
+| | | join (
+| | | | select (
+| | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_brand NOT NULL, part.p_size NOT NULL, part.p_container NOT NULL ] COUNT 
+| | | | ) [ sys.sql_min(int[tinyint "1"], sys.sql_min(int[tinyint "1"], int[tinyint "1"])) <= part.p_size NOT NULL <= sys.sql_max(int[tinyint "5"], sys.sql_max(int[tinyint "10"], int[tinyint "15"])), part.p_brand NOT NULL in (char(10)[char(8) "Brand#12"], char(10)[char(8) "Brand#23"], char(10)[char(8) "Brand#34"]), part.p_container NOT NULL in (char(10)[char(7) "SM CASE"], char(10)[char(6) "SM BOX"], char(10)[char(7) "SM PACK"], char(10)[char(6) "SM PKG"], char(10)[char(7) "MED BAG"], char(10)[char(7) "MED BOX"], char(10)[char(7) "MED PKG"], char(10)[char(8) "MED PACK"], char(10)[char(7) "LG CASE"], char(10)[char(6) "LG BOX"], char(10)[char(7) "LG PACK"], char(10)[char(6) "LG PKG"]) ],
+| | | | select (
+| | | | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL, lineitem.l_quantity NOT NULL, lineitem.l_extendedprice NOT NULL, lineitem.l_discount NOT NULL, lineitem.l_shipinstruct NOT NULL, lineitem.l_shipmode NOT NULL ] COUNT 
+| | | | ) [ lineitem.l_shipinstruct NOT NULL = char(25)[char(17) "DELIVER IN PERSON"], lineitem.l_shipmode NOT NULL in (char(10)[char(3) "AIR"], char(10)[char(7) "AIR REG"]) ]
+| | | ) [ part.p_partkey NOT NULL HASHCOL  = lineitem.l_partkey NOT NULL ]
+| | ) [ (part.p_brand NOT NULL = char(10)[char(8) "Brand#12"], part.p_container NOT NULL in (char(10)[char(7) "SM CASE"], char(10)[char(6) "SM BOX"], char(10)[char(7) "SM PACK"], char(10)[char(6) "SM PKG"]), lineitem.l_quantity NOT NULL >= decimal(15,2)[tinyint "1"], lineitem.l_quantity NOT NULL <= decimal(15,2)[sys.sql_add(smallint[tinyint "1"], smallint[tinyint "10"])], int[tinyint "1"] <= part.p_size NOT NULL <= int[tinyint "5"]) or ((part.p_brand NOT NULL = char(10)[char(8) "Brand#23"], part.p_container NOT NULL in (char(10)[char(7) "MED BAG"], char(10)[char(7) "MED BOX"], char(10)[char(7) "MED PKG"], char(10)[char(8) "MED PACK"]), lineitem.l_quantity NOT NULL >= decimal(15,2)[tinyint "10"], lineitem.l_quantity NOT NULL <= decimal(15,2)[sys.sql_add(smallint[tinyint "10"], smallint[tinyint "10"])], int[tinyint "1"] <= part.p_size NOT NULL <= int[tinyint "10"]) or (part.p_brand NOT NULL = char(10)[char(8) "Brand#34"], part.p_container NOT NULL in (char(10)[char(7) "LG CASE"], char(10)[char(6) "LG BOX"], char(10)[char(7) "LG PACK"], char(10)[char(6) "LG PKG"]), lineitem.l_quantity NOT NULL >= decimal(15,2)[tinyint "20"], lineitem.l_quantity NOT NULL <= decimal(15,2)[sys.sql_add(smallint[tinyint "20"], smallint[tinyint "10"])], int[tinyint "1"] <= part.p_size NOT NULL <= int[tinyint "15"])) ]
+| ) [  ] [ sys.sum no nil (sys.sql_mul(lineitem.l_extendedprice NOT NULL, sys.sql_sub(decimal(15,2)[tinyint "1"], lineitem.l_discount NOT NULL))) as L1.L1 ]
+) [ L1 as L1.revenue ]
+--TEST-- /scratch/TPCH/20.sql;
+project (
+| project (
+| | join (
+| | | semijoin (
+| | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_nationkey NOT NULL ] COUNT ,
+| | | | project (
+| | | | | select (
+| | | | | | project (
+| | | | | | | group by (
+| | | | | | | | join (
+| | | | | | | | | project (
+| | | | | | | | | | semijoin (
+| | | | | | | | | | | table(sys.partsupp) [ partsupp.ps_partkey NOT NULL HASHCOL , partsupp.ps_suppkey NOT NULL, partsupp.ps_availqty NOT NULL, partsupp.%partsupp_ps_partkey_ps_suppkey_pkey NOT NULL HASHIDX  ] COUNT ,
+| | | | | | | | | | | project (
+| | | | | | | | | | | | select (
+| | | | | | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_name NOT NULL ] COUNT 
+| | | | | | | | | | | | ) [ char[part.p_name NOT NULL] FILTER like (char[char(7) "forest%"], char "") ]
+| | | | | | | | | | | ) [ part.p_partkey NOT NULL HASHCOL  as L11.L10 ]
+| | | | | | | | | | ) [ partsupp.ps_partkey NOT NULL HASHCOL  = L11.L10 NOT NULL HASHCOL  ]
+| | | | | | | | | ) [ partsupp.ps_partkey NOT NULL HASHCOL , partsupp.ps_suppkey NOT NULL, partsupp.ps_availqty NOT NULL, partsupp.%partsupp_ps_partkey_ps_suppkey_pkey NOT NULL HASHIDX , sys.identity(partsupp.ps_partkey NOT NULL HASHCOL ) HASHCOL  as L17.L17 ],
+| | | | | | | | | select (
+| | | | | | | | | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL as L16.l_partkey, lineitem.l_suppkey NOT NULL as L16.l_suppkey, lineitem.l_quantity NOT NULL as L16.l_quantity, lineitem.l_shipdate NOT NULL as L16.l_shipdate ] COUNT 
+| | | | | | | | | ) [ date "1994-01-01" <= L16.l_shipdate NOT NULL < sys.sql_add(date "1994-01-01", month_interval "12") ]
+| | | | | | | | ) [ partsupp.ps_partkey NOT NULL = L16.l_partkey NOT NULL HASHCOL , partsupp.ps_suppkey NOT NULL = L16.l_suppkey NOT NULL HASHCOL  ]
+| | | | | | | ) [ L17.L17 ] [ partsupp.ps_suppkey NOT NULL, partsupp.ps_availqty NOT NULL, L17.L17 HASHCOL , sys.sum no nil (L16.l_quantity NOT NULL as lineitem.l_quantity) NOT NULL as L12.L12 ]
+| | | | | | ) [ partsupp.ps_suppkey NOT NULL, partsupp.ps_availqty NOT NULL, sys.sql_mul(decimal(2,1) "5", L12 NOT NULL) as L13.L13 ]
+| | | | | ) [ partsupp.ps_availqty NOT NULL > int[L13.L13] ]
+| | | | ) [ partsupp.ps_suppkey NOT NULL as L15.L14 ]
+| | | ) [ supplier.s_suppkey NOT NULL HASHCOL  = L15.L14 NOT NULL ],
+| | | select (
+| | | | table(sys.nation) [ nation.n_nationkey NOT NULL HASHCOL , nation.n_name NOT NULL ] COUNT 
+| | | ) [ nation.n_name NOT NULL = char(25)[char(6) "CANADA"] ]
+| | ) [ supplier.s_nationkey NOT NULL = nation.n_nationkey NOT NULL HASHCOL  ]
+| ) [ supplier.s_name NOT NULL, supplier.s_address NOT NULL ]
+) [ supplier.s_name NOT NULL, supplier.s_address NOT NULL ] [ supplier.s_name ASC NOT NULL ]
+--TEST-- /scratch/TPCH/21.sql;
+top N (
+| project (
+| | group by (
+| | | antijoin (
+| | | | project (
+| | | | | semijoin (
+| | | | | | project (
+| | | | | | | join (
+| | | | | | | | join (
+| | | | | | | | | join (
+| | | | | | | | | | select (
+| | | | | | | | | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL  as l1.l_orderkey, lineitem.l_partkey NOT NULL as l1.l_partkey, lineitem.l_suppkey NOT NULL as l1.l_suppkey, lineitem.l_linenumber NOT NULL as l1.l_linenumber, lineitem.l_quantity NOT NULL as l1.l_quantity, lineitem.l_extendedprice NOT NULL as l1.l_extendedprice, lineitem.l_discount NOT NULL as l1.l_discount, lineitem.l_tax NOT NULL as l1.l_tax, lineitem.l_returnflag NOT NULL as l1.l_returnflag, lineitem.l_linestatus NOT NULL as l1.l_linestatus, lineitem.l_shipdate NOT NULL as l1.l_shipdate, lineitem.l_commitdate NOT NULL as l1.l_commitdate, lineitem.l_receiptdate NOT NULL as l1.l_receiptdate, lineitem.l_shipinstruct NOT NULL as l1.l_shipinstruct, lineitem.l_shipmode NOT NULL as l1.l_shipmode, lineitem.l_comment NOT NULL as l1.l_comment, lineitem.%TID% NOT NULL as l1.%TID%, lineitem.%lineitem_l_orderkey_l_linenumber_pkey NOT NULL HASHIDX  as l1.%lineitem_l_orderkey_l_linenumber_pkey, lineitem.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1 as l1.%lineitem_fk1, lineitem.%lineitem_fk2 NOT NULL JOINIDX sys.lineitem.lineitem_fk2 as l1.%lineitem_fk2 ] COUNT 
+| | | | | | | | | | ) [ l1.l_receiptdate NOT NULL > l1.l_commitdate NOT NULL ],
+| | | | | | | | | | select (
+| | | | | | | | | | | table(sys.orders) [ orders.o_orderkey NOT NULL HASHCOL , orders.o_custkey NOT NULL, orders.o_orderstatus NOT NULL, orders.o_totalprice NOT NULL, orders.o_orderdate NOT NULL, orders.o_orderpriority NOT NULL, orders.o_clerk NOT NULL, orders.o_shippriority NOT NULL, orders.o_comment NOT NULL, orders.%TID% NOT NULL, orders.%orders_o_orderkey_pkey NOT NULL HASHIDX , orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | | | | | | ) [ orders.o_orderstatus NOT NULL = char(1) "F" ]
+| | | | | | | | | ) [ l1.%lineitem_fk1 NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk1 ],
+| | | | | | | | | table(sys.supplier) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_nationkey NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, supplier.%TID% NOT NULL, supplier.%supplier_s_suppkey_pkey NOT NULL HASHIDX , supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT 
+| | | | | | | | ) [ supplier.s_suppkey NOT NULL HASHCOL  = l1.l_suppkey NOT NULL ],
+| | | | | | | | select (
+| | | | | | | | | table(sys.nation) [ nation.n_nationkey NOT NULL HASHCOL , nation.n_name NOT NULL, nation.n_regionkey NOT NULL, nation.n_comment, nation.%TID% NOT NULL, nation.%nation_n_nationkey_pkey NOT NULL HASHIDX , nation.%nation_fk1 NOT NULL JOINIDX sys.nation.nation_fk1 ] COUNT 
+| | | | | | | | ) [ nation.n_name NOT NULL = char(25)[char(12) "SAUDI ARABIA"] ]
+| | | | | | | ) [ supplier.%supplier_fk1 NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_fk1 ]
+| | | | | | ) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_nationkey NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, supplier.%TID% NOT NULL, supplier.%supplier_s_suppkey_pkey NOT NULL HASHIDX , supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1, l1.l_orderkey NOT NULL HASHCOL , l1.l_partkey NOT NULL, l1.l_suppkey NOT NULL, l1.l_linenumber NOT NULL, l1.l_quantity NOT NULL, l1.l_extendedprice NOT NULL, l1.l_discount NOT NULL, l1.l_tax NOT NULL, l1.l_returnflag NOT NULL, l1.l_linestatus NOT NULL, l1.l_shipdate NOT NULL, l1.l_commitdate NOT NULL, l1.l_receiptdate NOT NULL, l1.l_shipinstruct NOT NULL, l1.l_shipmode NOT NULL, l1.l_comment NOT NULL, l1.%TID% NOT NULL, l1.%lineitem_l_orderkey_l_linenumber_pkey NOT NULL HASHIDX , l1.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1, l1.%lineitem_fk2 NOT NULL JOINIDX sys.lineitem.lineitem_fk2, orders.o_orderkey NOT NULL HASHCOL , orders.o_custkey NOT NULL, orders.o_orderstatus NOT NULL, orders.o_totalprice NOT NULL, orders.o_orderdate NOT NULL, orders.o_orderpriority NOT NULL, orders.o_clerk NOT NULL, orders.o_shippriority NOT NULL, orders.o_comment NOT NULL, orders.%TID% NOT NULL, orders.%orders_o_orderkey_pkey NOT NULL HASHIDX , orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1, nation.n_nationkey NOT NULL HASHCOL , nation.n_name NOT NULL, nation.n_regionkey NOT NULL, nation.n_comment, nation.%TID% NOT NULL, nation.%nation_n_nationkey_pkey NOT NULL HASHIDX , nation.%nation_fk1 NOT NULL JOINIDX sys.nation.nation_fk1, sys.identity(supplier.s_suppkey NOT NULL HASHCOL ) HASHCOL  as L3.L3 ],
+| | | | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL  as l2.l_orderkey, lineitem.l_suppkey NOT NULL as l2.l_suppkey ] COUNT 
+| | | | | ) [ l2.l_orderkey NOT NULL HASHCOL  = l1.l_orderkey NOT NULL, l2.l_suppkey NOT NULL != l1.l_suppkey NOT NULL ]
+| | | | ) [ supplier.s_suppkey NOT NULL HASHCOL , supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_nationkey NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, supplier.%TID% NOT NULL, supplier.%supplier_s_suppkey_pkey NOT NULL HASHIDX , supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1, l1.l_orderkey NOT NULL HASHCOL , l1.l_partkey NOT NULL, l1.l_suppkey NOT NULL, l1.l_linenumber NOT NULL, l1.l_quantity NOT NULL, l1.l_extendedprice NOT NULL, l1.l_discount NOT NULL, l1.l_tax NOT NULL, l1.l_returnflag NOT NULL, l1.l_linestatus NOT NULL, l1.l_shipdate NOT NULL, l1.l_commitdate NOT NULL, l1.l_receiptdate NOT NULL, l1.l_shipinstruct NOT NULL, l1.l_shipmode NOT NULL, l1.l_comment NOT NULL, l1.%TID% NOT NULL, l1.%lineitem_l_orderkey_l_linenumber_pkey NOT NULL HASHIDX , l1.%lineitem_fk1 NOT NULL JOINIDX sys.lineitem.lineitem_fk1, l1.%lineitem_fk2 NOT NULL JOINIDX sys.lineitem.lineitem_fk2, orders.o_orderkey NOT NULL HASHCOL , orders.o_custkey NOT NULL, orders.o_orderstatus NOT NULL, orders.o_totalprice NOT NULL, orders.o_orderdate NOT NULL, orders.o_orderpriority NOT NULL, orders.o_clerk NOT NULL, orders.o_shippriority NOT NULL, orders.o_comment NOT NULL, orders.%TID% NOT NULL, orders.%orders_o_orderkey_pkey NOT NULL HASHIDX , orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1, nation.n_nationkey NOT NULL HASHCOL , nation.n_name NOT NULL, nation.n_regionkey NOT NULL, nation.n_comment, nation.%TID% NOT NULL, nation.%nation_n_nationkey_pkey NOT NULL HASHIDX , nation.%nation_fk1 NOT NULL JOINIDX sys.nation.nation_fk1, L3.L3 HASHCOL , sys.identity(supplier.s_suppkey NOT NULL HASHCOL ) HASHCOL  as L5.L5 ],
+| | | | select (
+| | | | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL as L2.l_orderkey, lineitem.l_suppkey NOT NULL as L2.l_suppkey, lineitem.l_commitdate NOT NULL as L2.l_commitdate, lineitem.l_receiptdate NOT NULL as L2.l_receiptdate ] COUNT 
+| | | | ) [ L2.l_receiptdate NOT NULL > L2.l_commitdate NOT NULL ]
+| | | ) [ L2.l_orderkey NOT NULL HASHCOL  = l1.l_orderkey NOT NULL, L2.l_suppkey NOT NULL != l1.l_suppkey NOT NULL ]
+| | ) [ supplier.s_name NOT NULL ] [ supplier.s_name NOT NULL, sys.count() NOT NULL as L1.L1 ]
+| ) [ supplier.s_name NOT NULL, L1 NOT NULL as L1.numwait ] [ L1.numwait NOT NULL, supplier.s_name ASC NOT NULL ]
+) [ wrd "100" ]
+--TEST-- /scratch/TPCH/22.sql;
+project (
+| group by (
+| | project (
+| | | antijoin (
+| | | | project (
+| | | | | semijoin (
+| | | | | | select (
+| | | | | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL , customer.c_phone NOT NULL, customer.c_acctbal NOT NULL ] COUNT 
+| | | | | | ) [ sys.substring(char[customer.c_phone NOT NULL] as customer.c_phone, int[tinyint "1"], int[tinyint "2"]) in (char(15)[char(2) "13"], char(15)[char(2) "31"], char(15)[char(2) "23"], char(15)[char(2) "29"], char(15)[char(2) "30"], char(15)[char(2) "18"], char(15)[char(2) "17"]) ],
+| | | | | | project (
+| | | | | | | group by (
+| | | | | | | | select (
+| | | | | | | | | table(sys.customer) [ customer.c_phone NOT NULL, customer.c_acctbal NOT NULL ] COUNT 
+| | | | | | | | ) [ customer.c_acctbal NOT NULL > decimal(15,2)[decimal(2,1) "0"], sys.substring(char[customer.c_phone NOT NULL] as customer.c_phone, int[tinyint "1"], int[tinyint "2"]) in (char(15)[char(2) "13"], char(15)[char(2) "31"], char(15)[char(2) "23"], char(15)[char(2) "29"], char(15)[char(2) "30"], char(15)[char(2) "18"], char(15)[char(2) "17"]) ]
+| | | | | | | ) [  ] [ sys.avg no nil (double[customer.c_acctbal NOT NULL] as customer.c_acctbal) as L1.L1 ]
+| | | | | | ) [ L1 as L1.L1 ]
+| | | | | ) [ customer.c_acctbal NOT NULL > decimal(15,2)[L1.L1] ]
+| | | | ) [ customer.c_custkey NOT NULL HASHCOL , customer.c_phone NOT NULL, customer.c_acctbal NOT NULL ],
+| | | | table(sys.orders) [ orders.o_custkey NOT NULL as L4.o_custkey ] COUNT 
+| | | ) [ L4.o_custkey NOT NULL = customer.c_custkey NOT NULL ]
+| | ) [ sys.substring(char[customer.c_phone NOT NULL] as customer.c_phone, int[tinyint "1"], int[tinyint "2"]) as custsale.cntrycode, customer.c_acctbal NOT NULL as custsale.c_acctbal ]
+| ) [ custsale.cntrycode ] [ custsale.cntrycode, sys.count() NOT NULL as L2.L2, sys.sum no nil (custsale.c_acctbal NOT NULL) NOT NULL as L3.L3 ]
+) [ custsale.cntrycode, L2 NOT NULL as L2.numcust, L3 NOT NULL as L3.totacctbal ] [ custsale.cntrycode ASC ]
