@@ -30,25 +30,6 @@ $ord = [^ \" \\ \n \t \' \xC]
 
 tokens :-
   ([$white \|])+ ; -- ignore vertical bars as well.
-    project
-  | group by
-  | select
-  | table
-  | NOT
-  | NULL
-  | COUNT
-  | tinyint
-  | int
-  | smallint
-  | bigint
-  | decimal
-  | sum
-  | sql_add
-  | sql_sub
-  | sql_mul
-  | sql_mod
-  | sql_div
-  | as  { \posn s -> scannedToken posn ( Keyword s ) }
   \[  { \posn _ -> scannedToken posn LBrack }
   \]  { \posn _ -> scannedToken posn RBrack }
   \(  { \posn _ -> scannedToken posn LParen }
@@ -56,7 +37,7 @@ tokens :-
   \,   { \posn _ -> scannedToken posn Comma }
   \.   { \posn _ -> scannedToken posn Dot }
   \"( \\ $esc  | $ord )* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
-  ($alpha|_)($alpha|_|[0-9])* { \posn s -> scannedToken posn ( Identifier s ) }
+  ($alpha|_)($alpha|_|[0-9])* { \posn s -> scannedToken posn ( Word s ) }
   "<"|"<="
   |">"|">="   { \posn s -> scannedToken posn $ CmpOp s}
   "!="|"="   { \posn s -> scannedToken posn $ RelOp s}
@@ -73,9 +54,8 @@ data ScannedToken = ScannedToken { line :: Int
 
 -- | A token.
 data Token =
-             Keyword String
+             Word String
            | ValueLiteral String
-           | Identifier String
            | LCurly
            | RCurly
            | LBrack

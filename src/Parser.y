@@ -33,48 +33,85 @@ import Scanner (ScannedToken(..), Token(..))
   ']'        { ScannedToken _ _ RBrack }
   '('        { ScannedToken _ _ LParen }
   ')'        { ScannedToken _ _ RParen }
-  literal    { ScannedToken _ _ (ValueLiteral $$) }
   ','        { ScannedToken _ _ Comma }
   '.'        { ScannedToken _ _ Dot }
-  relOp     { ScannedToken _ _ (RelOp $$ ) }
-  cmpOp     { ScannedToken _ _ (CmpOp $$ ) }
-  table     { ScannedToken _ _ ( Keyword "table" ) }
-  select    { ScannedToken _ _ ( Keyword "select") }
-  project    { ScannedToken _ _ ( Keyword "project") }
-  COUNT     { ScannedToken _ _  (Keyword "COUNT") }
-  sys { ScannedToken _ _  (Identifier "sys") }
-  identifier      {  ScannedToken _ _ ( Identifier $$  )  }
-  as        {  ScannedToken _ _ ( Keyword "as") }
-  NOT       {  ScannedToken _ _ ( Keyword "NOT") }
-  NULL       {  ScannedToken _ _ ( Keyword "NULL") }
-  sum       {  ScannedToken _ _ ( Keyword "sum") }
-  sql_add   {  ScannedToken _ _ ( Keyword "sql_add") }
+  literal    { ScannedToken _ _ ( ValueLiteral $$) }
+  relOp      { ScannedToken _ _ ( RelOp $$ ) }
+  cmpOp      { ScannedToken _ _ ( CmpOp $$ ) }
+
+  {- as long as the queries dont use these words within the columns names
+or within table names, this should work alright -}
+  COUNT      { ScannedToken _ _ ( Word "COUNT") }
+  table      { ScannedToken _ _ ( Word "table" ) }
+  select     { ScannedToken _ _ ( Word "select") }
+  project    { ScannedToken _ _ ( Word "project") }
+  group      { ScannedToken _ _ ( Word "group") }
+  by         { ScannedToken _ _ ( Word "by") }
+  top        { ScannedToken _ _ ( Word "top") }
+  N          { ScannedToken _ _ ( Word "N"  )  }
+  join       { ScannedToken _ _ ( Word "join"  ) }
+  antijoin   { ScannedToken _ _ ( Word "antijoin"  ) }
+  cross      { ScannedToken _ _ ( Word "crossproduct" ) }
+  sys        { ScannedToken _ _ ( Word "sys") }
+  as         { ScannedToken _ _ ( Word "as") }
+  NOT        { ScannedToken _ _ ( Word "NOT") }
+  NULL       { ScannedToken _ _ ( Word "NULL") }
+  sum        { ScannedToken _ _ ( Word "sum") }
+  sql_add    { ScannedToken _ _ ( Word "sql_add") }
+  {- anthing not matched  by the previous special words is dealt with as an identifier -}
+  identifier { ScannedToken _ _ ( Word $$  )  }
+
 
 %% -------------------------------- Grammar -----------------------------------
 
-Program: RelExpr { $1}
+Program: Tree { $1}
 
-RelExpr
-: Table { $1 }
-| Project { $1 }
+Tree
+: Leaf { $1 }
+| Node { $1 }
 
-{- extra check: this expression list should be non-emtpy and made out of columns only -}
-Table
-: table '(' QualifiedName ')' '[' ExprList ']' COUNT
-  { Table { name=$3, columns = $6 }  }
+Leaf
+: table '(' QualifiedName ')' '[' ExprListNE ']' COUNT
+  { Leaf { source=$3, columns = $6 }  }
 
-Project
-: project '(' RelExpr ')' '[' ExprList ']'
-  {  Project { rel = $3,  values = $6 } }
+Node
+: RelOp '(' NodeListNE ')' BracketListNE { Node { op = $1, children = $3, arg_lists = $5 } }
+| Leaf { $1 }
+
+BracketListNE
+: '[' ExprList ']' {  ($2 : []) :: [[(ScalarExpr, Maybe Name)]] }
+| '[' ExprList ']' BracketListNE  { $2  : $4 }
+
+RelOp
+: select { OpSelect }
+| project { OpProject }
+| group by { OpGroupBy }
+| top N   {  OpTopK }
+| join { OpJoin }
+| antijoin { OpAntiJoin }
+| cross { OpCrossProduct }
+
+NodeListNE
+: Node { $1 : [] }
+| Node ',' NodeListNE { $1 : $3 }
 
 QualifiedName
-: Iden { [$1] }
+: Iden { $1 : [] }
 | Iden '.' QualifiedName { $1 : $3 }
 
-Iden {-annoying sys.* -}
+Iden {-allowing special words to also be used in any identifier context
+we like special words because they allow us to easily express the parsing
+of things like 'sys.sql_sum' -}
 : sys { "sys" }
 | identifier { $1 }
 
+-- NameListNE
+-- : NameBind { $1 : [] }
+--- | NameBind ',' NameListNE { $1 : $3 }
+
+-- NameBind
+-- : QualifiedName { ($1, Nothing)}
+--- | QualifiedName as QualifiedName { ($1, Just $3) }
 
 ExprList
 : { [] }
@@ -92,7 +129,7 @@ Expr
 : QualifiedName { Ref $1 }
 | QualifiedName NOT NULL {Ref $1}
 | sys '.' sql_add '(' ExprBind ','  ExprBind ')' {- ignoring the aliases here for now -}
-  { Binop { op = Add, left = fst $5, right = fst $7 } }
+  { Binop { opcode = Add, left = fst $5, right = fst $7 } }
   {- todonext : literals and casts. both require typenames  -}
 
 
@@ -104,18 +141,40 @@ type Name = [String]
 data BinaryOp = Gt | Lt | Leq | Geq
   | Eq | Neq {- comp -}
   | Sub | Add | Div | Mul | Mod {- arith -}
-  | And | Or deriving (Eq, Show)
+  | LogAnd | LogOr
+  | BitAnd | BitOr deriving (Eq, Show)
 
 data ScalarExpr =  Literal String
              | Ref Name
-             | Binop { op :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr }
+             | Binop { opcode :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr }
              | Cast  { typ :: String, arg :: ScalarExpr }  deriving (Eq, Show)
 
-data RelExpr  = Table { name :: Name, columns :: [(ScalarExpr, Maybe Name)] }
-    | Select { rel :: RelExpr, predicate :: ScalarExpr }
-    | Project { rel :: RelExpr, values :: [(ScalarExpr, Maybe Name)] }
-    | GroupBy { rel :: RelExpr, keys :: [(String, Maybe Name)], values :: [(ScalarExpr, Maybe Name)]  }
-    deriving (Eq,Show)
+{-
+general rel expresssion used for parsing. contains very little checks for sense
+-}
+
+data RelOp = OpSelect
+           | OpProject
+           | OpGroupBy
+           | OpTopK
+           | OpCrossProduct
+           | OpJoin
+           | OpSemiJoin
+           | OpAntiJoin
+           deriving (Eq,Show)
+
+data Rel = Node { op ::RelOp
+                , children :: [Rel]
+                , arg_lists :: [[(ScalarExpr, Maybe Name)]]  }
+           | Leaf { source :: Name, columns :: [(ScalarExpr, Maybe Name)] }
+           deriving (Eq, Show)
+
+{- custom types for each expression, used after checking parsed contents -}
+-- data RelExpr  = Table { name :: Name, columns :: [(ScalarExpr, Maybe Name)] }
+--     | Select { rel :: RelExpr, predicate :: ScalarExpr }
+--     | Project { rel :: RelExpr, values :: [(ScalarExpr, Maybe Name)] }
+--     | GroupBy { rel :: RelExpr, keys :: [(String, Maybe Name)], values :: [(ScalarExpr, Maybe Name)]  }
+--     deriving (Eq,Show)
 
 parseError :: [ScannedToken] -> Either String a
 parseError [] = Left "unexpected EOF"
