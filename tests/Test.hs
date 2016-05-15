@@ -14,9 +14,10 @@ import Data.List(intercalate)
 main :: IO ()
 main = do base <- readFile "tests/monet_test_cases.txt"
           tpch <- readFile "tests/tpch_query_plans.txt"
-          defaultMain $ testGroup "Tests" [testGroup "AdHocTests" (get_test_cases base),
-                                           testGroup "TPCHTests" (get_test_cases tpch)
-                                           ]
+          defaultMain $ testGroup "Tests"
+           [ testGroup "AdHocTests" (get_test_cases base)
+           , testGroup "TPCHTests" (get_test_cases tpch)
+            ]
 
 toTestCase :: (String, String) -> TestTree
 toTestCase (a, b)  =
