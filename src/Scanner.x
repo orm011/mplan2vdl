@@ -37,6 +37,7 @@ tokens :-
   \,   { \posn _ -> scannedToken posn Comma }
   \.   { \posn _ -> scannedToken posn Dot }
   \"( \\ $esc  | $ord )* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
+  [0-9]+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
   "group by"  { \posn _ -> scannedToken posn (Word "group by") }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
@@ -58,6 +59,7 @@ data ScannedToken = ScannedToken { line :: Int
 data Token =
              Word String
            | ValueLiteral String
+           | NumberLiteral Int
            | LCurly
            | RCurly
            | LBrack

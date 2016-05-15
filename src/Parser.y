@@ -38,6 +38,7 @@ import Scanner (ScannedToken(..), Token(..), scan)
   '.'        { ScannedToken _ _ Dot }
   literal    { ScannedToken _ _ ( ValueLiteral $$) }
   infixop    { ScannedToken _ _ ( InfixOp $$ ) }
+  number     { ScannedToken _ _ ( NumberLiteral $$) }
 
   {- as long as the queries dont use these words within the columns names
 or within table names, this should work alright -}
@@ -65,6 +66,14 @@ Leaf
 Node
 : identifier '(' NodeListNE ')' BracketListNE { Node { relop = $1, children = $3, arg_lists = $5 } }
 
+TypeSpec
+: QualifiedName { TypeSpec { tname = $1, tparams=[]  } }
+| QualifiedName '(' NumberListNE ')' { TypeSpec { tname=$1, tparams=$3 } }
+
+NumberListNE
+: number { $1 : [] }
+| number ',' NumberListNE { $1 : $3 }
+
 BracketListNE
 : '[' ExprList ']' {  ($2 : []) :: [[(ScalarExpr, Maybe Name)]] }
 | '[' ExprList ']' BracketListNE  { $2  : $4 }
@@ -90,34 +99,43 @@ ExprListNE
 | ExprBind ',' ExprListNE { $1 : $3 }
 
 ExprBind
-: Expr { ($1, Nothing) }
+: Expr  { ($1, Nothing) }
 | Expr as QualifiedName { ($1, Just $3) }
 
 Expr
-: BasicExpr { $1 }
-| BasicExpr infixop Expr { Infix  { infixop = $2, left = $1, right = $3 } }
+: BasicExprMaybeNull  { $1 }
+| BasicExprMaybeNull infixop Expr
+  { Infix  { infixop = $2, left = $1, right = $3 } }
+
+BasicExprMaybeNull
+: BasicExpr { $1}
+| BasicExpr NOTNULL { $1 }
 
 BasicExpr
 : QualifiedName { Ref $1 }
-| QualifiedName NOTNULL { Ref $1 }
 | QualifiedName '(' ExprList ')'
   { Call { fname = $1, args = $3 } }
 | QualifiedName notnil '(' ExprList ')'
   { Call { fname = $1, args = $4 } }
-| QualifiedName '[' BasicExpr ']' { Cast { tname=$1, arg=$3 } }
-| QualifiedName literal { Literal {tname=$1, value=$2  } }
+| TypeSpec '[' BasicExprMaybeNull ']' { Cast { tspec=$1, arg=$3 } }
+| TypeSpec literal { Literal {tspec=$1, value=$2 } }
 
 ----------------------------------- Haskell -----------------------------------
 {
 
 type Name = [String]
 
+{- eg decimal(15,2) , or smallint  -}
+data TypeSpec = TypeSpec { tname :: Name
+                         , tparams :: [Int] } deriving (Eq,Show)
+
 {- todo: deal with things like x < y < z that show up in the select args-}
-data ScalarExpr =  Literal { tname:: Name,  value::String }
+data ScalarExpr =  Literal { tspec :: TypeSpec
+                           , value::String }
                    | Ref Name
                    | Call { fname :: Name
                           , args :: [(ScalarExpr, Maybe Name)] }
-                   | Cast  { tname :: Name
+                   | Cast  { tspec :: TypeSpec
                            , arg :: ScalarExpr }
                    | Infix { infixop :: String
                            , left :: ScalarExpr
