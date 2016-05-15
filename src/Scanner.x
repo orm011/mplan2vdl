@@ -29,7 +29,7 @@ $esc = [\\ \" \' n t]
 $ord = [^ \" \\ \n \t \' \xC]
 
 tokens :-
-  ($white#\xC#\|)+ ; -- ignore vertical bars as well.
+  ([$white \|])+ ; -- ignore vertical bars as well.
     project
   | group by
   | select
@@ -70,7 +70,7 @@ tokens :-
 data ScannedToken = ScannedToken { line :: Int
                                  , column :: Int
                                  , extractRawToken :: Token
-                                 } deriving (Eq)
+                                 } deriving (Eq,Show)
 
 -- | A token.
 data Token =
