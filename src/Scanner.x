@@ -24,6 +24,11 @@ module Scanner ( ScannedToken(..)
 ----------------------------------- Tokens ------------------------------------
 
 $alpha = [a-zA-Z]
+$num = [0-9]
+
+$alnum = [$alpha $num]
+$name = [$alnum \_ \%]
+$withinquotes = [$name \-]
 
 $esc = [\\ \" \' n t]
 $ord = [^ \" \\ \n \t \' \xC]
@@ -36,13 +41,15 @@ tokens :-
   \)  { \posn _ -> scannedToken posn RParen }
   \,   { \posn _ -> scannedToken posn Comma }
   \.   { \posn _ -> scannedToken posn Dot }
-  \"( \\ $esc  | $ord )* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
-  [0-9]+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
+  \"$withinquotes*\" { \posn s -> scannedToken posn ( ValueLiteral s ) }
+  $num+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
   "group by"  { \posn _ -> scannedToken posn (Word "group by") }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
+  "ASC"  { \posn _ -> scannedToken posn (Word "ASC") }
+  "HASHCOL"  { \posn _ -> scannedToken posn (Word "HASHCOL") }
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
   "top N"  { \posn _ -> scannedToken posn (Word "top N") }
-  ($alpha|_)($alpha|_|[0-9])* { \posn s -> scannedToken posn ( Word s ) }
+  $name+ { \posn s -> scannedToken posn ( Word s ) }
   "<"|"<=" |">"|">="|"!="|"="   { \posn s -> scannedToken posn $ InfixOp s}
 
 

@@ -44,8 +44,10 @@ import Scanner (ScannedToken(..), Token(..), scan)
 or within table names, this should work alright -}
   COUNT      { ScannedToken _ _ ( Word "COUNT") }
   NOTNULL    { ScannedToken _ _ ( Word "NOT NULL") }
+  HASHCOL    { ScannedToken _ _ ( Word "HASHCOL") }
+  ASC        { ScannedToken _ _ ( Word "ASC") }
   notnil     { ScannedToken _ _ ( Word "no nil") }
-  table     { ScannedToken _ _ ( Word "table") }
+  table      { ScannedToken _ _ ( Word "table") }
   as         { ScannedToken _ _ ( Word "as") }
   {- anthing not matched  by the previous special words is dealt with as an identifier -}
   identifier { ScannedToken _ _ ( Word $$  )  }
@@ -103,21 +105,29 @@ ExprBind
 | Expr as QualifiedName { ($1, Just $3) }
 
 Expr
-: BasicExprMaybeNull  { $1 }
-| BasicExprMaybeNull infixop Expr
+: BasicExprWithAttr  { $1 }
+| BasicExprWithAttr infixop Expr
   { Infix  { infixop = $2, left = $1, right = $3 } }
 
-BasicExprMaybeNull
-: BasicExpr { $1}
-| BasicExpr NOTNULL { $1 }
+BasicExprWithAttr
+: BasicExpr AttrList { $1 {-ignore attrlist right now-} }
+
+AttrList
+: { [] }
+| Attr AttrList { $1 : $2 }
+
+Attr {- propagate them later. at least ASC should be. -}
+: NOTNULL { undefined }
+| ASC { undefined }
+| HASHCOL { undefined }
 
 BasicExpr
-: QualifiedName { Ref $1 }
+: QualifiedName  { Ref $1 }
 | QualifiedName '(' ExprList ')'
   { Call { fname = $1, args = $3 } }
 | QualifiedName notnil '(' ExprList ')'
   { Call { fname = $1, args = $4 } }
-| TypeSpec '[' BasicExprMaybeNull ']' { Cast { tspec=$1, arg=$3 } }
+| TypeSpec '[' BasicExprWithAttr ']' { Cast { tspec=$1, arg=$3 } }
 | TypeSpec literal { Literal {tspec=$1, value=$2 } }
 
 ----------------------------------- Haskell -----------------------------------
@@ -129,10 +139,23 @@ type Name = [String]
 data TypeSpec = TypeSpec { tname :: Name
                          , tparams :: [Int] } deriving (Eq,Show)
 
+{- for now, parse but drop the column attributes.
+maybe will take a look again later.
+do they beling only with references (like L1.L1 Asc), or also
+with expressions (like NOT NULL seems to be)
+
+-- data Order  =  OrderAsc | OrderDefault  deriving (Eq,Show)
+-- data HashCol = HashCol | PlainCol deriving (Eq,Show)
+-- data Nullable = NotNull | Nullable deriving (Eq,Show)
+                         -- , rorder=Order
+                         -- , rhash=Hashcol
+                         -- , rnullable=Nullable
+-}
+
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tspec :: TypeSpec
                            , value::String }
-                   | Ref Name
+                   | Ref { rname :: Name }
                    | Call { fname :: Name
                           , args :: [(ScalarExpr, Maybe Name)] }
                    | Cast  { tspec :: TypeSpec
