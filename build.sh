@@ -41,6 +41,7 @@ else
     FLAG=$1
 fi
 
+OPTS="-g --debug --info"
 set -x
 cabal $FLAG \
-      --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options="-g --debug --info"
+      --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=""

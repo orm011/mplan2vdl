@@ -36,8 +36,7 @@ import Scanner (ScannedToken(..), Token(..))
   ','        { ScannedToken _ _ Comma }
   '.'        { ScannedToken _ _ Dot }
   literal    { ScannedToken _ _ ( ValueLiteral $$) }
-  relOp      { ScannedToken _ _ ( RelOp $$ ) }
-  cmpOp      { ScannedToken _ _ ( CmpOp $$ ) }
+  infixop    { ScannedToken _ _ ( InfixOp $$ ) }
 
   {- as long as the queries dont use these words within the columns names
 or within table names, this should work alright -}
@@ -45,19 +44,14 @@ or within table names, this should work alright -}
   table      { ScannedToken _ _ ( Word "table" ) }
   select     { ScannedToken _ _ ( Word "select") }
   project    { ScannedToken _ _ ( Word "project") }
-  group      { ScannedToken _ _ ( Word "group") }
-  by         { ScannedToken _ _ ( Word "by") }
-  top        { ScannedToken _ _ ( Word "top") }
-  N          { ScannedToken _ _ ( Word "N"  )  }
+  groupby    { ScannedToken _ _ ( Word "group by") }
+  topN       { ScannedToken _ _ ( Word "top N") }
   join       { ScannedToken _ _ ( Word "join"  ) }
+  NOTNULL    { ScannedToken _ _ ( Word "NOT NULL") }
+  notnil     { ScannedToken _ _ ( Word "no nil") }
   antijoin   { ScannedToken _ _ ( Word "antijoin"  ) }
   cross      { ScannedToken _ _ ( Word "crossproduct" ) }
-  sys        { ScannedToken _ _ ( Word "sys") }
   as         { ScannedToken _ _ ( Word "as") }
-  NOT        { ScannedToken _ _ ( Word "NOT") }
-  NULL       { ScannedToken _ _ ( Word "NULL") }
-  sum        { ScannedToken _ _ ( Word "sum") }
-  sql_add    { ScannedToken _ _ ( Word "sql_add") }
   {- anthing not matched  by the previous special words is dealt with as an identifier -}
   identifier { ScannedToken _ _ ( Word $$  )  }
 
@@ -72,11 +66,10 @@ Tree
 
 Leaf
 : table '(' QualifiedName ')' '[' ExprListNE ']' COUNT
-  { Leaf { source=$3, columns = $6 }  }
+  { Leaf { source=$3, columns=$6 }  }
 
 Node
 : RelOp '(' NodeListNE ')' BracketListNE { Node { op = $1, children = $3, arg_lists = $5 } }
-| Leaf { $1 }
 
 BracketListNE
 : '[' ExprList ']' {  ($2 : []) :: [[(ScalarExpr, Maybe Name)]] }
@@ -85,33 +78,22 @@ BracketListNE
 RelOp
 : select { OpSelect }
 | project { OpProject }
-| group by { OpGroupBy }
-| top N   {  OpTopK }
+| groupby { OpGroupBy }
+| topN   {  OpTopK }
 | join { OpJoin }
 | antijoin { OpAntiJoin }
 | cross { OpCrossProduct }
 
 NodeListNE
-: Node { $1 : [] }
-| Node ',' NodeListNE { $1 : $3 }
+: Tree { $1 : [] }
+| Tree ',' NodeListNE { $1 : $3 }
 
 QualifiedName
 : Iden { $1 : [] }
 | Iden '.' QualifiedName { $1 : $3 }
 
-Iden {-allowing special words to also be used in any identifier context
-we like special words because they allow us to easily express the parsing
-of things like 'sys.sql_sum' -}
-: sys { "sys" }
-| identifier { $1 }
-
--- NameListNE
--- : NameBind { $1 : [] }
---- | NameBind ',' NameListNE { $1 : $3 }
-
--- NameBind
--- : QualifiedName { ($1, Nothing)}
---- | QualifiedName as QualifiedName { ($1, Just $3) }
+Iden
+: identifier { $1 }
 
 ExprList
 : { [] }
@@ -126,32 +108,31 @@ ExprBind
 | Expr as QualifiedName { ($1, Just $3) }
 
 Expr
-: QualifiedName { Ref $1 }
-| QualifiedName NOT NULL {Ref $1}
-| sys '.' sql_add '(' ExprBind ','  ExprBind ')' {- ignoring the aliases here for now -}
-  { Binop { opcode = Add, left = fst $5, right = fst $7 } }
-  {- todonext : literals and casts. both require typenames  -}
+: BasicExpr { $1 }
+| BasicExpr infixop Expr { Infix  { infixop = $2, left = $1, right = $3 } }
 
+BasicExpr
+: QualifiedName { Ref $1 }
+| QualifiedName NOTNULL { Ref $1 }
+| QualifiedName '(' ExprList ')'
+  { Call { fname = $1, args = $3 } }
+| QualifiedName notnil '(' ExprList ')'
+  { Call { fname = $1, args = $4 } }
+| QualifiedName '[' BasicExpr ']' { Cast { tname=$1, arg=$3 } }
+| QualifiedName literal { Literal {tname=$1, value=$2  } }
 
 ----------------------------------- Haskell -----------------------------------
 {
 
 type Name = [String]
 
-data BinaryOp = Gt | Lt | Leq | Geq
-  | Eq | Neq {- comp -}
-  | Sub | Add | Div | Mul | Mod {- arith -}
-  | LogAnd | LogOr
-  | BitAnd | BitOr deriving (Eq, Show)
-
-data ScalarExpr =  Literal String
-             | Ref Name
-             | Binop { opcode :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr }
-             | Cast  { typ :: String, arg :: ScalarExpr }  deriving (Eq, Show)
-
-{-
-general rel expresssion used for parsing. contains very little checks for sense
--}
+{- todo: deal with things like x < y < z that show up in the select args-}
+data ScalarExpr =  Literal { tname:: Name,  value::String }
+                   | Ref Name
+                   | Call { fname :: Name, args :: [(ScalarExpr, Maybe Name)]}
+                   | Cast  { tname :: Name, arg :: ScalarExpr }
+                   | Infix { infixop :: String, left :: ScalarExpr, right :: ScalarExpr }
+                     deriving (Eq, Show)
 
 data RelOp = OpSelect
            | OpProject
@@ -169,12 +150,6 @@ data Rel = Node { op ::RelOp
            | Leaf { source :: Name, columns :: [(ScalarExpr, Maybe Name)] }
            deriving (Eq, Show)
 
-{- custom types for each expression, used after checking parsed contents -}
--- data RelExpr  = Table { name :: Name, columns :: [(ScalarExpr, Maybe Name)] }
---     | Select { rel :: RelExpr, predicate :: ScalarExpr }
---     | Project { rel :: RelExpr, values :: [(ScalarExpr, Maybe Name)] }
---     | GroupBy { rel :: RelExpr, keys :: [(String, Maybe Name)], values :: [(ScalarExpr, Maybe Name)]  }
---     deriving (Eq,Show)
 
 parseError :: [ScannedToken] -> Either String a
 parseError [] = Left "unexpected EOF"

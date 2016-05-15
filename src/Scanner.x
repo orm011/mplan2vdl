@@ -37,10 +37,12 @@ tokens :-
   \,   { \posn _ -> scannedToken posn Comma }
   \.   { \posn _ -> scannedToken posn Dot }
   \"( \\ $esc  | $ord )* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
+  "group by"  { \posn _ -> scannedToken posn (Word "group by") }
+  "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
+  "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
+  "top N"  { \posn _ -> scannedToken posn (Word "top N") }
   ($alpha|_)($alpha|_|[0-9])* { \posn s -> scannedToken posn ( Word s ) }
-  "<"|"<="
-  |">"|">="   { \posn s -> scannedToken posn $ CmpOp s}
-  "!="|"="   { \posn s -> scannedToken posn $ RelOp s}
+  "<"|"<=" |">"|">="|"!="|"="   { \posn s -> scannedToken posn $ InfixOp s}
 
 
 ----------------------------- Representing tokens -----------------------------
@@ -64,8 +66,7 @@ data Token =
            | RParen
            | Dot
            | Comma
-           | RelOp String
-           | CmpOp String
+           | InfixOp String
            deriving (Eq, Show)
 
 {-| Smart constructor to create a 'ScannedToken' by extracting the line and

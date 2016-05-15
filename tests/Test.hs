@@ -18,8 +18,8 @@ main = do x <- readFile "tests/monet_test_cases.txt"
 toTestCase :: (String, String) -> TestTree
 toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
   let (ls, rs) = partitionEithers $ traceShowId $ scan b
-      prs = traceShowId $ parse rs
-  in (traceShowId ls) == [] && isRight prs @? (case prs of Left str -> str)
+      prs = parse rs
+  in (traceShowId ls) == [] && isRight (traceShowId prs) @? (case prs of Left str -> str)
   )
 
 get_test_cases :: String  -> [TestTree]
