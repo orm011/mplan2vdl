@@ -2,11 +2,13 @@ import Test.Tasty
 {- import Test.Tasty.SmallCheck as SC
 import Test.Tasty.QuickCheck as QC -}
 import Test.Tasty.HUnit
-import MainFuns(parse)
-import Data.Either(isRight)
+import Parser(parse)
+import Scanner(scan)
+import Data.Either(isRight,partitionEithers)
 import qualified Data.Text as T
 import Configuration(defaultConfiguration)
 import Text.Groom
+import Debug.Trace
 
 main :: IO ()
 main = do x <- readFile "tests/monet_test_cases.txt"
@@ -15,8 +17,9 @@ main = do x <- readFile "tests/monet_test_cases.txt"
 
 toTestCase :: (String, String) -> TestTree
 toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
-  let r = parse defaultConfiguration b
-  in isRight r @? (case r of Left str -> str)
+  let (ls, rs) = partitionEithers $ traceShowId $ scan b
+      prs = traceShowId $ parse rs
+  in (traceShowId ls) == [] && isRight prs @? (case prs of Left str -> str)
   )
 
 get_test_cases :: String  -> [TestTree]
