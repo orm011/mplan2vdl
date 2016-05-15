@@ -9,6 +9,7 @@ import qualified Data.Text as T
 import Configuration(defaultConfiguration)
 import Text.Groom
 import Debug.Trace
+import Data.List(intercalate)
 
 main :: IO ()
 main = do base <- readFile "tests/monet_test_cases.txt"
@@ -18,9 +19,11 @@ main = do base <- readFile "tests/monet_test_cases.txt"
                                            ]
 
 toTestCase :: (String, String) -> TestTree
-toTestCase (a, b)  = testCase ("------\n" ++  a ++ "\n\n" ++ b ++"\n------\n") (
-  let prs = fromString b in (isRight $ traceShowId prs)  @? show prs
-  )
+toTestCase (a, b)  =
+  let zpd = zip [1..] (T.splitOn (T.pack "\n") (T.pack b))
+      numbered_plan = map (\(n, line) -> (show n) ++ " " ++ (T.unpack line)) zpd
+  in
+    testCase ("------\n" ++  a ++ "\n\n" ++ (intercalate "\n" numbered_plan) ++"\n------\n") (let prs = fromString b in (isRight  prs)  @? groom prs)
 
 get_test_cases :: String  -> [TestTree]
 get_test_cases s = {- the first element after split is a "", because we start with a plan, so must do tail -}
