@@ -42,7 +42,6 @@ tokens :-
   | smallint
   | bigint
   | decimal
-  | sys
   | sum
   | sql_add
   | sql_sub
@@ -60,7 +59,7 @@ tokens :-
   ($alpha|_)($alpha|_|[0-9])* { \posn s -> scannedToken posn ( Identifier s ) }
   "<"|"<="
   |">"|">="   { \posn s -> scannedToken posn $ CmpOp s}
-  "<>"|"="   { \posn s -> scannedToken posn $ RelOp s}
+  "!="|"="   { \posn s -> scannedToken posn $ RelOp s}
 
 
 ----------------------------- Representing tokens -----------------------------

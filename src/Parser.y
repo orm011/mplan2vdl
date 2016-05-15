@@ -42,11 +42,11 @@ import Scanner (ScannedToken(..), Token(..))
   select    { ScannedToken _ _ ( Keyword "select") }
   project    { ScannedToken _ _ ( Keyword "project") }
   COUNT     { ScannedToken _ _  (Keyword "COUNT") }
+  sys { ScannedToken _ _  (Identifier "sys") }
   identifier      {  ScannedToken _ _ ( Identifier $$  )  }
   as        {  ScannedToken _ _ ( Keyword "as") }
   NOT       {  ScannedToken _ _ ( Keyword "NOT") }
   NULL       {  ScannedToken _ _ ( Keyword "NULL") }
-  sys       {  ScannedToken _ _ ( Keyword "sys") }
   sum       {  ScannedToken _ _ ( Keyword "sum") }
   sql_add   {  ScannedToken _ _ ( Keyword "sql_add") }
 
@@ -68,8 +68,13 @@ Project
   {  Project { rel = $3,  values = $6 } }
 
 QualifiedName
-: identifier { [$1] }
-| identifier '.' QualifiedName { $1 : $3 }
+: Iden { [$1] }
+| Iden '.' QualifiedName { $1 : $3 }
+
+Iden {-annoying sys.* -}
+: sys { "sys" }
+| identifier { $1 }
+
 
 ExprList
 : { [] }
