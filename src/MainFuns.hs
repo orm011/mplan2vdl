@@ -9,7 +9,7 @@ terms of the MIT (X11) License as described in the LICENSE file.
 decafc is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE.  See the X11 license for more details. -}
-module Main (main) where
+module MainFuns (main, parse) where
 
 import Prelude hiding (readFile)
 import qualified Prelude

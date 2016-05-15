@@ -1,0 +1,90 @@
+
+plan select sum(1 + 1);
+
+project (
+|  [  ] [ sys.sum no nil (sys.sql_add(smallint[tinyint "1"], smallint[tinyint "1"])) as L1.L1 ]
+) [ L1 as L1.L1 ]
+
+plan select 1;
+
+ [ tinyint "1" ]
+
+plan select 1 + 1;
+
+ [ sys.sql_add(smallint[tinyint "1"], smallint[tinyint "1"]) ]
+
+plan select sum(1 + 1);
+
+project (
+|  [  ] [ sys.sum no nil (sys.sql_add(smallint[tinyint "1"], smallint[tinyint "1"])) as L1.L1 ]
+) [ L1 as L1.L1 ]
+
+plan select r_name from sys.region;
+
+project (
+| table(sys.region) [ region.r_name NOT NULL ] COUNT 
+) [ region.r_name NOT NULL ]
+
+plan select r_name, r_comment from sys.region;
+
+project (
+| table(sys.region) [ region.r_name NOT NULL, region.r_comment ] COUNT 
+) [ region.r_name NOT NULL, region.r_comment ]
+
+plan select r_name, r_comment from sys.region;
+
+project (
+| table(sys.region) [ region.r_name NOT NULL, region.r_comment ] COUNT 
+) [ region.r_name NOT NULL, region.r_comment ]
+
+plan select * from sys.region;
+
+project (
+| table(sys.region) [ region.r_regionkey NOT NULL, region.r_name NOT NULL, region.r_comment ] COUNT 
+) [ region.r_regionkey NOT NULL, region.r_name NOT NULL, region.r_comment ]
+
+plan select sum(r_name) from sys.region;
+
+project (
+| group by (
+| | table(sys.region) [ region.r_name NOT NULL ] COUNT 
+| ) [  ] [ sys.sum no nil (tinyint[region.r_name NOT NULL] as region.r_name) as L1.L1 ]
+) [ L1 as L1.L1 ]
+
+plan select sum(l_orderkey + l_partkey) from sys.lineitem;
+
+project (
+| group by (
+| | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL, lineitem.l_partkey NOT NULL ] COUNT 
+| ) [  ] [ sys.sum no nil (sys.sql_add(bigint[lineitem.l_orderkey NOT NULL] as lineitem.l_orderkey, bigint[lineitem.l_partkey NOT NULL] as lineitem.l_partkey)) as L1.L1 ]
+) [ L1 as L1.L1 ]
+
+plan select sum(l_orderkey + l_partkey) from sys.lineitem where l_orderkey > 10;
+
+project (
+| group by (
+| | select (
+| | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL, lineitem.l_partkey NOT NULL ] COUNT 
+| | ) [ lineitem.l_orderkey NOT NULL > int[tinyint "10"] ]
+| ) [  ] [ sys.sum no nil (sys.sql_add(bigint[lineitem.l_orderkey NOT NULL] as lineitem.l_orderkey, bigint[lineitem.l_partkey NOT NULL] as lineitem.l_partkey)) as L1.L1 ]
+) [ L1 as L1.L1 ]
+
+plan select sum(l_orderkey + l_partkey) from sys.lineitem where l_orderkey > 10 and l_partkey <> l_orderkey;
+
+project (
+| group by (
+| | select (
+| | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL, lineitem.l_partkey NOT NULL ] COUNT 
+| | ) [ lineitem.l_partkey NOT NULL != lineitem.l_orderkey NOT NULL, lineitem.l_orderkey NOT NULL > int[tinyint "10"] ]
+| ) [  ] [ sys.sum no nil (sys.sql_add(bigint[lineitem.l_orderkey NOT NULL] as lineitem.l_orderkey, bigint[lineitem.l_partkey NOT NULL] as lineitem.l_partkey)) as L1.L1 ]
+) [ L1 as L1.L1 ]
+
+plan select l_partkey, sum(l_orderkey + l_partkey) from sys.lineitem where l_orderkey > 10 and l_partkey <> l_orderkey group by l_partkey;
+
+project (
+| group by (
+| | select (
+| | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL, lineitem.l_partkey NOT NULL ] COUNT 
+| | ) [ lineitem.l_partkey NOT NULL != lineitem.l_orderkey NOT NULL, lineitem.l_orderkey NOT NULL > int[tinyint "10"] ]
+| ) [ lineitem.l_partkey NOT NULL ] [ lineitem.l_partkey NOT NULL, sys.sum no nil (sys.sql_add(bigint[lineitem.l_orderkey NOT NULL] as lineitem.l_orderkey, bigint[lineitem.l_partkey NOT NULL] as lineitem.l_partkey)) as L1.L1 ]
+) [ lineitem.l_partkey NOT NULL, L1 as L1.L1 ]
