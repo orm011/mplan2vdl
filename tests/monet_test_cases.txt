@@ -1,24 +1,3 @@
-
-plan select sum(1 + 1);
-
-project (
-|  [  ] [ sys.sum no nil (sys.sql_add(smallint[tinyint "1"], smallint[tinyint "1"])) as L1.L1 ]
-) [ L1 as L1.L1 ]
-
-plan select 1;
-
- [ tinyint "1" ]
-
-plan select 1 + 1;
-
- [ sys.sql_add(smallint[tinyint "1"], smallint[tinyint "1"]) ]
-
-plan select sum(1 + 1);
-
-project (
-|  [  ] [ sys.sum no nil (sys.sql_add(smallint[tinyint "1"], smallint[tinyint "1"])) as L1.L1 ]
-) [ L1 as L1.L1 ]
-
 plan select r_name from sys.region;
 
 project (
