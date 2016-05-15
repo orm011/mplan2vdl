@@ -34,11 +34,13 @@ for package in alex happy; do
     fi
 done
 
-HAPPY="" #"-g --debug --info "
+if [[ $# -lt 1  ]]
+then
+    FLAG="install"
+else
+    FLAG=$1
+fi
 
-cabal install \
-    --enable-library-profiling --enable-profiling \
-    --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=$HAPPY
-
-cabal test \
-    --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=$HAPPY
+set -x
+cabal $FLAG \
+      --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options="-g --debug --info"
