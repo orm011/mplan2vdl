@@ -114,17 +114,21 @@ type Name = [String]
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tname:: Name,  value::String }
                    | Ref Name
-                   | Call { fname :: Name, args :: [(ScalarExpr, Maybe Name)]}
-                   | Cast  { tname :: Name, arg :: ScalarExpr }
-                   | Infix { infixop :: String, left :: ScalarExpr, right :: ScalarExpr }
+                   | Call { fname :: Name
+                          , args :: [(ScalarExpr, Maybe Name)] }
+                   | Cast  { tname :: Name
+                           , arg :: ScalarExpr }
+                   | Infix { infixop :: String
+                           , left :: ScalarExpr
+                           , right :: ScalarExpr }
                      deriving (Eq, Show)
 
 data Rel = Node { relop :: String {- relational op like join -}
                 , children :: [Rel]
                 , arg_lists :: [[(ScalarExpr, Maybe Name)]]  }
            | Leaf { source :: Name, columns :: [(ScalarExpr, Maybe Name)] }
+             {-table scan -}
            deriving (Eq, Show)
-
 
 parseError :: [ScannedToken] -> Either String a
 parseError [] = Left "unexpected EOF"
