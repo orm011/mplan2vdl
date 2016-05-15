@@ -36,7 +36,7 @@ done
 
 if [[ $# -lt 1  ]]
 then
-    FLAG="install"
+    FLAG="install --enable-tests"
 else
     FLAG=$1
 fi
