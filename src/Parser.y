@@ -82,23 +82,23 @@ TypeSpec
 | QualifiedName '(' NumberListNE ')' { TypeSpec { tname=$1, tparams=$3 } }
 
 NumberListNE
-: number { $1 : [] }
-| number ',' NumberListNE { $1 : $3 }
+: number { ($1 : []) :: [Int] }
+| number ',' NumberListNE { ($1 : $3) :: [Int] }
 
 BracketListNE
-: '[' Expr ']' {  ($2 : [])  }
-| '[' Expr ']' BracketListNE  { $2  : $4 }
+: '[' Expr ']' {  ($2 : []) :: [Expr] }
+| '[' Expr ']' BracketListNE  { ($2  : $4) :: [Expr] }
 
 NodeListNE
-: Tree { $1 : [] }
-| Tree ',' NodeListNE { $1 : $3 }
+: Tree { ( $1 : [] ) :: [Rel] }
+| Tree ',' NodeListNE { ($1 : $3) :: [Rel] }
 
 QualifiedName
-: Iden { $1 : [] }
-| Iden '.' QualifiedName { $1 : $3 }
+: Iden { ($1 : []) :: [String] }
+| Iden '.' QualifiedName { ($1 : $3) :: [String] }
 
 Iden
-: identifier { $1 }
+: identifier { $1  :: String }
 
 -- {- it is unclear we need this as well as the comma infix -}
 -- ExprList
@@ -110,11 +110,11 @@ Iden
 --- | ExprBind ',' ExprListNE { $1 : $3 }
 
 Expr {- top level definition -}
-: ExprBind { $1 }
+: ExprBind { $1 :: Expr }
 
 ExprBind {- allows for the aliasing that happens sometimes -}
-: CommaExpr  { Expr { expr=$1, alias=Nothing } }
-| CommaExpr as QualifiedName { Expr { expr=$1, alias= Just $3 } }
+: CommaExpr  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
+| CommaExpr as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
 
 {- note to self on operator precedences:
 For the most part, parenthesis are explicit in the plans, except for commas:
