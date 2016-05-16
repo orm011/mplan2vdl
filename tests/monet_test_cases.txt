@@ -67,3 +67,18 @@ project (
 | | ) [ lineitem.l_partkey NOT NULL != lineitem.l_orderkey NOT NULL, lineitem.l_orderkey NOT NULL > int[tinyint "10"] ]
 | ) [ lineitem.l_partkey NOT NULL ] [ lineitem.l_partkey NOT NULL, sys.sum no nil (sys.sql_add(bigint[lineitem.l_orderkey NOT NULL] as lineitem.l_orderkey, bigint[lineitem.l_partkey NOT NULL] as lineitem.l_partkey)) as L1.L1 ]
 ) [ lineitem.l_partkey NOT NULL, L1 as L1.L1 ]
+
+--TEST-- select n1.n_nationkey from nation as n1, nation as n2 where n1.n_name = 'FRANCE' and n2.n_name = 'GERMANY' or n1.n_name = 'GERMANY' and n2.n_name = 'FRANCE';
+
+project (
+| select (
+| | crossproduct (
+| | | select (
+| | | | table(sys.nation) [ nation.n_nationkey NOT NULL HASHCOL  as n1.n_nationkey, nation.n_name NOT NULL as n1.n_name ] COUNT 
+| | | ) [ n1.n_name NOT NULL in (char(25)[char(6) "FRANCE"], char(25)[char(7) "GERMANY"]) ],
+| | | select (
+| | | | table(sys.nation) [ nation.n_name NOT NULL as n2.n_name ] COUNT 
+| | | ) [ n2.n_name NOT NULL in (char(25)[char(7) "GERMANY"], char(25)[char(6) "FRANCE"]) ]
+| | ) [  ]
+| ) [ (n1.n_name NOT NULL = char(25)[char(6) "FRANCE"], n2.n_name NOT NULL = char(25)[char(7) "GERMANY"]) or (n1.n_name NOT NULL = char(25)[char(7) "GERMANY"], n2.n_name NOT NULL = char(25)[char(6) "FRANCE"]) ]
+) [ n1.n_nationkey NOT NULL HASHCOL  ]
