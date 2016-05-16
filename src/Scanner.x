@@ -30,9 +30,6 @@ $alnum = [$alpha $num]
 $name = [$alnum \_ \%]
 $withinquotes = [$name \-\ \#]
 
-$esc = [\\ \" \' n t]
-$ord = [^ \" \\ \n \t \' \xC]
-
 tokens :-
   ([$white \|])+ ; -- ignore vertical bars as well.
   \[  { \posn _ -> scannedToken posn LBrack }
@@ -41,7 +38,7 @@ tokens :-
   \)  { \posn _ -> scannedToken posn RParen }
   \,   { \posn _ -> scannedToken posn Comma }
   \.   { \posn _ -> scannedToken posn Dot }
-  \"$withinquotes*\" { \posn s -> scannedToken posn ( ValueLiteral s ) }
+  \"$withinquotes* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
   $num+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
   "group by"  { \posn _ -> scannedToken posn (Word "group by") }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
@@ -51,7 +48,6 @@ tokens :-
   "or" { \posn _ -> scannedToken posn (Oper "or")}
   $name+ { \posn s -> scannedToken posn ( Word s ) }
   "<"|"<=" |">"|">="|"!="|"="|"!"   { \posn s -> scannedToken posn $ Oper s}
-
 
 
 ----------------------------- Representing tokens -----------------------------
@@ -77,9 +73,24 @@ data Token =
            | Dot
            | Comma
            | Oper String
-           deriving (Eq, Show)
+           deriving (Eq)
 
-{-| Smart constructor to create a 'ScannedToken' by extracting the line and
+instance Show Token where
+  show (Word s) = "(Word " ++ s ++ ")"
+  show (ValueLiteral s) = "( ValueLiteral " ++ s ++ ")"
+  show (NumberLiteral n) = "( NumberLitreal " ++ (show n) ++ ")"
+  show LCurly = "{"
+  show RCurly = "}"
+  show LBrack = "["
+  show RBrack = "]"
+  show LParen = "("
+  show RParen = ")"
+  show Dot = "."
+  show Comma = ","
+  show (Oper s) = "(Oper " ++ s ++")"
+
+
+{-  Smart constructor to create a 'ScannedToken' by extracting the line and
 column numbers from an 'AlexPosn'. -}
 scannedToken :: AlexPosn -> Token -> ScannedToken
 scannedToken (AlexPn _ lineNo columnNo) tok = ScannedToken lineNo columnNo tok

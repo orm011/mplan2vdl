@@ -292,15 +292,17 @@ data Rel = Node { relop :: String {- relational op like join -}
 parseError :: [ScannedToken] -> Either String a
 parseError [] = Left "unexpected EOF"
 parseError toks =
-  Left $ printf "line %d:%d: unexpected token%s '%s'."
+  Left $ printf "At %d:%d. unexpected token%s (at most %d shown): '%s'."
                 lineNo
                 columnNo
                 (if (not $ null $ tail toks) then "s" else "")
+                numToks
                 badTokenText
-  where firstBadToken = head toks
+  where numToks = 10
+        firstBadToken = head toks
         lineNo = Scanner.line firstBadToken
         columnNo = Scanner.column firstBadToken
-        badTokenText = concatMap (show . extractRawToken) toks
+        badTokenText = concatMap ((++ "  ") . show . extractRawToken) (take numToks toks)
 
 fromString :: String -> Either String Rel
 fromString str =
