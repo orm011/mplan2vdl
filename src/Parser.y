@@ -70,7 +70,8 @@ Tree
 | Node { $1 }
 
 Leaf
-: table '(' QualifiedName ')' '[' ExprListNE ']' COUNT
+: table '(' QualifiedName ')' '[' Expr ']' COUNT
+{- within the braces, we regard comma separated lists of expressions as an infix comma operator -}
   { Leaf { source=$3, columns=$6 }  }
 
 Node
@@ -85,9 +86,8 @@ NumberListNE
 | number ',' NumberListNE { $1 : $3 }
 
 BracketListNE
-: '[' ExprList ']' {  ($2 : []) :: [[(ScalarExpr, Maybe Name)]] }
-| '[' ExprList ']' BracketListNE  { $2  : $4 }
-
+: '[' Expr ']' {  ($2 : [])  }
+| '[' Expr ']' BracketListNE  { $2  : $4 }
 
 NodeListNE
 : Tree { $1 : [] }
@@ -100,59 +100,132 @@ QualifiedName
 Iden
 : identifier { $1 }
 
-ExprList
-: { [] }
-| ExprListNE { $1 }
+-- {- it is unclear we need this as well as the comma infix -}
+-- ExprList
+-- : { [] }
+--- | ExprListNE { $1 }
 
-ExprListNE
-: ExprBind { [$1] }
-| ExprBind ',' ExprListNE { $1 : $3 }
+-- ExprListNE
+-- : ExprBind { [$1] }
+--- | ExprBind ',' ExprListNE { $1 : $3 }
 
-ExprBind
-: Expr  { ($1, Nothing) }
-| Expr as QualifiedName { ($1, Just $3) }
+Expr {- top level definition -}
+: ExprBind { $1 }
 
-Expr
-: BasicExprWithAttr  { $1 }
-| BasicExprWithAttr infixop Expr
+ExprBind {- allows for the aliasing that happens sometimes -}
+: CommaExpr  { Expr { expr=$1, alias=Nothing } }
+| CommaExpr as QualifiedName { Expr { expr=$1, alias= Just $3 } }
+
+{- note to self on operator precedences:
+For the most part, parenthesis are explicit in the plans, except for commas:
+
+In the monet plan,  AND (in the where clause) becomes ',' and
+FILTER, IN and OR expressions are not parenthesized within it. (so they must bind more strongly than ',')
+
+If OR is forced to  be  main operator at the sql level, then the AND expressions
+get parenthesized and OR appears at the top level.
+
+Here are some examples:
+
+-- And (aka ',') is parenthesised in the plan on the RHS of the OR.
+sql>plan select r_name from region where region.r_regionkey  < 40 or region.r_regionkey < 100 and r_name like '%oston' and r_name in (1,2);
+project (
+| select (
+"| | table(sys.region) [ region.r_regionkey NOT NULL HASHCOL , region.r_name NOT NULL ] COUNT "
+"| ) [ (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""40""]) or (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""100""], char[region.r_name NOT NULL] FILTER like (char[char(6) ""%oston""], char """"), tinyint[region.r_name NOT NULL] as region.r_name in (tinyint ""1"", tinyint ""2"")) ]"
+) [ region.r_name NOT NULL ]
+
+
+-- notice how OR is not parenthesised in the plan.
+sql>plan select r_name from region where (region.r_regionkey  < 40 or region.r_regionkey < 100) and r_name like '%oston' and r_name in (1,2);
+
+project (
+| select (
+"| | table(sys.region) [ region.r_regionkey NOT NULL HASHCOL , region.r_name NOT NULL ] COUNT "
+"| ) [ (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""40""]) or (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""100""]), char[region.r_name NOT NULL] FILTER like (char[char(6) ""%oston""], char """"), tinyint[region.r_name NOT NULL] as region.r_name in (tinyint ""1"", tinyint ""2"") ]"
+) [ region.r_name NOT NULL ]
+
+other than comma, comparison operators sometimes come in non-parenthesised trees as well:
+
+sql>plan select (l_quantity < 100) as foo from lineitem where l_orderkey < l_partkey and l_partkey < l_suppkey;
+
+project (
+| select (
+"| | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_partkey NOT NULL, lineitem.l_suppkey NOT NULL, lineitem.l_quantity NOT NULL ] COUNT "
+| ) [ lineitem.l_orderkey NOT NULL HASHCOL  < lineitem.l_partkey NOT NULL < lineitem.l_suppkey NOT NULL ]
+") [ sys.<(lineitem.l_quantity NOT NULL, decimal(15,2)[tinyint ""100""]) as L.foo ]"
+
+-}
+
+{- comma is the weakest in the hierarchy. other operators take precedence for now (at least OR does,
+in reality)
+  The following makes comma be right-associative, which I assume is okay.
+-}
+
+CommaExpr
+: OtherInfixExpr { $1 }
+| OtherInfixExpr ',' CommaExpr { Infix  { infixop = ",", left = $1, right = $3 } }
+
+{- things like <, which show up as trees, or OR which do not fit within the BasicExpr list.
+note:
+Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3),
+but in practice OR always shows up with parens around its two arguments.
+-}
+OtherInfixExpr
+: BasicExpr  { $1 }
+| BasicExpr infixop OtherInfixExpr
   { Infix  { infixop = $2, left = $1, right = $3 } }
-| LikeExpr { $1 }
-| InExpr { $1 }
 
-LikeExpr
-: ExprBind '!' FILTER like '(' ExprBind ',' BasicExpr ')'
-  { Like { arg = $1, negated =  True, pattern = $6, escape = $8 } }
-| ExprBind FILTER like '(' ExprBind ',' BasicExpr ')'
-  { Like { arg = $1, negated = False, pattern = $5, escape = $7 } }
-
-InExpr
-: ExprBind in '(' ExprListNE ')' { In { arg = $1, negated = False, set = $4 } }
-| ExprBind notin '(' ExprListNE ')' { In { arg = $1, negated = True, set = $4 } }
-
-BasicExprWithAttr
-: BasicExpr AttrList { $1 {-ignore attrlist right now-} }
+{-attributes only seem to show up next to column refernces, and sometimes functions -}
+BasicExpr
+: BasicExprBare AttrList { $1 }
 
 AttrList
 : { [] }
 | Attr AttrList { $1 : $2 }
 
-Attr {- TODO: propagate them later. at least ASC should be for ordering
-to be correct -}
+Attr
+{- NOTNULL shows up after columns marked NOT NULL in the schena, and sometimes function calls like sys.sum() -}
 : NOTNULL { undefined }
+{- ASC shows up in 2nd bracket list of projects, after column references when ORDER BY is in the query
+Desc does not produce an explicit annotation.-}
 | ASC { undefined }
+{- HASHCOL shows up next to column references, those that are primary keys -}
 | HASHCOL { undefined }
-| JOINIDX QualifiedName { undefined } {- the name refers to a fk constrain in the schema -}
-| HASHIDX { undefined } {- sometimes using to refer to fk constraint -}
-| FETCH { undefined } {- used in join attributes -}
+{- JOINIDX the name refers to a fk constraint name (which looks like a column name) in the schema on the right -}
+| JOINIDX QualifiedName { undefined }
+{- HASHIDX shows up on table() operators. foreign key constraint name on the left-}
+| HASHIDX { undefined }
+{- shows up in some join bracket lists -}
+| FETCH { undefined }
 
-BasicExpr
+{- expression with no attributes yet.
+  Almost always used followed by attributes, so use BasicExpr instead of this.
+-}
+BasicExprBare
 : QualifiedName  { Ref $1 }
-| QualifiedName '(' ExprList ')'
+| QualifiedName '(' Expr ')'
   { Call { fname = $1, args = $3 } }
-| QualifiedName notnil '(' ExprList ')'
+| QualifiedName notnil '(' Expr ')'
   { Call { fname = $1, args = $4 } }
-| TypeSpec '[' ExprBind ']' { Cast { tspec=$1, arg=$3 } }
+| TypeSpec '[' Expr ']' { Cast { tspec=$1, arg=$3 } }
 | TypeSpec literal { Literal {tspec=$1, value=$2 } }
+| LikeExpr { $1 }
+| InExpr { $1 }
+| '(' Expr ')' { $2 }
+
+{- for now, only seen like after a char[] cast, which is a basic expression-}
+LikeExpr
+:  Expr FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
+  { Like { arg = $1, negated = False, pattern=$5 } }
+|  Expr '!' FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
+  { Like { arg = $1, negated =  True, pattern=$6} }
+
+{- for now, only seen IN after a column ref (with NOT NULL in it), and after
+some function call. the internal expr is a comma infix -}
+InExpr
+: Expr  in '(' Expr ')' { In { arg = $1, negated = False, set = $4 } }
+| Expr notin '(' Expr ')' { In { arg = $1, negated = True, set = $4 } }
 
 ----------------------------------- Haskell -----------------------------------
 {
@@ -176,31 +249,37 @@ with expressions (like NOT NULL seems to be)
                          -- , rnullable=Nullable
 -}
 
+data Expr = Expr { expr :: ScalarExpr, alias :: Maybe Name } deriving (Eq,Show)
+
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tspec :: TypeSpec
-                           , value::String }
-                   | Ref { rname :: Name }
-                   | Call { fname :: Name
-                          , args :: [(ScalarExpr, Maybe Name)] }
+                           , value::String
+                           }
+                   | Ref   { rname :: Name }
+                   | Call  { fname :: Name
+                           , args :: Expr
+                           }
                    | Cast  { tspec :: TypeSpec
-                           , arg :: (ScalarExpr, Maybe Name) }
+                           , arg :: Expr
+                           }
                    | Infix { infixop :: String
                            , left :: ScalarExpr
-                           , right :: ScalarExpr }
-                   | Like  { arg :: (ScalarExpr, Maybe Name)
+                           , right :: ScalarExpr
+                           }
+                   | Like  { arg :: Expr
                            , negated :: Bool
-                           , pattern :: (ScalarExpr, Maybe Name )
-                           , escape :: ScalarExpr {- really, should be a literal -}}
-                   | In    { arg :: (ScalarExpr, Maybe Name)
+                           , pattern :: Expr
+                           }
+                   | In    { arg :: Expr
                            , negated :: Bool
-                           , set :: [(ScalarExpr, Maybe Name)] {- name should probably be NOthing -}
+                           , set :: Expr  {- alias should probably be Nothing -}
                            }
                    deriving (Eq, Show)
 
 data Rel = Node { relop :: String {- relational op like join -}
                 , children :: [Rel]
-                , arg_lists :: [[(ScalarExpr, Maybe Name)]]  }
-           | Leaf { source :: Name, columns :: [(ScalarExpr, Maybe Name)] }
+                , arg_lists :: [Expr]  }
+           | Leaf { source :: Name, columns :: Expr }
              {-table scan -}
            deriving (Eq, Show)
 
