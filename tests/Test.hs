@@ -22,7 +22,7 @@ main = do base <- readFile "tests/monet_test_cases.txt"
 toTestCase :: (String, String) -> TestTree
 toTestCase (a, b)  =
   let zpd = zip [1..] (T.splitOn (T.pack "\n") (T.pack b))
-      numbered_plan = map (\(n, line) -> (show n) ++ " " ++ (T.unpack line)) zpd
+      numbered_plan = map (\(n, line) -> (show n) ++ (if n < 10 then " " else "") ++" " ++ (T.unpack line)) zpd
   in
     testCase ("------\n" ++  a ++ "\n\n" ++ (intercalate "\n" numbered_plan) ++"\n------\n") (let prs = fromString b in (isRight  prs)  @? groom prs)
 
