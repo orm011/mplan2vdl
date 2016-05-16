@@ -44,4 +44,4 @@ fi
 OPTS="-g --debug --info"
 set -x
 cabal $FLAG \
-      --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options=""
+      --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options="-g --info"
