@@ -70,7 +70,7 @@ Tree
 | Node { $1 }
 
 Leaf
-: table '(' QualifiedName ')' '[' Expr ']' COUNT
+: table '(' QualifiedName ')' '[' ExprListNE ']' COUNT
 {- within the braces, we regard comma separated lists of expressions as an infix comma operator -}
   { Leaf { source=$3, columns=$6 }  }
 
@@ -86,8 +86,8 @@ NumberListNE
 | number ',' NumberListNE { ($1 : $3) :: [Int] }
 
 BracketListNE
-: '[' Expr ']' {  ($2 : []) :: [Expr] }
-| '[' Expr ']' BracketListNE  { ($2  : $4) :: [Expr] }
+: '[' ExprList ']' {  ($2 : []) :: [[Expr]] }
+| '[' ExprList ']' BracketListNE  { ($2  : $4) :: [[Expr]] }
 
 NodeListNE
 : Tree { ( $1 : [] ) :: [Rel] }
@@ -100,21 +100,32 @@ QualifiedName
 Iden
 : identifier { $1  :: String }
 
--- {- it is unclear we need this as well as the comma infix -}
--- ExprList
--- : { [] }
---- | ExprListNE { $1 }
+{- we use this list only at the top level of nesting, for nested commas used as 'and' use ExprComma.
+Note that this list allows things like [foo as bar] and also empty list [] -}
+ExprList
+: { [] }
+| ExprListNE { $1 }
 
--- ExprListNE
--- : ExprBind { [$1] }
---- | ExprBind ',' ExprListNE { $1 : $3 }
+ExprListNE
+: Expr { [$1] }
+| Expr ',' ExprListNE { $1 : $3 }
 
-Expr {- top level definition -}
+
+{- comma is the weakest in the hierarchy. other operators take precedence for now (at least OR does,
+in reality)
+  The following makes comma be right-associative, which I assume is okay.. This expression only shows up nested ( a or (b and c))
+this only allows things like [a, b] but not [a as b]
+-}
+-- ExprComma
+-- : Expr { ($1 : [] ):: [ScalarExpr] }
+--- | Expr ',' ExprComma { ($1 : $3) :: [ScalarExpr] }
+
+Expr {- top level definition  -}
 : ExprBind { $1 :: Expr }
 
 ExprBind {- allows for the aliasing that happens sometimes -}
-: CommaExpr  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
-| CommaExpr as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
+: ExprNoComma  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
+| ExprNoComma  as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
 
 {- note to self on operator precedences:
 For the most part, parenthesis are explicit in the plans, except for commas:
@@ -157,23 +168,15 @@ project (
 
 -}
 
-{- comma is the weakest in the hierarchy. other operators take precedence for now (at least OR does,
-in reality)
-  The following makes comma be right-associative, which I assume is okay.
--}
-
-CommaExpr
-: OtherInfixExpr { $1 :: ScalarExpr }
-| OtherInfixExpr ',' CommaExpr { Infix  { infixop = ",", left = ($1 :: ScalarExpr), right = ($3 :: ScalarExpr) } }
 
 {- things like <, which show up as trees, or OR which do not fit within the BasicExpr list.
 note:
 Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3),
 but in practice OR always shows up with parens around its two arguments.
 -}
-OtherInfixExpr
+ExprNoComma
 : BasicExpr  { $1 :: ScalarExpr }
-| BasicExpr infixop OtherInfixExpr
+| BasicExpr infixop ExprNoComma
   { Infix  { infixop = $2, left = ($1 :: ScalarExpr), right = ($3 :: ScalarExpr) } }
 
 {-attributes only seem to show up next to column refernces, and sometimes functions -}
@@ -204,28 +207,28 @@ Desc does not produce an explicit annotation.-}
 -}
 BasicExprBare
 : QualifiedName  { Ref $1 }
-| QualifiedName '(' Expr ')'
+| QualifiedName '(' ExprList ')'
   { Call { fname = $1, args = $3 } }
-| QualifiedName notnil '(' Expr ')'
+| QualifiedName notnil '(' ExprList ')'
   { Call { fname = $1, args = $4 } }
 | TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
 | TypeSpec literal { Literal {tspec=$1, stringRep=$2 } }
 | LikeExpr { $1 }
 | InExpr { $1 }
-| '(' Expr ')' { Nested $2 }
+| '(' ExprListNE ')' { Nested $2 }
 
 {- for now, only seen like after a char[] cast, which is a basic expression-}
 LikeExpr
-:  BasicExpr FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
-  { Like { arg = $1, negated = False, pattern=$5 } }
-|  BasicExpr '!' FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
-  { Like { arg = $1, negated =  True, pattern=$6} }
+:  BasicExpr FILTER like '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
+  { Like { arg = $1, negated = False, pattern=$5, escape=$7 } }
+|  BasicExpr '!' FILTER like '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
+  { Like { arg = $1, negated =  True, pattern=$6, escape=$8 } }
 
 {- for now, only seen IN after a column ref (with NOT NULL in it), and after
 some function call. the internal expr is a comma infix -}
 InExpr
-: BasicExpr  in '(' Expr ')' { In { arg = $1, negated = False, set = $4 } }
-| BasicExpr notin '(' Expr ')' { In { arg = $1, negated = True, set = $4 } }
+: BasicExpr  in '(' ExprList ')' { In { arg = $1, negated = False, set = $4 } }
+| BasicExpr notin '(' ExprList ')' { In { arg = $1, negated = True, set = $4 } }
 
 ----------------------------------- Haskell -----------------------------------
 {
@@ -257,7 +260,7 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                            }
                    | Ref   { rname :: Name }
                    | Call  { fname :: Name
-                           , args :: Expr
+                           , args :: [Expr]
                            }
                    | Cast  { tspec :: TypeSpec
                            , value :: Expr
@@ -269,19 +272,20 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                    | Like  { arg :: ScalarExpr
                            , negated :: Bool
                            , pattern :: Expr
+                           , escape :: ScalarExpr
                            }
                    | In    { arg :: ScalarExpr
                            , negated :: Bool
-                           , set :: Expr  {- alias should probably be Nothing -}
+                           , set :: [Expr]  {- alias should probably be Nothing -}
                            }
-                   | Nested Expr {-its here just allow types to check without modifying the grammar -}
+                   | Nested [Expr] {-its here just allow types to check without modifying the grammar -}
 
                    deriving (Eq, Show)
 
 data Rel = Node { relop :: String {- relational op like join -}
                 , children :: [Rel]
-                , arg_lists :: [Expr]  }
-           | Leaf { source :: Name, columns :: Expr }
+                , arg_lists :: [[Expr]]  }
+           | Leaf { source :: Name, columns :: [Expr] }
              {-table scan -}
            deriving (Eq, Show)
 
