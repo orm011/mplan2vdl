@@ -209,23 +209,23 @@ BasicExprBare
 | QualifiedName notnil '(' Expr ')'
   { Call { fname = $1, args = $4 } }
 | TypeSpec '[' Expr ']' { Cast { tspec=$1, arg=$3 } }
-| TypeSpec literal { Literal {tspec=$1, value=$2 } }
+| TypeSpec literal { Literal {tspec=$1, stringRep=$2 } }
 | LikeExpr { $1 }
 | InExpr { $1 }
 | '(' Expr ')' { $2 }
 
 {- for now, only seen like after a char[] cast, which is a basic expression-}
 LikeExpr
-:  Expr FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
+:  BasicExpr FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
   { Like { arg = $1, negated = False, pattern=$5 } }
-|  Expr '!' FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
+|  BasicExpr '!' FILTER like '(' Expr ')' {- it should be a 2 elt list, last one being a literal -}
   { Like { arg = $1, negated =  True, pattern=$6} }
 
 {- for now, only seen IN after a column ref (with NOT NULL in it), and after
 some function call. the internal expr is a comma infix -}
 InExpr
-: Expr  in '(' Expr ')' { In { arg = $1, negated = False, set = $4 } }
-| Expr notin '(' Expr ')' { In { arg = $1, negated = True, set = $4 } }
+: BasicExpr  in '(' Expr ')' { In { arg = $1, negated = False, set = $4 } }
+| BasicExpr notin '(' Expr ')' { In { arg = $1, negated = True, set = $4 } }
 
 ----------------------------------- Haskell -----------------------------------
 {
@@ -253,24 +253,24 @@ data Expr = Expr { expr :: ScalarExpr, alias :: Maybe Name } deriving (Eq,Show)
 
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tspec :: TypeSpec
-                           , value::String
+                           , stringRep :: String
                            }
                    | Ref   { rname :: Name }
                    | Call  { fname :: Name
                            , args :: Expr
                            }
                    | Cast  { tspec :: TypeSpec
-                           , arg :: Expr
+                           , value :: Expr
                            }
                    | Infix { infixop :: String
                            , left :: ScalarExpr
                            , right :: ScalarExpr
                            }
-                   | Like  { arg :: Expr
+                   | Like  { arg :: ScalarExpr
                            , negated :: Bool
                            , pattern :: Expr
                            }
-                   | In    { arg :: Expr
+                   | In    { arg :: ScalarExpr
                            , negated :: Bool
                            , set :: Expr  {- alias should probably be Nothing -}
                            }
