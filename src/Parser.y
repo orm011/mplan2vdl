@@ -117,12 +117,17 @@ Expr
 | BasicExprWithAttr infixop Expr
   { Infix  { infixop = $2, left = $1, right = $3 } }
 | LikeExpr { $1 }
+| InExpr { $1 }
 
 LikeExpr
 : ExprBind '!' FILTER like '(' ExprBind ',' BasicExpr ')'
   { Like { arg = $1, negated =  True, pattern = $6, escape = $8 } }
 | ExprBind FILTER like '(' ExprBind ',' BasicExpr ')'
   { Like { arg = $1, negated = False, pattern = $5, escape = $7 } }
+
+InExpr
+: ExprBind in '(' ExprListNE ')' { In { arg = $1, negated = False, set = $4 } }
+| ExprBind notin '(' ExprListNE ')' { In { arg = $1, negated = True, set = $4 } }
 
 BasicExprWithAttr
 : BasicExpr AttrList { $1 {-ignore attrlist right now-} }
@@ -185,7 +190,10 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                    | Like  { arg :: (ScalarExpr, Maybe Name)
                            , negated :: Bool
                            , pattern :: (ScalarExpr, Maybe Name )
-                           , escape :: ScalarExpr {- really, should be a literal -}
+                           , escape :: ScalarExpr {- really, should be a literal -}}
+                   | In    { arg :: (ScalarExpr, Maybe Name)
+                           , negated :: Bool
+                           , set :: [(ScalarExpr, Maybe Name)] {- name should probably be NOthing -}
                            }
                    deriving (Eq, Show)
 
