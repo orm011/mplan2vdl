@@ -25,9 +25,9 @@ module Scanner ( ScannedToken(..)
 
 $alpha = [a-zA-Z]
 $num = [0-9]
-
-$alnum = [$alpha $num]
-$name = [$alnum \_ \%]
+$rel = [\<\>\=\!]
+$alnumrel = [$alpha $num $rel]
+$name = [$alnumrel \_  \% ] -- bc sys.>= and sys.=, sys.%pk, sys.l_lineitem are all names
 $withinquotes = [$name \-\ \#]
 
 tokens :-
@@ -45,9 +45,8 @@ tokens :-
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
   "top N"   { \posn _ -> scannedToken posn (Word "top N") }
   "left outer join" { \posn _ -> scannedToken posn (Word "left outer join") }
-  "or" { \posn _ -> scannedToken posn (Oper "or")}
+  "!=" { \posn _ -> scannedToken posn (Word "!=") } -- must do this before !
   $name+ { \posn s -> scannedToken posn ( Word s ) }
-  "<"|"<=" |">"|">="|"!="|"="|"!"   { \posn s -> scannedToken posn $ Oper s}
 
 
 ----------------------------- Representing tokens -----------------------------
@@ -72,13 +71,12 @@ data Token =
            | RParen
            | Dot
            | Comma
-           | Oper String
            deriving (Eq)
 
 instance Show Token where
-  show (Word s) = "(Word " ++ s ++ ")"
-  show (ValueLiteral s) = "( ValueLiteral " ++ s ++ ")"
-  show (NumberLiteral n) = "( NumberLitreal " ++ (show n) ++ ")"
+  show (Word s) = "Word " ++ s ++ ""
+  show (ValueLiteral s) = "ValueLiteral " ++ s
+  show (NumberLiteral n) = "NumberLiteral " ++ (show n)
   show LCurly = "{"
   show RCurly = "}"
   show LBrack = "["
@@ -87,7 +85,6 @@ instance Show Token where
   show RParen = ")"
   show Dot = "."
   show Comma = ","
-  show (Oper s) = "(Oper " ++ s ++")"
 
 
 {-  Smart constructor to create a 'ScannedToken' by extracting the line and

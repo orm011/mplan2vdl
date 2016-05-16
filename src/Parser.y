@@ -36,9 +36,8 @@ import Scanner (ScannedToken(..), Token(..), scan)
   ')'        { ScannedToken _ _ RParen }
   ','        { ScannedToken _ _ Comma }
   '.'        { ScannedToken _ _ Dot }
-  '!'        { ScannedToken _ _ ( Oper "!" ) }
+  '!'        { ScannedToken _ _ ( Word "!" ) }
   literal    { ScannedToken _ _ ( ValueLiteral $$) }
-  infixop    { ScannedToken _ _ ( Oper $$ ) }
   number     { ScannedToken _ _ ( NumberLiteral $$) }
 
   {- as long as the queries dont use these words within the columns names
@@ -175,7 +174,7 @@ but in practice OR always shows up with parens around its two arguments.
 -}
 ExprNoComma
 : BasicExpr  { $1 :: ScalarExpr }
-| BasicExpr infixop ExprNoComma
+| BasicExpr identifier ExprNoComma
   { Infix  { infixop = $2, left = ($1 :: ScalarExpr), right = ($3 :: ScalarExpr) } }
 
 {-attributes only seem to show up next to column refernces, and sometimes functions -}
