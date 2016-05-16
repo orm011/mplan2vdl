@@ -28,7 +28,7 @@ $num = [0-9]
 
 $alnum = [$alpha $num]
 $name = [$alnum \_ \%]
-$withinquotes = [$name \-]
+$withinquotes = [$name \-\ \#]
 
 $esc = [\\ \" \' n t]
 $ord = [^ \" \\ \n \t \' \xC]
@@ -45,12 +45,11 @@ tokens :-
   $num+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
   "group by"  { \posn _ -> scannedToken posn (Word "group by") }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
-  "ASC"  { \posn _ -> scannedToken posn (Word "ASC") }
-  "HASHCOL"  { \posn _ -> scannedToken posn (Word "HASHCOL") }
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
   "top N"  { \posn _ -> scannedToken posn (Word "top N") }
   $name+ { \posn s -> scannedToken posn ( Word s ) }
-  "<"|"<=" |">"|">="|"!="|"="   { \posn s -> scannedToken posn $ InfixOp s}
+  "<"|"<=" |">"|">="|"!="|"="|"!"   { \posn s -> scannedToken posn $ Oper s}
+
 
 
 ----------------------------- Representing tokens -----------------------------
@@ -75,7 +74,7 @@ data Token =
            | RParen
            | Dot
            | Comma
-           | InfixOp String
+           | Oper String
            deriving (Eq, Show)
 
 {-| Smart constructor to create a 'ScannedToken' by extracting the line and

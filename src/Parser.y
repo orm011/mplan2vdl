@@ -36,8 +36,9 @@ import Scanner (ScannedToken(..), Token(..), scan)
   ')'        { ScannedToken _ _ RParen }
   ','        { ScannedToken _ _ Comma }
   '.'        { ScannedToken _ _ Dot }
+  '!'        { ScannedToken _ _ ( Oper "!" ) }
   literal    { ScannedToken _ _ ( ValueLiteral $$) }
-  infixop    { ScannedToken _ _ ( InfixOp $$ ) }
+  infixop    { ScannedToken _ _ ( Oper $$ ) }
   number     { ScannedToken _ _ ( NumberLiteral $$) }
 
   {- as long as the queries dont use these words within the columns names
@@ -45,7 +46,14 @@ or within table names, this should work alright -}
   COUNT      { ScannedToken _ _ ( Word "COUNT") }
   NOTNULL    { ScannedToken _ _ ( Word "NOT NULL") }
   HASHCOL    { ScannedToken _ _ ( Word "HASHCOL") }
+  JOINIDX    { ScannedToken _ _ ( Word "JOINIDX") }
+  HASHIDX    { ScannedToken _ _ ( Word "HASHIDX") }
+  FETCH      { ScannedToken _ _ ( Word "FETCH")  }
   ASC        { ScannedToken _ _ ( Word "ASC") }
+  FILTER     { ScannedToken _ _ ( Word "FILTER") }
+  like       { ScannedToken _ _ ( Word "like") }
+  in         { ScannedToken _ _ ( Word "in") }
+  notin      { ScannedToken _ _ ( Word "notin") }
   notnil     { ScannedToken _ _ ( Word "no nil") }
   table      { ScannedToken _ _ ( Word "table") }
   as         { ScannedToken _ _ ( Word "as") }
@@ -108,6 +116,13 @@ Expr
 : BasicExprWithAttr  { $1 }
 | BasicExprWithAttr infixop Expr
   { Infix  { infixop = $2, left = $1, right = $3 } }
+| LikeExpr { $1 }
+
+LikeExpr
+: ExprBind '!' FILTER like '(' ExprBind ',' BasicExpr ')'
+  { Like { arg = $1, negated =  True, pattern = $6, escape = $8 } }
+| ExprBind FILTER like '(' ExprBind ',' BasicExpr ')'
+  { Like { arg = $1, negated = False, pattern = $5, escape = $7 } }
 
 BasicExprWithAttr
 : BasicExpr AttrList { $1 {-ignore attrlist right now-} }
@@ -116,10 +131,14 @@ AttrList
 : { [] }
 | Attr AttrList { $1 : $2 }
 
-Attr {- propagate them later. at least ASC should be. -}
+Attr {- TODO: propagate them later. at least ASC should be for ordering
+to be correct -}
 : NOTNULL { undefined }
 | ASC { undefined }
 | HASHCOL { undefined }
+| JOINIDX QualifiedName { undefined } {- the name refers to a fk constrain in the schema -}
+| HASHIDX { undefined } {- sometimes using to refer to fk constraint -}
+| FETCH { undefined } {- used in join attributes -}
 
 BasicExpr
 : QualifiedName  { Ref $1 }
@@ -127,7 +146,7 @@ BasicExpr
   { Call { fname = $1, args = $3 } }
 | QualifiedName notnil '(' ExprList ')'
   { Call { fname = $1, args = $4 } }
-| TypeSpec '[' BasicExprWithAttr ']' { Cast { tspec=$1, arg=$3 } }
+| TypeSpec '[' ExprBind ']' { Cast { tspec=$1, arg=$3 } }
 | TypeSpec literal { Literal {tspec=$1, value=$2 } }
 
 ----------------------------------- Haskell -----------------------------------
@@ -159,11 +178,16 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                    | Call { fname :: Name
                           , args :: [(ScalarExpr, Maybe Name)] }
                    | Cast  { tspec :: TypeSpec
-                           , arg :: ScalarExpr }
+                           , arg :: (ScalarExpr, Maybe Name) }
                    | Infix { infixop :: String
                            , left :: ScalarExpr
                            , right :: ScalarExpr }
-                     deriving (Eq, Show)
+                   | Like  { arg :: (ScalarExpr, Maybe Name)
+                           , negated :: Bool
+                           , pattern :: (ScalarExpr, Maybe Name )
+                           , escape :: ScalarExpr {- really, should be a literal -}
+                           }
+                   deriving (Eq, Show)
 
 data Rel = Node { relop :: String {- relational op like join -}
                 , children :: [Rel]
