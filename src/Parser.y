@@ -163,8 +163,8 @@ in reality)
 -}
 
 CommaExpr
-: OtherInfixExpr { $1 }
-| OtherInfixExpr ',' CommaExpr { Infix  { infixop = ",", left = $1, right = $3 } }
+: OtherInfixExpr { $1 :: ScalarExpr }
+| OtherInfixExpr ',' CommaExpr { Infix  { infixop = ",", left = ($1 :: ScalarExpr), right = ($3 :: ScalarExpr) } }
 
 {- things like <, which show up as trees, or OR which do not fit within the BasicExpr list.
 note:
@@ -172,13 +172,13 @@ Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 
 but in practice OR always shows up with parens around its two arguments.
 -}
 OtherInfixExpr
-: BasicExpr  { $1 }
+: BasicExpr  { $1 :: ScalarExpr }
 | BasicExpr infixop OtherInfixExpr
-  { Infix  { infixop = $2, left = $1, right = $3 } }
+  { Infix  { infixop = $2, left = ($1 :: ScalarExpr), right = ($3 :: ScalarExpr) } }
 
 {-attributes only seem to show up next to column refernces, and sometimes functions -}
 BasicExpr
-: BasicExprBare AttrList { $1 }
+: BasicExprBare AttrList { $1 :: ScalarExpr }
 
 AttrList
 : { [] }
@@ -208,11 +208,11 @@ BasicExprBare
   { Call { fname = $1, args = $3 } }
 | QualifiedName notnil '(' Expr ')'
   { Call { fname = $1, args = $4 } }
-| TypeSpec '[' Expr ']' { Cast { tspec=$1, arg=$3 } }
+| TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
 | TypeSpec literal { Literal {tspec=$1, stringRep=$2 } }
 | LikeExpr { $1 }
 | InExpr { $1 }
-| '(' Expr ')' { $2 }
+| '(' Expr ')' { Nested $2 }
 
 {- for now, only seen like after a char[] cast, which is a basic expression-}
 LikeExpr
@@ -274,6 +274,8 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                            , negated :: Bool
                            , set :: Expr  {- alias should probably be Nothing -}
                            }
+                   | Nested Expr {-its here just allow types to check without modifying the grammar -}
+
                    deriving (Eq, Show)
 
 data Rel = Node { relop :: String {- relational op like join -}
