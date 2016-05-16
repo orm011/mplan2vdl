@@ -4,7 +4,7 @@ import Test.Tasty.QuickCheck as QC -}
 import Test.Tasty.HUnit
 import Parser(parse, fromString)
 import Scanner(scan)
-import Data.Either(isRight,partitionEithers)
+import Data.Either(isRight,partitionEithers, rights)
 import qualified Data.Text as T
 import Configuration(defaultConfiguration)
 import Text.Groom
@@ -24,7 +24,8 @@ toTestCase (a, b)  =
   let zpd = zip [1..] (T.splitOn (T.pack "\n") (T.pack b))
       numbered_plan = map (\(n, line) -> (show n) ++ (if n < 10 then " " else "") ++" " ++ (T.unpack line)) zpd
   in
-    testCase ("------\n" ++  a ++ "\n\n" ++ (intercalate "\n" numbered_plan) ++"\n------\n") (let prs = fromString b in (isRight  prs)  @? groom prs)
+    let prs = fromString b in
+    testCase ("------\n" ++  a ++ "\n\n" ++ (intercalate "\n" numbered_plan) ++"\n------\n" ++ (groom prs) ++ "\n\n") $ (isRight prs) @? (groom prs)
 
 get_test_cases :: String  -> [TestTree]
 get_test_cases s = {- the first element after split is a "", because we start with a plan, so must do tail -}
