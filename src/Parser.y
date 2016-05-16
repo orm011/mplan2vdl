@@ -51,7 +51,6 @@ or within table names, this should work alright -}
   FETCH      { ScannedToken _ _ ( Word "FETCH")  }
   ASC        { ScannedToken _ _ ( Word "ASC") }
   FILTER     { ScannedToken _ _ ( Word "FILTER") }
-  like       { ScannedToken _ _ ( Word "like") }
   in         { ScannedToken _ _ ( Word "in") }
   notin      { ScannedToken _ _ ( Word "notin") }
   notnil     { ScannedToken _ _ ( Word "no nil") }
@@ -213,16 +212,18 @@ BasicExprBare
   { Call { fname = $1, args = $4 } }
 | TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
 | TypeSpec literal { Literal {tspec=$1, stringRep=$2 } }
-| LikeExpr { $1 }
+| FilterExpr { $1 }
 | InExpr { $1 }
 | '(' ExprListNE ')' { Nested $2 }
 
-{- for now, only seen like after a char[] cast, which is a basic expression-}
-LikeExpr
-:  BasicExpr FILTER like '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
-  { Like { arg = $1, negated = False, pattern=$5, escape=$7 } }
-|  BasicExpr '!' FILTER like '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
-  { Like { arg = $1, negated =  True, pattern=$6, escape=$8 } }
+{- for now, only seen like after a char[] cast, which is a basic expression.
+ note that like is also used in sys.like, so treating it specially breaks things
+-}
+FilterExpr
+:  BasicExpr FILTER identifier '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
+  { Filter { arg = $1, oper=$3, negated = False, pattern=$5, escape=$7 } }
+|  BasicExpr '!' FILTER identifier '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
+  { Filter { arg = $1, oper = $4, negated = True, pattern=$6, escape=$8 } }
 
 {- for now, only seen IN after a column ref (with NOT NULL in it), and after
 some function call. the internal expr is a comma infix -}
@@ -269,7 +270,8 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                            , left :: ScalarExpr
                            , right :: ScalarExpr
                            }
-                   | Like  { arg :: ScalarExpr
+                   | Filter{ arg :: ScalarExpr
+                           , oper :: String {-eg like, or ilike or iregex -}
                            , negated :: Bool
                            , pattern :: Expr
                            , escape :: ScalarExpr
