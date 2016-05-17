@@ -22,7 +22,7 @@ library
                      , Scanner
                      , Configuration
                      , Configuration.Types
-                     , MPlan
+                     , Mplan
                      , Vlite
   other-modules:       CLI
   build-depends:       base >= 4.7 && <5

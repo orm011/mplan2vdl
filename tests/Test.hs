@@ -10,7 +10,7 @@ import Configuration(defaultConfiguration)
 import Text.Groom
 import Debug.Trace
 import Data.List(intercalate)
-import qualified MPlan as M
+import qualified Mplan as M
 
 main :: IO ()
 main = do base <- readFile "tests/ad_hoc_tests.txt"
@@ -22,7 +22,7 @@ main = do base <- readFile "tests/ad_hoc_tests.txt"
            , testGroup "TPCHParseTests" (makeParseTestTree tpch)
              {- checks only parses ok -}
            , testGroup "DetailedParseTests" (makeParseTestTree detailed)
-           , testGroup "MPlanTests" (makeMplanTestTree detailed)
+           , testGroup "MplanTests" (makeMplanTestTree detailed)
              {- tests successful conversion to mplan  -}
             ]
 
@@ -58,7 +58,7 @@ toMplanTestCase :: (String, String) -> TestTree
 toMplanTestCase (a, b) =
   let plainName  = makeTestName a b
       mplan = M.fromString b
-      detailedName = "MPlan: " ++ plainName ++ groom mplan ++ "\n\n"
+      detailedName = "Mplan: " ++ plainName ++ groom mplan ++ "\n\n"
       in testCase detailedName $ (isRight mplan) @? (groom mplan)
 
 makeMplanTestTree :: String -> [TestTree]

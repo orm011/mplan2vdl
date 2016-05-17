@@ -1,8 +1,8 @@
-module Vlite( fromMPlan
+module Vlite( fromMplan
             , fromPlanString) where
 
-import qualified MPlan as Mp
-import MPlan(BinaryOp, Name)
+import qualified Mplan as Mp
+import Mplan(BinaryOp, Name)
 
 data ShOp = Gather | OpScatter
   deriving (Eq, Show)
@@ -32,8 +32,8 @@ pos_ = Range { rmin = 0, rstep = 1 }
 ones_ = const_ 1
 zeros_ = const_ 0
 
-fromMPlan :: Mp.RelExpr -> Either String [Vexp]
-fromMPlan _ = Left "not implemented"
+fromMplan :: Mp.RelExpr -> Either String [Vexp]
+fromMplan _ = Left "not implemented"
 
 fromPlanString :: String -> Either String [Vexp]
-fromPlanString mplanstring = Mp.fromString mplanstring >>= fromMPlan
+fromPlanString mplanstring = Mp.fromString mplanstring >>= fromMplan

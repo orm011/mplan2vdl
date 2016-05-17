@@ -1,4 +1,4 @@
-module MPlan( fromParseTree
+module Mplan( fromParseTree
             , fromString
             , Name
             , BinaryOp
