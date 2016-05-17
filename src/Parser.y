@@ -1,3 +1,4 @@
+-- -*- haskell -*-
 {
 module Parser ( parse,
                 fromString

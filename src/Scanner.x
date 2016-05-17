@@ -1,3 +1,4 @@
+-- -*- haskell -*-
 {
 {-# OPTIONS_GHC -w #-}
 module Scanner ( ScannedToken(..)
