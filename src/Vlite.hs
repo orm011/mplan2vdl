@@ -56,15 +56,11 @@ solve  M.Table { M.tablename, M.tablecolumns } =
 
 {- not dealing with ordered queries right now -}
 solve M.Project { M.child, M.projectout, M.order = [] } =
-  let menv = solve child in
-  case menv of
-    Left s -> Left s
-    Right env
-      -> let (exprs, maliases) = unzip projectout
-             msolved = sequence $ map (fromScalar env) exprs
-         in case msolved of
-             Left s -> Left s
-             Right vexprs -> Right $ foldl processBinding env (zip vexprs maliases)
+  let (exprs, maliases) = unzip projectout
+  in do env <- solve child
+        vexprs <- sequence $ map (fromScalar env) exprs
+        return $ foldl processBinding env (zip vexprs maliases)
+        
 
 solve _ = Left "this relational operator is not supported yet"
 
