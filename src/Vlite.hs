@@ -38,41 +38,69 @@ pos_ = Range { rmin = 0, rstep = 1 }
 ones_ = const_ 1
 zeros_ = const_ 0
 
-fromMplan :: M.RelExpr -> Either String (Map Name Vexp)
+fromMplan :: M.RelExpr -> Either String [(Vexp, Maybe Name)]
 fromMplan = solve
 
-solve  :: M.RelExpr -> Either String (Map Name Vexp)
+{- helper function that makes a lookup table from the output of a previous
+operator. the lookup table loses information about the anonymous outputs
+of the operator, so it only makes sense to use this in internal nodes
+whose vectors will be consumed by other operators, but not on the
+top level operator, which may return anonymous columns which we will need to
+keep around -}
+solve' :: M.RelExpr -> Either String (Map Name Vexp)
+solve' relexp  = solve relexp >>= (return . makeEnv)
+  where makeEnv lst = foldl maybeadd Map.empty lst
+        maybeadd env (_, Nothing) = env
+        maybeadd env (vexp, Just newalias) = Map.insert newalias vexp env
 
+{- gets vexprs for the output columns of an operator, anonymous or not.
+special case, because if the columns are not aliased, we can use their
+original names.
+
+note: not especially dealing with % names right now
+todo: using the table schema we can resolve % names before
+      they get to the final voodoo
+-}
+solve :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 solve  M.Table { M.tablename, M.tablecolumns } =
-  let addElt m (orig, malias)  =
-         {- note: not especially dealing with % names right now -}
-         {- todo: using the table schema we can resolve % names before
-             they get to the final voodoo -}
-        let export = case malias of
-                       Nothing -> orig {-exports the same name-}
-                       Just alias -> alias
-        in Map.insert export (External orig) m
-   in Right $ foldl addElt Map.empty tablecolumns
+  Right $ map deduceName tablecolumns
+  where deduceName (orig, Nothing) = (External orig, Just orig)
+        deduceName (orig, Just x) = (External orig, Just x)
 
-{- not dealing with ordered queries right now -}
+{- not dealing with ordered queries right now
+note. project affects the name scope in the following ways
+
+There are four cases illustrated below:
+project (...) [ foo, bar as bar2, sum(bar, baz) as sumbaz, sum(bar, bar) ]
+
+For the consumer to be able to see all relevant columns, we need
+to solve the cases like this:
+
+1) despite not having an 'as' keyword, foo should produce
+(Vexprfoo, Just foo)
+2) for bar, the alias is explicit:
+(Vexprbar, Just bar2)
+3) for sum(bar, baz), the alias is also explicit. this is the same
+as case 2 actually. (Vexpr sum(bar, baz), sum2)
+4) sum(bar, bar) could not be referred to in a consumer query,
+but could be the topmost result, so we must return it as well.
+as (vexpr .., Nothing)
+-}
 solve M.Project { M.child, M.projectout, M.order = [] } =
-  let (exprs, maliases) = unzip projectout
-  in do env <- solve child
-        vexprs <- sequence $ map (fromScalar env) exprs
-        return $ foldl processBinding env (zip vexprs maliases)
-        
+  do env <- solve' child
+     vexprs <- sequence $ map (fromScalar env) exprs
+     let originalnames = map maybeGetName exprs
+     let finalnames = map solveName $ zip originalnames finalnames
+     return $ (zip vexprs finalnames)
+  where maybeGetName (M.Ref orig) = Just orig
+        maybeGetName _ = Nothing
+        solveName (_, Just alias) = Just alias
+        solveName (Just some, Nothing) = Just some
+        solveName _ = Nothing
+        (exprs, maliases) = unzip projectout
+
 
 solve _ = Left "this relational operator is not supported yet"
-
-{- updates the env with a new binding -}
-processBinding :: Map Name Vexp -> (Vexp, Maybe Name)  -> Map Name Vexp
-{- case nothing: for anything other than the Table operator,
-the name must already exist in the env, or otherwise the result won't be used again
-within the expression (eg top-level project operators leave comples outputs anonymous sometimes)
-TODO: could check, if the vexp is an External, that this binding exists in the scope -}
-processBinding env (_, Nothing) = env
-processBinding env (vexp, Just newalias) = Map.insert newalias vexp env
-
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
@@ -87,5 +115,5 @@ sc env (M.Ref refname)  =
 
 sc _ _ = Left "this scalar expr is not supported yet"
 
-fromPlanString :: String -> Either String (Map Name Vexp)
+fromPlanString :: String -> Either String [(Vexp, Maybe Name)]
 fromPlanString mplanstring = M.fromString mplanstring >>= fromMplan
