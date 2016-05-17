@@ -1,4 +1,4 @@
-module Process with
+module MPlan with
 import Parser (fromString)
 
 {- stronger types for each kind of operation -}
