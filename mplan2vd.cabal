@@ -17,7 +17,13 @@ cabal-version:       >=1.20
 
 library
   ghc-options:         -Wall -O2
-  exposed-modules:     MainFuns,Parser,Scanner,Configuration,Configuration.Types,MPlan
+  exposed-modules:     MainFuns
+                     , Parser
+                     , Scanner
+                     , Configuration
+                     , Configuration.Types
+                     , MPlan
+                     , Vlite
   other-modules:       CLI
   build-depends:       base >= 4.7 && <5
                      , MissingH==1.3.0.*

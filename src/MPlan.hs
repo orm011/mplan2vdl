@@ -1,9 +1,11 @@
-module MPlan(fromParseTree, fromString) where
-
+module MPlan( fromParseTree
+            , fromString
+            , Name
+            , BinaryOp
+            , RelExpr) where
 
 import qualified Parser as P
-
-type Name = P.Name {- use the same qualified name type -}
+import Parser(Name)
 
 data OrderSpec = Asc | Desc deriving (Eq,Show)
 
@@ -61,3 +63,5 @@ fromParseTree _ = Left " not implemented "
 
 fromString :: String -> Either String RelExpr
 fromString s = P.fromString s >>= fromParseTree
+
+
