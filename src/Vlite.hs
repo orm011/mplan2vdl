@@ -46,26 +46,40 @@ solve  :: M.RelExpr -> Either String (Map Name Vexp)
 solve  M.Table { M.tablename, M.tablecolumns } =
   let addElt m (orig, malias)  =
          {- note: not especially dealing with % names right now -}
+         {- todo: using the table schema we can resolve % names before
+             they get to the final voodoo -}
         let export = case malias of
                        Nothing -> orig {-exports the same name-}
                        Just alias -> alias
         in Map.insert export (External orig) m
    in Right $ foldl addElt Map.empty tablecolumns
 
-{- not dealing with orderd queries right now -}
+{- not dealing with ordered queries right now -}
 solve M.Project { M.child, M.projectout, M.order = [] } =
-  Left "todo"
-  -- let prev = helper child
-  --   in
+  let menv = solve child in
+  case menv of
+    Left s -> Left s
+    Right env
+      -> let (exprs, maliases) = unzip projectout
+             msolved = sequence $ map (fromScalar env) exprs
+         in case msolved of
+             Left s -> Left s
+             Right vexprs -> Right $ foldl processBinding env (zip vexprs maliases)
 
 solve _ = Left "this relational operator is not supported yet"
 
-{-
-takes a single scalar expression, and a set of existing bindings (name, vexp)
-bindings and computes a Vexp for the input expression, possibly
-in terms of expressions already in the context
--}
+{- updates the env with a new binding -}
+processBinding :: Map Name Vexp -> (Vexp, Maybe Name)  -> Map Name Vexp
+{- case nothing: for anything other than the Table operator,
+the name must already exist in the env, or otherwise the result won't be used again
+within the expression (eg top-level project operators leave comples outputs anonymous sometimes)
+TODO: could check, if the vexp is an External, that this binding exists in the scope -}
+processBinding env (_, Nothing) = env
+processBinding env (vexp, Just newalias) = Map.insert newalias vexp env
 
+
+{- makes a vector from a scalar expression, given a context with existing
+defintiions -}
 fromScalar ::  Map Name Vexp -> M.ScalarExpr  -> Either String Vexp
 fromScalar = sc
 
