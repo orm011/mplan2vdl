@@ -82,3 +82,18 @@ project (
 | | ) [  ]
 | ) [ (n1.n_name NOT NULL = char(25)[char(6) "FRANCE"], n2.n_name NOT NULL = char(25)[char(7) "GERMANY"]) or (n1.n_name NOT NULL = char(25)[char(7) "GERMANY"], n2.n_name NOT NULL = char(25)[char(6) "FRANCE"]) ]
 ) [ n1.n_nationkey NOT NULL HASHCOL  ]
+
+--TEST-- (notice the column naming) plan select l_partkey from lineitem union select l_orderkey from lineitem;
+
+distinct union (
+| group by (
+| | project (
+| | | table(sys.lineitem) [ lineitem.l_partkey NOT NULL ] COUNT 
+| | ) [ lineitem.l_partkey NOT NULL ]
+| ) [ lineitem.l_partkey NOT NULL ] [ lineitem.l_partkey NOT NULL ],
+| group by (
+| | project (
+| | | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL  ] COUNT 
+| | ) [ lineitem.l_orderkey NOT NULL HASHCOL  ]
+| ) [ lineitem.l_orderkey NOT NULL HASHCOL  ] [ lineitem.l_orderkey NOT NULL HASHCOL  ]
+) [ lineitem.l_partkey NOT NULL as L.l_partkey ]

@@ -35,6 +35,7 @@ tokens :-
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
   "top N"   { \posn _ -> scannedToken posn (Word "top N") }
   "left outer join" { \posn _ -> scannedToken posn (Word "left outer join") }
+  "distinct union"  { \posn _ -> scannedToken posn (Word "distinct union") }
   "!=" { \posn _ -> scannedToken posn (Word "!=") } -- must do this before !
   $name+ { \posn s -> scannedToken posn ( Word s ) }
 
