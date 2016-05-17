@@ -136,9 +136,13 @@ note:
 Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3)), but in practice OR always shows up with parens around its two arguments.
 -}
 ExprNoComma
-: BasicExpr  { $1 :: ScalarExpr }
-| BasicExpr identifier ExprNoComma
-  { Infix  { infixop = $2, left = ($1 :: ScalarExpr), right = ($3 :: ScalarExpr) } }
+: ExprBind  { $1 :: Expr }
+| ExprBind identifier ExprNoComma
+  { Expr { expr=Infix  { infixop = $2, left = ($1 :: Expr), right = ($3 :: Expr) }, alias=Nothing } }
+
+ExprBind {- allows for the aliasing that happens sometimes -}
+: BasicExpr  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
+| BasicExpr  as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
 
 {-attributes only seem to show up next to column refernces, and sometimes functions -}
 BasicExpr
@@ -182,16 +186,16 @@ BasicExprBare
  note that like is also used in sys.like, so treating it specially breaks things
 -}
 FilterExpr
-:  BasicExpr FILTER identifier '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
+:  ExprBind FILTER identifier '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
   { Filter { arg = $1, oper=$3, negated = False, pattern=$5, escape=$7 } }
-|  BasicExpr '!' FILTER identifier '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
+|  ExprBind '!' FILTER identifier '(' Expr ',' BasicExprBare ')' {- it should be a 2 elt list, last one being a literal -}
   { Filter { arg = $1, oper = $4, negated = True, pattern=$6, escape=$8 } }
 
 {- for now, only seen IN after a column ref (with NOT NULL in it), and after
 some function call. the internal expr is a comma infix -}
 InExpr
-: BasicExpr  in '(' ExprList ')' { In { arg = $1, negated = False, set = $4 } }
-| BasicExpr notin '(' ExprList ')' { In { arg = $1, negated = True, set = $4 } }
+: ExprBind in '(' ExprList ')' { In { arg = $1, negated = False, set = $4 } }
+| ExprBind notin '(' ExprList ')' { In { arg = $1, negated = True, set = $4 } }
 
 ----------------------------------- Haskell -----------------------------------
 {
@@ -229,16 +233,16 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                            , value :: Expr
                            }
                    | Infix { infixop :: String
-                           , left :: ScalarExpr
-                           , right :: ScalarExpr
+                           , left :: Expr
+                           , right :: Expr
                            }
-                   | Filter{ arg :: ScalarExpr
+                   | Filter{ arg :: Expr
                            , oper :: String {-eg like, or ilike or iregex -}
                            , negated :: Bool
                            , pattern :: Expr
                            , escape :: ScalarExpr
                            }
-                   | In    { arg :: ScalarExpr
+                   | In    { arg :: Expr
                            , negated :: Bool
                            , set :: [Expr]  {- alias should probably be Nothing -}
                            }
