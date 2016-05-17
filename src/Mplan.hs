@@ -2,7 +2,8 @@ module Mplan( fromParseTree
             , fromString
             , Name
             , BinaryOp
-            , RelExpr) where
+            , RelExpr(..)
+            , ScalarExpr(..)) where
 
 import qualified Parser as P
 import Parser(Name)
@@ -18,27 +19,30 @@ data BinaryOp =
 
 data ScalarExpr =
   {- a Ref can be a column or a previously bound name for an intermediate -}
-  Ref  { refname :: Name }
+  Ref Name
   | Lit { littype :: String,  litvalue :: String }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   deriving (Eq, Show)
 
 data RelExpr =
-  {- Table invariants:
+  {- Table invariants /checks:
      -tablecolumns must not be empty.
+     -table columns may themselves be aliased within table.
+     -some of the names involve using schema (not for now)
+      for concrete resolution to things like partsupp.%partsupp_fk1
   -}
   Table { tablename :: Name,  tablecolumns :: [(Name, Maybe Name)]  }
-  {- Select invariants:
-     -single child node
-     -predicate is a single scalar expression
-  -}
-  | Select { child :: RelExpr, selectpredicate :: ScalarExpr  }
-  {- Project invariants
+   {- Project invariants
       - single child node
       - multiple output columns with potential aliasing (non empty)
       - potentially empty order columns. no aliasing there. (what relation do they have with output ones?)
   -}
-  | Project { child :: RelExpr, projectout :: [(Name, Maybe Name)], order ::[(Name, OrderSpec)] }
+  | Project { child :: RelExpr, projectout :: [(ScalarExpr, Maybe Name)], order ::[(Name, OrderSpec)] }
+    {- Select invariants:
+     -single child node
+     -predicate is a single scalar expression
+  -}
+  | Select { child :: RelExpr, selectpredicate :: ScalarExpr  }
   {- Group invariants:
      - single child node
      - multiple output value columns with potential expressions (non-empty)
