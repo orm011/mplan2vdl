@@ -58,7 +58,6 @@ Tree
 
 Leaf
 : table '(' QualifiedName ')' '[' ExprListNE ']' COUNT
-{- within the braces, we regard comma separated lists of expressions as an infix comma operator -}
   { Leaf { source=$3, columns=$6 }  }
 
 Node
@@ -87,8 +86,6 @@ QualifiedName
 Iden
 : identifier { $1  :: String }
 
-{- we use this list only at the top level of nesting, for nested commas used as 'and' use ExprComma.
-Note that this list allows things like [foo as bar] and also empty list [] -}
 ExprList
 : { [] }
 | ExprListNE { $1 }
@@ -97,29 +94,16 @@ ExprListNE
 : Expr { [$1] }
 | Expr ',' ExprListNE { $1 : $3 }
 
-
-{- comma is the weakest in the hierarchy. other operators take precedence for now (at least OR does,
-in reality)
-  The following makes comma be right-associative, which I assume is okay.. This expression only shows up nested ( a or (b and c))
-this only allows things like [a, b] but not [a as b]
--}
--- ExprComma
--- : Expr { ($1 : [] ):: [ScalarExpr] }
---- | Expr ',' ExprComma { ($1 : $3) :: [ScalarExpr] }
-
 Expr {- top level definition  -}
-: ExprBind { $1 :: Expr }
+: ExprNoComma { $1 :: Expr }
 
-ExprBind {- allows for the aliasing that happens sometimes -}
-: ExprNoComma  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
-| ExprNoComma  as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
+{-
+Note to self on operator precedences:
+Parenthesis are explicit in most plans, except for commas and relation operations (<=, <).
 
-
-{- note to self on operator precedences:
-For the most part, parenthesis are explicit in the plans, except for commas and relation operations (<=, <):
-
-In the monet plan,  AND (in the where clause) becomes ',' and
-FILTER, IN and OR expressions are not parenthesized within it. (so they must bind more strongly than ',')
+in where conditions AND (in the where clause) becomes ',' and
+FILTER, IN and OR expressions are not parenthesized within it.
+(so they must bind more strongly than ',')
 
 If OR is forced to  be  main operator at the sql level, then the AND expressions
 get parenthesized and OR appears at the top level.
@@ -129,11 +113,10 @@ See examples in detailed_tests.txt
 
 {-
 ExprNoComma: expressions that have no comma within them bind tighter than those with comma.
-
 things like <, which show up as trees. or OR which do not fit within the BasicExpr list.
 
-note:
-Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3)), but in practice OR always shows up with parens around its two arguments.
+Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3)),
+but in practice OR always shows up with parens around its two arguments.
 -}
 ExprNoComma
 : ExprBind  { $1 :: Expr }
