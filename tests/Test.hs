@@ -16,28 +16,43 @@ main = do base <- readFile "tests/ad_hoc_tests.txt"
           tpch <- readFile "tests/tpch_query_plans.txt"
           detailed  <- readFile "tests/detailed_tests.txt"
           defaultMain $ testGroup "Tests"
-           [ testGroup "AdHocTests" (get_test_cases base) {-check only parses ok-}
-           , testGroup "TPCHTests" (get_test_cases tpch) {- checks only parses ok -}
-           , testGroup "DetailedTests" (get_test_cases detailed) {- in the future, will check these against an expected AST -}
+           [ testGroup "AdHocParseTests" (makeParseTestTree base) {-check only parses ok-}
+           , testGroup "TPCHParseTests" (makeParseTestTree tpch) {- checks only parses ok -}
+           , testGroup "DetailedParseTests" (makeParseTestTree detailed)
+--           , testGroup "MPlanTests" (makeMplanTestTree detailed)  {- tests successful conversion to mplan  -}
             ]
 
-toTestCase :: (String, String) -> TestTree
-toTestCase (a, b)  =
-  let zpd = zip [1..] (T.splitOn (T.pack "\n") (T.pack b))
-      numbered_plan = map (\(n, line) -> (show n) ++ (if n < 10 then " " else "") ++" " ++ (T.unpack line)) zpd
-  in
-    let prs = fromString b in
-    testCase ("------\n" ++  a ++ "\n\n" ++ (intercalate "\n" numbered_plan) ++"\n------\n" ++ (groom prs) ++ "\n\n") $ (isRight prs) @? (groom prs)
+makeTestName :: String ->  String -> String
+makeTestName name plantext =
+  let zpd = zip [1..] (T.splitOn (T.pack "\n") (T.pack plantext))
+      numline (num, packedline) = (show num) ++ (if num < 10 then " " else "") ++" " ++ (T.unpack packedline)
+      numbered_plan = map numline zpd
+      in "------\n" ++  name ++ "\n" ++ (intercalate "\n" numbered_plan) ++ "\n------\n"
 
-get_test_cases :: String  -> [TestTree]
-get_test_cases s = {- the first element after split is a "", because we start with a plan, so must do tail -}
-  let raw_pairs =
-        case (T.splitOn (T.pack "--TEST--") (T.pack s)) of
-          [] -> []
-          _ : rest -> rest
-      to_pairs [x,y] = (T.unpack . T.strip $ x, T.unpack . T.strip $ y)
-  in map (toTestCase . to_pairs . (T.splitOn (T.pack ";"))) raw_pairs
+toParseTestCase :: (String, String) -> TestTree
+toParseTestCase (a, b)  =
+  let plainName  = makeTestName a b
+      prs = fromString b
+      detailedName = "Parse: " ++ plainName ++ groom prs ++ "\n\n"
+      in testCase detailedName $ (isRight prs) @? (groom prs)
 
+parseTestFileContents :: String -> [(String, String)]
+parseTestFileContents s =
+  {- the first element after split is an empty string, because we start with a plan, so must do tail -}
+  let rawPairs = case (T.splitOn (T.pack "--TEST--") (T.pack s)) of
+                    [] -> []
+                    _ : rest -> rest
+      toPairs [x,y] = (T.unpack . T.strip $ x, T.unpack . T.strip $ y)
+      in map (toPairs . (T.splitOn (T.pack ";"))) rawPairs
+
+makeParseTestTree :: String  -> [TestTree]
+makeParseTestTree contents =
+  let prs = parseTestFileContents contents
+      in map toParseTestCase prs
+
+
+-- makeMplanTestTree :: (String, String) -> [TestTree]
+-- makeMplanTestTree (a
 
 -- unitTests = testGroup "Unit tests"
 --   [ -- testCase "List comparison (different length)" $
