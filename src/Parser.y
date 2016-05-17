@@ -1,14 +1,3 @@
--- Parser -- Decaf parser                                       -*- haskell -*-
--- Copyright (C) 2013  Benjamin Barenblat <bbaren@mit.edu>
---
--- This file is a part of decafc.
---
--- decafc is free software: you can redistribute it and/or modify it under the
--- terms of the MIT (X11) License as described in the LICENSE file.
---
--- decafc is distributed in the hope that it will be useful, but WITHOUT ANY
--- WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
--- FOR A PARTICULAR PURPOSE.  See the X11 license for more details.
 {
 module Parser ( parse,
                 fromString
@@ -19,7 +8,6 @@ import Data.Either(isRight,partitionEithers)
 import Scanner (ScannedToken(..), Token(..), scan)
 
 }
-
 
 --------------------------------- Directives ----------------------------------
 
@@ -125,8 +113,9 @@ ExprBind {- allows for the aliasing that happens sometimes -}
 : ExprNoComma  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
 | ExprNoComma  as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
 
+
 {- note to self on operator precedences:
-For the most part, parenthesis are explicit in the plans, except for commas:
+For the most part, parenthesis are explicit in the plans, except for commas and relation operations (<=, <):
 
 In the monet plan,  AND (in the where clause) becomes ',' and
 FILTER, IN and OR expressions are not parenthesized within it. (so they must bind more strongly than ',')
@@ -134,43 +123,16 @@ FILTER, IN and OR expressions are not parenthesized within it. (so they must bin
 If OR is forced to  be  main operator at the sql level, then the AND expressions
 get parenthesized and OR appears at the top level.
 
-Here are some examples:
-
--- And (aka ',') is parenthesised in the plan on the RHS of the OR.
-sql>plan select r_name from region where region.r_regionkey  < 40 or region.r_regionkey < 100 and r_name like '%oston' and r_name in (1,2);
-project (
-| select (
-"| | table(sys.region) [ region.r_regionkey NOT NULL HASHCOL , region.r_name NOT NULL ] COUNT "
-"| ) [ (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""40""]) or (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""100""], char[region.r_name NOT NULL] FILTER like (char[char(6) ""%oston""], char """"), tinyint[region.r_name NOT NULL] as region.r_name in (tinyint ""1"", tinyint ""2"")) ]"
-) [ region.r_name NOT NULL ]
-
-
--- notice how OR is not parenthesised in the plan.
-sql>plan select r_name from region where (region.r_regionkey  < 40 or region.r_regionkey < 100) and r_name like '%oston' and r_name in (1,2);
-
-project (
-| select (
-"| | table(sys.region) [ region.r_regionkey NOT NULL HASHCOL , region.r_name NOT NULL ] COUNT "
-"| ) [ (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""40""]) or (region.r_regionkey NOT NULL HASHCOL  < int[tinyint ""100""]), char[region.r_name NOT NULL] FILTER like (char[char(6) ""%oston""], char """"), tinyint[region.r_name NOT NULL] as region.r_name in (tinyint ""1"", tinyint ""2"") ]"
-) [ region.r_name NOT NULL ]
-
-other than comma, comparison operators sometimes come in non-parenthesised trees as well:
-
-sql>plan select (l_quantity < 100) as foo from lineitem where l_orderkey < l_partkey and l_partkey < l_suppkey;
-
-project (
-| select (
-"| | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_partkey NOT NULL, lineitem.l_suppkey NOT NULL, lineitem.l_quantity NOT NULL ] COUNT "
-| ) [ lineitem.l_orderkey NOT NULL HASHCOL  < lineitem.l_partkey NOT NULL < lineitem.l_suppkey NOT NULL ]
-") [ sys.<(lineitem.l_quantity NOT NULL, decimal(15,2)[tinyint ""100""]) as L.foo ]"
-
+See examples in detailed_tests.txt
 -}
 
+{-
+ExprNoComma: expressions that have no comma within them bind tighter than those with comma.
 
-{- things like <, which show up as trees, or OR which do not fit within the BasicExpr list.
+things like <, which show up as trees. or OR which do not fit within the BasicExpr list.
+
 note:
-Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3),
-but in practice OR always shows up with parens around its two arguments.
+Right now we allow them to have the same associativity (ie 1 < 2 or 3 -> 1 < (2 or 3)), but in practice OR always shows up with parens around its two arguments.
 -}
 ExprNoComma
 : BasicExpr  { $1 :: ScalarExpr }
