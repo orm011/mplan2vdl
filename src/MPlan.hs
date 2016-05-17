@@ -60,4 +60,4 @@ fromParseTree :: P.Rel -> Either String RelExpr
 fromParseTree _ = Left " not implemented "
 
 fromString :: String -> Either String RelExpr
-fromString  _ = Left "not implemented"
+fromString s = P.fromString s >>= fromParseTree
