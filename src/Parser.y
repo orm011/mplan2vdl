@@ -1,7 +1,9 @@
 -- -*- haskell -*-
 {
-module Parser ( parse,
-                fromString
+module Parser ( parse
+              , fromString
+              , Name
+              , Rel
               ) where
 
 import Text.Printf (printf)

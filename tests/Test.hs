@@ -10,16 +10,20 @@ import Configuration(defaultConfiguration)
 import Text.Groom
 import Debug.Trace
 import Data.List(intercalate)
+import qualified MPlan as M
 
 main :: IO ()
 main = do base <- readFile "tests/ad_hoc_tests.txt"
           tpch <- readFile "tests/tpch_query_plans.txt"
           detailed  <- readFile "tests/detailed_tests.txt"
           defaultMain $ testGroup "Tests"
-           [ testGroup "AdHocParseTests" (makeParseTestTree base) {-check only parses ok-}
-           , testGroup "TPCHParseTests" (makeParseTestTree tpch) {- checks only parses ok -}
+           [ testGroup "AdHocParseTests" (makeParseTestTree base)
+             {-check only parses ok-}
+           , testGroup "TPCHParseTests" (makeParseTestTree tpch)
+             {- checks only parses ok -}
            , testGroup "DetailedParseTests" (makeParseTestTree detailed)
---           , testGroup "MPlanTests" (makeMplanTestTree detailed)  {- tests successful conversion to mplan  -}
+           , testGroup "MPlanTests" (makeMplanTestTree detailed)
+             {- tests successful conversion to mplan  -}
             ]
 
 makeTestName :: String ->  String -> String
@@ -50,9 +54,17 @@ makeParseTestTree contents =
   let prs = parseTestFileContents contents
       in map toParseTestCase prs
 
+toMplanTestCase :: (String, String) -> TestTree
+toMplanTestCase (a, b) =
+  let plainName  = makeTestName a b
+      mplan = M.fromString b
+      detailedName = "MPlan: " ++ plainName ++ groom mplan ++ "\n\n"
+      in testCase detailedName $ (isRight mplan) @? (groom mplan)
 
--- makeMplanTestTree :: (String, String) -> [TestTree]
--- makeMplanTestTree (a
+makeMplanTestTree :: String -> [TestTree]
+makeMplanTestTree contents =
+  let prs = parseTestFileContents contents
+      in map toMplanTestCase prs
 
 -- unitTests = testGroup "Unit tests"
 --   [ -- testCase "List comparison (different length)" $
