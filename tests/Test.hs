@@ -12,11 +12,13 @@ import Debug.Trace
 import Data.List(intercalate)
 
 main :: IO ()
-main = do base <- readFile "tests/monet_test_cases.txt"
+main = do base <- readFile "tests/ad_hoc_tests.txt"
           tpch <- readFile "tests/tpch_query_plans.txt"
+          detailed  <- readFile "tests/detailed_tests.txt"
           defaultMain $ testGroup "Tests"
-           [ testGroup "AdHocTests" (get_test_cases base)
-           , testGroup "TPCHTests" (get_test_cases tpch)
+           [ testGroup "AdHocTests" (get_test_cases base) {-check only parses ok-}
+           , testGroup "TPCHTests" (get_test_cases tpch) {- checks only parses ok -}
+           , testGroup "DetailedTests" (get_test_cases detailed) {- in the future, will check these against an expected AST -}
             ]
 
 toTestCase :: (String, String) -> TestTree

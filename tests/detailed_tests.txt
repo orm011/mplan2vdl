@@ -1,0 +1,23 @@
+--TEST-- plan select r_name from region where region.r_regionkey  < 40 or region.r_regionkey < 100 and r_name like '%oston' and r_name in (1,2);
+
+project (
+| select (
+| | table(sys.region) [ region.r_regionkey NOT NULL HASHCOL , region.r_name NOT NULL ] COUNT 
+| ) [ (region.r_regionkey NOT NULL HASHCOL  < int[tinyint "40"]) or (region.r_regionkey NOT NULL HASHCOL  < int[tinyint "100"], char[region.r_name NOT NULL] FILTER like (char[char(6) "%oston"], char ""), tinyint[region.r_name NOT NULL] as region.r_name in (tinyint "1", tinyint "2")) ]
+) [ region.r_name NOT NULL ]
+
+--TEST-- plan select r_name from region where (region.r_regionkey  < 40 or region.r_regionkey < 100) and r_name like '%oston' and r_name in (1,2);
+
+project (
+| select (
+| | table(sys.region) [ region.r_regionkey NOT NULL HASHCOL , region.r_name NOT NULL ] COUNT 
+| ) [ (region.r_regionkey NOT NULL HASHCOL  < int[tinyint "40"]) or (region.r_regionkey NOT NULL HASHCOL  < int[tinyint "100"]), char[region.r_name NOT NULL] FILTER like (char[char(6) "%oston"], char ""), tinyint[region.r_name NOT NULL] as region.r_name in (tinyint "1", tinyint "2") ]
+) [ region.r_name NOT NULL ]
+
+--TEST-- plan select (l_quantity < 100) as foo from lineitem where l_orderkey < l_partkey and l_partkey < l_suppkey;
+
+project (
+| select (
+| | table(sys.lineitem) [ lineitem.l_orderkey NOT NULL HASHCOL , lineitem.l_partkey NOT NULL, lineitem.l_suppkey NOT NULL, lineitem.l_quantity NOT NULL ] COUNT 
+| ) [ lineitem.l_orderkey NOT NULL HASHCOL  < lineitem.l_partkey NOT NULL < lineitem.l_suppkey NOT NULL ]
+) [ sys.<(lineitem.l_quantity NOT NULL, decimal(15,2)[tinyint "100"]) as L.foo ]
