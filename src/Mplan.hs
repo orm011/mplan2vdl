@@ -74,7 +74,23 @@ solve P.Leaf { P.source, P.columns } =
                  , P.alias } = Right (rname, alias)
     split _ = Left "a Leaf should only have reference expressions"
 
-solve P.Node { P.relop } = Left $ "converting " ++ relop ++ " to Mplan is not implemented "
+
+{- Project invariants
+- single child node
+- multiple output columns with potential aliasing (non empty)
+- potentially empty order columns. no aliasing there.
+(what relation do they have with output ones?)
+-}
+
+solve P.Node { P.relop = "project"
+             , P.children = [ch] -- only one child rel allowed for project
+             , P.arg_lists = out : rest -- must have at least one arg list (outputs)
+             } = Left "implement me"
+--  do sch <- solve ch
+ -- need to look at out Exprs, converte scalar exprs with potential aliass
+
+solve _ = Left $ " parse tree not valid or case not implemented  "
+
 
 fromParseTree :: P.Rel -> Either String RelExpr
 fromParseTree = solve
