@@ -58,6 +58,10 @@ data RelExpr =
   deriving (Eq,Show)
 
 
+-- thsis  way to insert extra consistency checks
+check :: a -> (a -> Bool) -> String -> Either String a
+check val cond msg = if cond val then Right val else Left msg
+
 solve :: P.Rel -> Either String RelExpr
 
 {- Leaf -> Table invariants /checks:
@@ -67,10 +71,13 @@ solve :: P.Rel -> Either String RelExpr
    for concrete resolution to things like partsupp.%partsupp_fk1
 -}
 solve P.Leaf { P.source, P.columns } =
-  do pcols <- sequence $ map splitNames columns
+  do pcols <- sequence $ map split columns
+     pcols <- check pcols ( /= []) "list of table columns must not be empty"
      return $ Table { tablename = source, tablecolumns = pcols}
-  where splitNames P.Expr { P.expr = P.Ref { P.rname }, P.alias } = Right (rname, alias)
-        splitNames _ = Left "a Leaf should only have reference expressions"
+  where
+    split P.Expr { P.expr = P.Ref { P.rname }, P.alias }
+             = Right (rname, alias)
+    split _ = Left "a Leaf should only have reference expressions"
 
 solve P.Node { P.relop } = Left $ "converting " ++ relop ++ " to Mplan is not implemented "
 
