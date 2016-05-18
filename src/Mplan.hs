@@ -54,21 +54,8 @@ data ScalarExpr =
 data RelExpr =
   Table { tablename :: Name,  tablecolumns :: [(Name, Maybe Name)]  }
   | Project { child :: RelExpr, projectout :: [(ScalarExpr, Maybe Name)], order ::[(Name, OrderSpec)] }
-    {- Select invariants:
-     -single child node
-     -predicate is a single scalar expression
-  -}
   | Select { child :: RelExpr, selectpredicate :: ScalarExpr  }
-  {- Group invariants:
-     - single child node
-     - multiple output value columns with potential expressions (non-empty)
-     - multiple group key value columns (non-empty)
-  -}
   | Group {  child :: RelExpr, groupvalues :: [(Name, Maybe Name)], groupkeys :: [(Name, Maybe Name)]  }
-  {- Semijoin invariants:
-     - binary relop
-     - condition may be complex (most are quality, but some aren't)
-  -}
   | SemiJoin { lchild :: RelExpr, rchild :: RelExpr, condition :: ScalarExpr  }
   | TopN
   | Cross
@@ -113,6 +100,23 @@ solve P.Node { P.relop = "project"
              } = Left "implement me"
 --  do sch <- solve ch
  -- need to look at out Exprs, converte scalar exprs with potential aliass
+
+
+  {- Select invariants:
+     -single child node
+     -predicate is a single scalar expression
+  -}
+
+  {- Group invariants:
+     - single child node
+     - multiple output value columns with potential expressions (non-empty)
+     - multiple group key value columns (non-empty)
+  -}
+  {- Semijoin invariants:
+     - binary relop
+     - condition may be complex (most are quality, but some aren't)
+  -}
+
 
 solve _ = Left $ " parse tree not valid or case not implemented  "
 
