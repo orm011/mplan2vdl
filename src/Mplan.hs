@@ -52,11 +52,24 @@ data ScalarExpr =
   deriving (Eq, Show)
 
 data RelExpr =
-  Table { tablename :: Name,  tablecolumns :: [(Name, Maybe Name)]  }
-  | Project { child :: RelExpr, projectout :: [(ScalarExpr, Maybe Name)], order ::[(Name, OrderSpec)] }
-  | Select { child :: RelExpr, selectpredicate :: ScalarExpr  }
-  | Group {  child :: RelExpr, groupvalues :: [(Name, Maybe Name)], groupkeys :: [(Name, Maybe Name)]  }
-  | SemiJoin { lchild :: RelExpr, rchild :: RelExpr, condition :: ScalarExpr  }
+  Table       { tablename :: Name
+              , tablecolumns :: [(Name, Maybe Name)]
+              }
+  | Project   { child :: RelExpr
+              , projectout :: [(ScalarExpr, Maybe Name)]
+              , order ::[(Name, OrderSpec)]
+              }
+  | Select    { child :: RelExpr
+              , selectpredicate :: ScalarExpr
+              }
+  | Group     { child :: RelExpr
+              , groupvalues :: [(Name, Maybe Name)]
+              , groupkeys :: [(Name, Maybe Name)]
+              }
+  | SemiJoin  { lchild :: RelExpr
+              , rchild :: RelExpr
+              , condition :: ScalarExpr
+              }
   | TopN
   | Cross
   | Join
