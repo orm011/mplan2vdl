@@ -96,10 +96,18 @@ solve P.Leaf { P.source, P.columns } =
 
 solve P.Node { P.relop = "project"
              , P.children = [ch] -- only one child rel allowed for project
-             , P.arg_lists = out : rest -- must have at least one arg list (outputs)
-             } = Left "implement me"
---  do sch <- solve ch
- -- need to look at out Exprs, converte scalar exprs with potential aliass
+             , P.arg_lists = out : rest -- not dealing with order by right now.
+             } =
+  do child <- solve ch
+     projectout <- solveOutputs out
+     order  <- (case rest of
+                 [] -> Right []
+                 _ -> Left "not dealing with order-by clauses")
+     return $ Project {child, projectout, order }
+  where solveOutputs explist = sequence $ map f explist
+        f P.Expr { P.expr, P.alias } =
+          do scalar <- sc expr
+             return (scalar, alias)
 
 
   {- Select invariants:
