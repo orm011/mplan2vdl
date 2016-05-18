@@ -9,6 +9,31 @@ import qualified Parser as P
 import Parser(Name)
 
 
+data MType =
+  MInt
+  | MTinyint
+  | MSmallint
+  | MDecimal Int Int
+  | MSecInterval Int
+  | MMonthInterval
+  | MDate
+  | MCharFix Int
+  | MChar
+  deriving (Eq, Show)
+
+fromTypeSpec :: P.TypeSpec -> Either String MType
+fromTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
+  where f ["int"] [] = Right MInt
+        f ["tinyint"] [] = Right MTinyint
+        f ["smallint"] [] = Right MSmallint
+        f ["decimal"] [a, b] = Right (MDecimal a b)
+        f ["sec_interval"] [a] = Right (MSecInterval a)
+        f ["month_interval"] []  = Right MMonthInterval
+        f ["date"] []  = Right MDate
+        f ["char"] [a] = Right (MCharFix a)
+        f ["char"] [] = Right MChar
+        f _ _ = Left "unsupported typespec"
+
 
 data OrderSpec = Asc | Desc deriving (Eq,Show)
 
@@ -22,7 +47,7 @@ data BinaryOp =
 data ScalarExpr =
   {- a Ref can be a column or a previously bound name for an intermediate -}
   Ref Name
-  | Lit { littype :: String,  litvalue :: String }
+  | Lit { littype :: MType,  litvalue :: String }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   deriving (Eq, Show)
 
@@ -98,3 +123,16 @@ fromParseTree = solve
 fromString :: String -> Either String RelExpr
 fromString s = P.fromString s >>= fromParseTree
 
+
+{- code to transform parser scalar sublanguage into Mplan scalar -}
+sc :: P.ScalarExpr -> Either String ScalarExpr
+sc P.Ref { P.rname  } = Right $ Ref rname
+
+sc P.Literal { P.tspec, P.stringRep } =
+  do tp <- fromTypeSpec tspec
+     -- finish later.
+     Left "not supporting literals yet"
+     -- Lit { littype=tspec,  litvalue=stringRep }
+
+
+sc _ = Left "problem with p.scalar"

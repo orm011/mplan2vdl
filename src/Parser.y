@@ -6,6 +6,7 @@ module Parser ( parse
               , Rel(..)
               , ScalarExpr(..)
               , Expr(..)
+              , TypeSpec(..)
               ) where
 
 import Text.Printf (printf)
