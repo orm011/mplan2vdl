@@ -28,11 +28,6 @@ data ScalarExpr =
 
 data RelExpr =
   Table { tablename :: Name,  tablecolumns :: [(Name, Maybe Name)]  }
-   {- Project invariants
-      - single child node
-      - multiple output columns with potential aliasing (non empty)
-      - potentially empty order columns. no aliasing there. (what relation do they have with output ones?)
-  -}
   | Project { child :: RelExpr, projectout :: [(ScalarExpr, Maybe Name)], order ::[(Name, OrderSpec)] }
     {- Select invariants:
      -single child node
@@ -75,8 +70,8 @@ solve P.Leaf { P.source, P.columns } =
      pcols <- check pcols ( /= []) "list of table columns must not be empty"
      return $ Table { tablename = source, tablecolumns = pcols}
   where
-    split P.Expr { P.expr = P.Ref { P.rname }, P.alias }
-             = Right (rname, alias)
+    split P.Expr { P.expr = P.Ref { P.rname }
+                 , P.alias } = Right (rname, alias)
     split _ = Left "a Leaf should only have reference expressions"
 
 solve P.Node { P.relop } = Left $ "converting " ++ relop ++ " to Mplan is not implemented "
