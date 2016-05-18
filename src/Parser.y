@@ -3,7 +3,9 @@
 module Parser ( parse
               , fromString
               , Name
-              , Rel
+              , Rel(..)
+              , ScalarExpr(..)
+              , Expr(..)
               ) where
 
 import Text.Printf (printf)

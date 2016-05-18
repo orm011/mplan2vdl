@@ -8,6 +8,8 @@ module Mplan( fromParseTree
 import qualified Parser as P
 import Parser(Name)
 
+
+
 data OrderSpec = Asc | Desc deriving (Eq,Show)
 
 data BinaryOp =
@@ -25,12 +27,6 @@ data ScalarExpr =
   deriving (Eq, Show)
 
 data RelExpr =
-  {- Table invariants /checks:
-     -tablecolumns must not be empty.
-     -table columns may themselves be aliased within table.
-     -some of the names involve using schema (not for now)
-      for concrete resolution to things like partsupp.%partsupp_fk1
-  -}
   Table { tablename :: Name,  tablecolumns :: [(Name, Maybe Name)]  }
    {- Project invariants
       - single child node
@@ -62,10 +58,25 @@ data RelExpr =
   deriving (Eq,Show)
 
 
+solve :: P.Rel -> Either String RelExpr
+
+{- Leaf -> Table invariants /checks:
+  -tablecolumns must not be empty.
+  -table columns may themselves be aliased within table.
+  -some of the names involve using schema (not for now)
+   for concrete resolution to things like partsupp.%partsupp_fk1
+-}
+solve P.Leaf { P.source, P.columns } =
+  do pcols <- sequence $ map splitNames columns
+     return $ Table { tablename = source, tablecolumns = pcols}
+  where splitNames P.Expr { P.expr = P.Ref { P.rname }, P.alias } = Right (rname, alias)
+        splitNames _ = Left "a Leaf should only have reference expressions"
+
+solve P.Node { P.relop } = Left $ "converting " ++ relop ++ " to Mplan is not implemented "
+
 fromParseTree :: P.Rel -> Either String RelExpr
-fromParseTree _ = Left " not implemented "
+fromParseTree = solve
 
 fromString :: String -> Either String RelExpr
 fromString s = P.fromString s >>= fromParseTree
-
 
