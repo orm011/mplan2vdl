@@ -23,13 +23,16 @@ main = do adhoc <- readFile "tests/ad_hoc_tests.txt"
           let tpch_cases = splitFileIntoTests tpch
           let detailed_cases = splitFileIntoTests detailed
           defaultMain $ testGroup "Tests"
-           [ testGroup "AdHocParseTests" $ trace "a" (makeTestTree "parse" P.fromString adhoc_cases),
-             testGroup "TPCHParseTests" (makeTestTree "parse" P.fromString tpch_cases),
-             testGroup "DetailedParseTests" (makeTestTree "parse" P.fromString detailed_cases),
+           [ testGroup "AdHocParseTests" $ makeTestTree "parse" P.fromString adhoc_cases,
+             testGroup "TPCHParseTests" $ makeTestTree "parse" P.fromString tpch_cases,
+             testGroup "DetailedParseTests" $ makeTestTree "parse" P.fromString detailed_cases,
 
-             testGroup "AdHocMplanGenTests" (makeTestTree "mplan" M.fromString adhoc_cases),
+             testGroup "AdHocMplanGenTests" $ makeTestTree "mplan" M.fromString  adhoc_cases,
+             testGroup "TPCHMplanGenTests" $ makeTestTree "mplan" M.fromString tpch_cases,
 
-             -- testGroup "AdHocVliteGenTests" (makeTestTree "vlite" V.fromString adhoc_cases),
+             testGroup "AdHocVliteGenTests" $ makeTestTree "vlite" V.fromString adhoc_cases,
+             testGroup "TPCHVliteGenTests" $ makeTestTree "vlite" V.fromString tpch_cases,
+
              testGroup "end" []
            ]
 
@@ -52,7 +55,10 @@ splitFileIntoTests s =
 makeTestTree :: (Show a, NFData a) => String -> (String -> Either String a) -> [(String,String)] -> [TestTree]
 makeTestTree compilername compiler  pairs   = map helper pairs
   where helper (a, b)  = let plainName  = makeTestName a b
-                             prs = compiler $ traceShowId b
-                             detailedName =  compilername ++ plainName ++ groom prs ++ "\n\n"
-                             tc = testCase detailedName $ (isRight $ traceShowId prs) @? (groom prs)
+                             prs = compiler b
+                             detailedName = compilername ++ plainName ++ "\n\n"
+                             msg = (case prs of
+                                       Left errmsg -> errmsg
+                                       Right ans -> groom ans)
+                             tc = testCase detailedName $ (isRight prs) @? msg
                              in localOption (mkTimeout 10000) {-10 milliseconds-} tc

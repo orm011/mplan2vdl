@@ -5,7 +5,6 @@ import qualified Mplan as M
 import Mplan(BinaryOp, Name)
 
 import qualified Data.Map.Strict as Map
-import Data.Map.Strict((!))
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
@@ -25,7 +24,7 @@ instance NFData FoldOp
 {- Range has no need for count arg at this point.
 may convert to differnt range after -}
 data Vexp =
-  External Name
+  Load Name
   | Range  { rmin :: Int, rstep :: Int }
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
@@ -60,6 +59,7 @@ solve' relexp  = solve relexp >>= (return . makeEnv)
         maybeadd env (_, Nothing) = env
         maybeadd env (vexp, Just newalias) = Map.insert newalias vexp env
 
+
 solve :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 
 {- Table is a Special case. It gets vexprs for all the output columns.
@@ -72,10 +72,10 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve  M.Table { M.tablename, M.tablecolumns } =
+solve M.Table { M.tablename, M.tablecolumns } =
   Right $ map deduceName tablecolumns
-  where deduceName (orig, Nothing) = (External orig, Just orig)
-        deduceName (orig, Just x) = (External orig, Just x)
+  where deduceName (orig, Nothing) = (Load orig, Just orig)
+        deduceName (orig, Just x) = (Load orig, Just x)
 
 {- Project: not dealing with ordered queries right now
 note. project affects the name scope in the following ways
@@ -99,16 +99,15 @@ as (vexpr .., Nothing)
 solve M.Project { M.child, M.projectout, M.order = [] } =
   do env <- solve' child
      vexprs <- sequence $ map (fromScalar env) exprs
-     let originalnames = map maybeGetName exprs
-     let finalnames = map solveName $ zip originalnames finalnames
-     return $ (zip vexprs finalnames)
+     return (zip vexprs finalnames)
   where maybeGetName (M.Ref orig) = Just orig
         maybeGetName _ = Nothing
-        solveName (_, Just alias) = Just alias
+        solveName (_, Just alias) = Just alias {-alias always wins-}
         solveName (Just some, Nothing) = Just some
         solveName _ = Nothing
         (exprs, maliases) = unzip projectout
-
+        originalnames = map maybeGetName exprs
+        finalnames = map solveName $ zip originalnames maliases
 
 solve _ = Left "this relational operator is not supported yet"
 

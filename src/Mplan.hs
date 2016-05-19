@@ -9,7 +9,7 @@ import qualified Parser as P
 import Parser(Name)
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
-
+import Text.Groom
 
 data MType =
   MInt
@@ -146,7 +146,7 @@ solve P.Node { P.relop = "project"
   -}
 
 
-solve _ = Left $ " parse tree not valid or case not implemented  "
+solve s_ = Left $ " parse tree not valid or case not implemented:  " ++ groom s_
 
 
 fromParseTree :: P.Rel -> Either String RelExpr
