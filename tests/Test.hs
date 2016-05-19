@@ -13,13 +13,15 @@ import qualified Parser as P
 import qualified Mplan as M
 import qualified Vlite as V
 
+import Control.DeepSeq(($!!), NFData)
+
 main :: IO ()
 main = do adhoc <- readFile "tests/ad_hoc_tests.txt"
           tpch <- readFile "tests/tpch_query_plans.txt"
           detailed  <- readFile "tests/detailed_tests.txt"
-          let adhoc_cases = trace "adhoc" $ splitFileIntoTests adhoc
-          let tpch_cases = trace "tpch" $ splitFileIntoTests tpch
-          let detailed_cases = trace "detailed" $ splitFileIntoTests detailed
+          let adhoc_cases = splitFileIntoTests adhoc
+          let tpch_cases = splitFileIntoTests tpch
+          let detailed_cases = splitFileIntoTests detailed
           defaultMain $ testGroup "Tests"
            [ testGroup "AdHocParseTests" $ trace "a" (makeTestTree "parse" P.fromString adhoc_cases),
              testGroup "TPCHParseTests" (makeTestTree "parse" P.fromString tpch_cases),
@@ -47,7 +49,7 @@ splitFileIntoTests s =
       toPairs [x,y] = (T.unpack . T.strip $ x, T.unpack . T.strip $ y)
       in map (toPairs . (T.splitOn (T.pack ";"))) rawPairs
 
-makeTestTree :: (Show a) => String -> (String -> Either String a) -> [(String,String)] -> [TestTree]
+makeTestTree :: (Show a, NFData a) => String -> (String -> Either String a) -> [(String,String)] -> [TestTree]
 makeTestTree compilername compiler  pairs   = map helper pairs
   where helper (a, b)  = let plainName  = makeTestName a b
                              prs = compiler $ traceShowId b

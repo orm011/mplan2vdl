@@ -12,6 +12,8 @@ module Parser ( parse
 import Text.Printf (printf)
 import Data.Either(isRight,partitionEithers)
 import Scanner (ScannedToken(..), Token(..), scan)
+import Control.DeepSeq(NFData)
+import GHC.Generics (Generic)
 
 }
 
@@ -192,7 +194,9 @@ type Name = [String]
 
 {- eg decimal(15,2) , or smallint  -}
 data TypeSpec = TypeSpec { tname :: Name
-                         , tparams :: [Int] } deriving (Eq,Show)
+                         , tparams :: [Int] } deriving (Eq,Show,Generic)
+
+instance NFData TypeSpec
 
 {- for now, parse but drop the column attributes.
 maybe will take a look again later.
@@ -207,7 +211,8 @@ with expressions (like NOT NULL seems to be)
                          -- , rnullable=Nullable
 -}
 
-data Expr = Expr { expr :: ScalarExpr, alias :: Maybe Name } deriving (Eq,Show)
+data Expr = Expr { expr :: ScalarExpr, alias :: Maybe Name } deriving (Eq,Show,Generic)
+instance NFData Expr
 
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tspec :: TypeSpec
@@ -236,14 +241,16 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                            }
                    | Nested [Expr] {-its here just allow types to check without modifying the grammar -}
 
-                   deriving (Eq, Show)
+                   deriving (Eq, Show, Generic)
+instance NFData ScalarExpr
 
 data Rel = Node { relop :: String {- relational op like join -}
                 , children :: [Rel]
                 , arg_lists :: [[Expr]]  }
            | Leaf { source :: Name, columns :: [Expr] }
              {-table scan -}
-           deriving (Eq, Show)
+           deriving (Eq, Show, Generic)
+instance NFData Rel
 
 parseError :: [ScannedToken] -> Either String a
 parseError [] = Left "unexpected EOF"

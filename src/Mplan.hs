@@ -7,6 +7,8 @@ module Mplan( fromParseTree
 
 import qualified Parser as P
 import Parser(Name)
+import Control.DeepSeq(NFData)
+import GHC.Generics (Generic)
 
 
 data MType =
@@ -19,7 +21,8 @@ data MType =
   | MDate
   | MCharFix Int
   | MChar
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+instance NFData MType
 
 fromTypeSpec :: P.TypeSpec -> Either String MType
 fromTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
@@ -35,21 +38,24 @@ fromTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f _ _ = Left "unsupported typespec"
 
 
-data OrderSpec = Asc | Desc deriving (Eq,Show)
+data OrderSpec = Asc | Desc deriving (Eq,Show, Generic)
+instance NFData OrderSpec
 
 data BinaryOp =
   Gt | Lt | Leq | Geq {- rel -}
   | Eq | Neq {- comp -}
   | LogAnd | LogOr {- logical -}
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr  {- arith -}
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+instance NFData BinaryOp
 
 data ScalarExpr =
   {- a Ref can be a column or a previously bound name for an intermediate -}
   Ref Name
   | Lit { littype :: MType,  litvalue :: String }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+instance NFData ScalarExpr
 
 data RelExpr =
   Table       { tablename :: Name
@@ -75,8 +81,8 @@ data RelExpr =
   | Join
   | AntiJoin
   | LeftOuter
-  deriving (Eq,Show)
-
+  deriving (Eq,Show, Generic)
+instance NFData RelExpr
 
 -- thsis  way to insert extra consistency checks
 check :: a -> (a -> Bool) -> String -> Either String a

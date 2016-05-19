@@ -7,14 +7,20 @@ import Mplan(BinaryOp, Name)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict((!))
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
+import GHC.Generics
+import Control.DeepSeq(NFData)
+
+import Debug.Trace
 
 type Map = Map.Map
 
 data ShOp = Gather | OpScatter
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+instance NFData ShOp
 
 data FoldOp = Sum | Max | Min
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+instance NFData FoldOp
 
 {- Range has no need for count arg at this point.
 may convert to differnt range after -}
@@ -28,7 +34,8 @@ data Vexp =
   | Cross
   | Partition
   | Cast
-  deriving (Eq,Show)
+  deriving (Eq,Show, Generic)
+instance NFData Vexp
 
 {- some convenience vectors -}
 const_ :: Int -> Vexp
