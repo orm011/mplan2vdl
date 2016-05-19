@@ -1,5 +1,5 @@
 module Vlite( fromMplan
-            , fromPlanString) where
+            , fromString) where
 
 import qualified Mplan as M
 import Mplan(BinaryOp, Name)
@@ -53,21 +53,24 @@ solve' relexp  = solve relexp >>= (return . makeEnv)
         maybeadd env (_, Nothing) = env
         maybeadd env (vexp, Just newalias) = Map.insert newalias vexp env
 
-{- gets vexprs for the output columns of an operator, anonymous or not.
-special case, because if the columns are not aliased, we can use their
-original names.
+solve :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
+
+{- Table is a Special case. It gets vexprs for all the output columns.
+
+If the output columns are not aliased, we can always
+use their original names as output names. (ie, there are no
+anonymous expressions in the list)
 
 note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 solve  M.Table { M.tablename, M.tablecolumns } =
   Right $ map deduceName tablecolumns
   where deduceName (orig, Nothing) = (External orig, Just orig)
         deduceName (orig, Just x) = (External orig, Just x)
 
-{- not dealing with ordered queries right now
+{- Project: not dealing with ordered queries right now
 note. project affects the name scope in the following ways
 
 There are four cases illustrated below:
@@ -115,5 +118,8 @@ sc env (M.Ref refname)  =
 
 sc _ _ = Left "this scalar expr is not supported yet"
 
-fromPlanString :: String -> Either String [(Vexp, Maybe Name)]
-fromPlanString mplanstring = M.fromString mplanstring >>= fromMplan
+-- string means monet plan string.
+fromString :: String -> Either String [(Vexp, Maybe Name)]
+fromString mplanstring = M.fromString mplanstring >>= fromMplan
+
+

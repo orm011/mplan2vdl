@@ -84,8 +84,9 @@ check val cond msg = if cond val then Right val else Left msg
 
 solve :: P.Rel -> Either String RelExpr
 
-{- Leaf -> Table invariants /checks:
+{- Leaf (aka Table) invariants /checks:
   -tablecolumns must not be empty.
+  -table columns must only be references, not complex expressions nor literals.
   -table columns may themselves be aliased within table.
   -some of the names involve using schema (not for now)
    for concrete resolution to things like partsupp.%partsupp_fk1
@@ -97,7 +98,7 @@ solve P.Leaf { P.source, P.columns } =
   where
     split P.Expr { P.expr = P.Ref { P.rname }
                  , P.alias } = Right (rname, alias)
-    split _ = Left "a Leaf should only have reference expressions"
+    split _ = Left "table outputs should only have reference expressions"
 
 
 {- Project invariants
