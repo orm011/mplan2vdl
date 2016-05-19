@@ -2,29 +2,34 @@ import Test.Tasty
 {- import Test.Tasty.SmallCheck as SC
 import Test.Tasty.QuickCheck as QC -}
 import Test.Tasty.HUnit
-import Parser(parse, fromString)
-import Scanner(scan)
 import Data.Either(isRight,partitionEithers, rights)
 import qualified Data.Text as T
 import Configuration(defaultConfiguration)
 import Text.Groom
 import Debug.Trace
 import Data.List(intercalate)
+
+import qualified Parser as P
 import qualified Mplan as M
+import qualified Vlite as V
 
 main :: IO ()
-main = do base <- readFile "tests/ad_hoc_tests.txt"
+main = do adhoc <- readFile "tests/ad_hoc_tests.txt"
           tpch <- readFile "tests/tpch_query_plans.txt"
           detailed  <- readFile "tests/detailed_tests.txt"
+          let adhoc_cases = trace "adhoc" $ splitFileIntoTests adhoc
+          let tpch_cases = trace "tpch" $ splitFileIntoTests tpch
+          let detailed_cases = trace "detailed" $ splitFileIntoTests detailed
           defaultMain $ testGroup "Tests"
-           [ testGroup "AdHocParseTests" (makeParseTestTree base)
-             {-check only parses ok-}
-           , testGroup "TPCHParseTests" (makeParseTestTree tpch)
-             {- checks only parses ok -}
-           , testGroup "DetailedParseTests" (makeParseTestTree detailed)
-           , testGroup "MplanTests" (makeMplanTestTree detailed)
-             {- tests successful conversion to mplan  -}
-            ]
+           [ testGroup "AdHocParseTests" $ trace "a" (makeTestTree "parse" P.fromString adhoc_cases),
+             testGroup "TPCHParseTests" (makeTestTree "parse" P.fromString tpch_cases),
+             testGroup "DetailedParseTests" (makeTestTree "parse" P.fromString detailed_cases),
+
+             testGroup "AdHocMplanGenTests" (makeTestTree "mplan" M.fromString adhoc_cases),
+
+             -- testGroup "AdHocVliteGenTests" (makeTestTree "vlite" V.fromString adhoc_cases),
+             testGroup "end" []
+           ]
 
 makeTestName :: String ->  String -> String
 makeTestName name plantext =
@@ -33,15 +38,8 @@ makeTestName name plantext =
       numbered_plan = map numline zpd
       in "------\n" ++  name ++ "\n" ++ (intercalate "\n" numbered_plan) ++ "\n------\n"
 
-toParseTestCase :: (String, String) -> TestTree
-toParseTestCase (a, b)  =
-  let plainName  = makeTestName a b
-      prs = fromString b
-      detailedName = "Parse: " ++ plainName ++ groom prs ++ "\n\n"
-      in testCase detailedName $ (isRight prs) @? (groom prs)
-
-parseTestFileContents :: String -> [(String, String)]
-parseTestFileContents s =
+splitFileIntoTests :: String -> [(String, String)]
+splitFileIntoTests s =
   {- the first element after split is an empty string, because we start with a plan, so must do tail -}
   let rawPairs = case (T.splitOn (T.pack "--TEST--") (T.pack s)) of
                     [] -> []
@@ -49,28 +47,10 @@ parseTestFileContents s =
       toPairs [x,y] = (T.unpack . T.strip $ x, T.unpack . T.strip $ y)
       in map (toPairs . (T.splitOn (T.pack ";"))) rawPairs
 
-makeParseTestTree :: String  -> [TestTree]
-makeParseTestTree contents =
-  let prs = parseTestFileContents contents
-      in map toParseTestCase prs
-
-toMplanTestCase :: (String, String) -> TestTree
-toMplanTestCase (a, b) =
-  let plainName  = makeTestName a b
-      mplan = M.fromString b
-      detailedName = "Mplan: " ++ plainName ++ groom mplan ++ "\n\n"
-      in testCase detailedName $ (isRight mplan) @? (groom mplan)
-
-makeMplanTestTree :: String -> [TestTree]
-makeMplanTestTree contents =
-  let prs = parseTestFileContents contents
-      in map toMplanTestCase prs
-
--- unitTests = testGroup "Unit tests"
---   [ -- testCase "List comparison (different length)" $
---   --     [1, 2, 3] `compare` [1,2] @?= GT
-
---   -- -- the following test does not hold
---   -- , testCase "List comparison (same length)" $
---   --     [1, 2, 3] `compare` [1,2,2] @?= LT
---   ]
+makeTestTree :: (Show a) => String -> (String -> Either String a) -> [(String,String)] -> [TestTree]
+makeTestTree compilername compiler  pairs   = map helper pairs
+  where helper (a, b)  = let plainName  = makeTestName a b
+                             prs = compiler $ traceShowId b
+                             detailedName =  compilername ++ plainName ++ groom prs ++ "\n\n"
+                             tc = testCase detailedName $ (isRight $ traceShowId prs) @? (groom prs)
+                             in localOption (mkTimeout 10000) {-10 milliseconds-} tc
