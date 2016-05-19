@@ -38,7 +38,7 @@ if [[ $# -lt 1  ]]
 then
     FLAG="install --enable-tests"
 else
-    FLAG=$1
+    FLAG=$@
 fi
 
 OPTS="-g --debug --info"
