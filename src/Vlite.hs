@@ -128,5 +128,3 @@ sc _ _ = Left "this scalar expr is not supported yet"
 -- string means monet plan string.
 fromString :: String -> Either String [(Vexp, Maybe Name)]
 fromString mplanstring = M.fromString mplanstring >>= fromMplan
-
-
