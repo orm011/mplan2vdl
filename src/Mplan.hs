@@ -10,9 +10,10 @@ import Parser(Name)
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Text.Groom
-import qualified Data.List.NonEmpty as Ne
 import Data.String.Utils(join)
 import Data.Int
+import Data.Monoid(mappend)
+
 
 data MType =
   MTinyint
@@ -42,8 +43,6 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         -- f ["char"] [a] = Right (MCharFix a)
         -- f ["char"] [] = Right MChar
 
-
-
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic)
 instance NFData OrderSpec
 
@@ -64,21 +63,19 @@ resolveBinopOpcode nm =
     ["sys", "sql_div"] -> Right Div
     _ -> Left $ "unsupported binary function: " ++ join "." nm
 
- {- some of them are semantically for groups,
-  but are syntatctically unary -}
+ {- they must be semantically for a single tuple (see aggregates otherwise) -}
 data UnaryOp =
-  Sum | Avg | Neg | Year
+  Neg | Year
   deriving (Eq, Show, Generic)
 instance NFData UnaryOp
+
 
 resolveUnopOpcode :: Name -> Either String UnaryOp
 resolveUnopOpcode nm =
   case nm of
-    ["sys", "sum"] -> Right Sum
-    ["sys", "avg"] -> Right Avg
     ["sys", "year"] -> Right Year
     ["sys", "sql_neg"] -> Right Neg
-    _ -> Left $ "unsupported unary function " ++ join "." nm
+    _ -> Left $ "unsupported scalar function " ++ join "." nm
 
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
@@ -89,6 +86,51 @@ data ScalarExpr =
   | Cast { mtype :: MType, arg::ScalarExpr }
   deriving (Eq, Show, Generic)
 instance NFData ScalarExpr
+
+data GroupAgg = Sum ScalarExpr | Avg ScalarExpr | Count
+  deriving (Eq,Show,Generic)
+instance NFData GroupAgg
+
+solveGroupOutputs :: [P.Expr] -> Either String ([(Name, Maybe Name)], [(GroupAgg, Maybe Name)])
+
+solveGroupOutputs exprs =
+  do sifted <- sequence $ map ghelper exprs
+     return $ foldl mappend ([],[]) sifted
+
+{- sifts out key lists to the first meber,
+ and aggregates to the second  -}
+ghelper  :: P.Expr -> Either String ([(Name, Maybe Name)], [(GroupAgg, Maybe Name)])
+
+ghelper P.Expr
+  { P.expr = P.Ref {P.rname} {- output key -}
+  , P.alias }
+  = Right ([(rname, alias)], [])
+
+ghelper P.Expr
+  { P.expr = P.Call { P.fname
+                    , P.args=[ P.Expr
+                               { P.expr=singlearg,
+                                 P.alias = _ -- ignoring this inner alias.
+                                 }
+                             ]
+                    }
+  , P.alias }
+  = do inner <- sc singlearg
+       case fname of
+         ["sys", "sum"] -> return ([], [(Sum inner, alias)])
+         ["sys", "avg"] -> return ([], [(Avg inner, alias)])
+         _ -> Left $ "unknown unary aggregate " ++ join "." fname
+
+ghelper  P.Expr
+  { P.expr = P.Call { P.fname=["sys", "count"]
+                    , P.args=[] }
+  , P.alias }
+  = Right ([], [(Count, alias)] )
+
+
+ghelper s_ = Left $
+  "expression not supported as output of group_by: " ++ groom s_
+
 
 data RelExpr =
   Table       { tablename :: Name
@@ -102,8 +144,9 @@ data RelExpr =
               , selectpredicate :: ScalarExpr
               }
   | Group     { child :: RelExpr
-              , groupkeys :: [Name]
-              , groupvalues :: [(ScalarExpr, Maybe Name)]
+              , inputkeys :: [Name]
+              , outputkeys :: [(Name, Maybe Name)]
+              , outputaggs :: [(GroupAgg, Maybe Name)]
               }
   | SemiJoin  { lchild :: RelExpr
               , rchild :: RelExpr
@@ -131,7 +174,6 @@ solveOutputs explist = sequence $ map f explist
              return (scalar, alias)
 
 
-
 solve :: P.Rel -> Either String RelExpr
 
 {- Leaf (aka Table) invariants /checks:
@@ -143,8 +185,8 @@ solve :: P.Rel -> Either String RelExpr
 -}
 solve P.Leaf { P.source, P.columns } =
   do pcols <- sequence $ map split columns
-     pcols <- check pcols ( /= []) "list of table columns must not be empty"
-     return $ Table { tablename = source, tablecolumns = pcols}
+     checkedcols <- check pcols ( /= []) "list of table columns must not be empty"
+     return $ Table { tablename = source, tablecolumns = checkedcols}
   where
     split P.Expr { P.expr = P.Ref { P.rname }
                  , P.alias } = Right (rname, alias)
@@ -180,12 +222,13 @@ solve P.Node { P.relop = "group by"
              , P.arg_lists =  igroupkeys : igroupvalues : []
              } =
   do child <- solve ch
-     groupvalues <- solveOutputs igroupvalues
-     groupkeys <- sequence $ map extractKey igroupkeys
-     return Group {child, groupkeys, groupvalues}
+     inputkeys <- sequence $ map extractKey igroupkeys
+     (outputkeys, outputaggs) <- solveGroupOutputs igroupvalues
+     return $  Group {child, inputkeys, outputkeys, outputaggs}
        where extractKey P.Expr { P.expr = P.Ref { P.rname }
                                , P.alias = Nothing } = Right rname
-             extractKey e_ = Left $ "unexpected expr as group key: " ++ groom e_
+             extractKey e_ =
+               Left $ "unexpected alias in input group key: " ++ groom e_
 
  {- Select invariants:
  -single child node
@@ -243,7 +286,7 @@ sc P.Literal { P.tspec, P.stringRep } =
                 MInt -> r
                 MTinyint -> r
                 MSmallint -> r
-                _ -> Left "not supporting literals yet"
+                _ -> Left "need to add conversion to this literal"
             )
      return $ IntLiteral int
 
