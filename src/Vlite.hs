@@ -27,7 +27,8 @@ instance NFData FoldOp
 may convert to differnt range after -}
 data Vexp =
   Load Name
-  | Range  { rmin :: Int, rstep :: Int }
+  | Range  { rmin :: Int, rstep :: Int } {- length deduced by context later-}
+  | CRange { rmin :: Int, rstep :: Int, rmax :: Int } {- fixed length -}
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
   | FoldSel  { fsdata :: Vexp, fsgroups :: Vexp }
@@ -46,6 +47,8 @@ pos_ = Range { rmin = 0, rstep = 1 }
 ones_ = const_ 1
 zeros_ = const_ 0
 
+range_ n = CRange {rmin = 0, rstep = 1, rmax = n }
+
 fromMplan :: M.RelExpr -> Either String [(Vexp, Maybe Name)]
 fromMplan = solve
 
@@ -61,6 +64,8 @@ solve' relexp  = solve relexp >>= (return . makeEnv)
         maybeadd env (_, Nothing) = env
         maybeadd env (vexp, Just newalias) = Map.insert newalias vexp env
 
+kMaxval :: Int
+kMaxval = 255
 
 solve :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 
@@ -110,6 +115,20 @@ solve M.Project { M.child, M.projectout, M.order = [] } =
         (exprs, maliases) = unzip projectout
         originalnames = map maybeGetName exprs
         finalnames = map solveName $ zip originalnames maliases
+
+{- need to partition the inputs by first group values...
+   then go on for a second group..
+   partition one column then apply to other column.
+
+   hardcoded assumptions: max value of columns.
+   (TODO: plug this through as a configuration param, as well as counts)
+-}
+
+-- solve M.Group { M.child,
+--                 M.inputkeys,
+--                 M.outputkeys,
+--                 M.outputaggs } = Left "implement me " ++
+
 
 solve r_  = Left $ "(Vlite) unsupported M.rel:  " ++ groom r_
 
