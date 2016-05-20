@@ -3,6 +3,7 @@ module Vlite( fromMplan
 
 import qualified Mplan as M
 import Mplan(BinaryOp, Name)
+import Data.String.Utils(join)
 
 import qualified Data.Map.Strict as Map
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
@@ -10,6 +11,7 @@ import GHC.Generics
 import Control.DeepSeq(NFData)
 
 import Debug.Trace
+import Text.Groom
 
 type Map = Map.Map
 
@@ -109,7 +111,7 @@ solve M.Project { M.child, M.projectout, M.order = [] } =
         originalnames = map maybeGetName exprs
         finalnames = map solveName $ zip originalnames maliases
 
-solve _ = Left "this relational operator is not supported yet"
+solve r_  = Left $ "(Vlite) unsupported M.rel:  " ++ groom r_
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
@@ -119,10 +121,10 @@ fromScalar = sc
 sc ::  Map Name Vexp -> M.ScalarExpr -> Either String Vexp
 sc env (M.Ref refname)  =
   case (Map.lookup refname env) :: Maybe Vexp of
-   Nothing -> Left $ "no column named" ++ show refname ++ "within scope"
+   Nothing -> Left $ "no column named " ++ (join "." refname) ++ " within scope"
    Just v -> Right v
 
-sc _ _ = Left "this scalar expr is not supported yet"
+sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 
 -- string means monet plan string.
 fromString :: String -> Either String [(Vexp, Maybe Name)]
