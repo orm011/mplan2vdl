@@ -27,7 +27,9 @@ instance NFData FoldOp
 may convert to differnt range after -}
 data Vexp =
   Load Name
-  | Range  { rmin :: Int, rstep :: Int } {- length deduced by context later-}
+  | Range  { rmin :: Int, rstep :: Int } {- length deduced by context later.
+actually, we should just use the count as an input parameter (just like
+we need max) -}
   | CRange { rmin :: Int, rstep :: Int, rmax :: Int } {- fixed length -}
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
