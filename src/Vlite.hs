@@ -149,4 +149,10 @@ sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 
 -- string means monet plan string.
 fromString :: String -> Either String [(Vexp, Maybe Name)]
-fromString mplanstring = M.fromString mplanstring >>= fromMplan
+fromString mplanstring =
+  do mplan <- M.fromString mplanstring
+     let vlite = fromMplan mplan
+     let tr = case vlite of
+                Left err -> "Error at Vlite stage:\n" ++ err
+                Right g -> "Vlite output\n: " ++ groom g
+     trace tr vlite

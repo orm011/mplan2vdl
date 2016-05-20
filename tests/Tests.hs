@@ -57,8 +57,6 @@ makeTestTree compilername compiler  pairs   = map helper pairs
   where helper (a, b)  = let plainName  = makeTestName a b
                              prs = compiler b
                              detailedName = compilername ++ plainName ++ "\n\n"
-                             msg = (case prs of
-                                       Left errmsg -> errmsg
-                                       Right ans -> groom ans)
+                             msg = "failed " ++ compilername  ++ " test"
                              tc = testCase detailedName $ (isRight prs) @? msg
                              in localOption (mkTimeout 10000) {-10 milliseconds-} tc

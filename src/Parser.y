@@ -14,7 +14,8 @@ import Data.Either(isRight,partitionEithers)
 import Scanner (ScannedToken(..), Token(..), scan)
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
-
+import Text.Groom
+import Debug.Trace
 }
 
 --------------------------------- Directives ----------------------------------
@@ -269,8 +270,10 @@ parseError toks =
 
 fromString :: String -> Either String Rel
 fromString str =
-  let (errs, okays) = partitionEithers $ Scanner.scan str
-  in
-    if errs /= [] then Left $ "Token error: " ++ (show $ head errs)
-    else parse okays
+  do tokens  <- sequence $ Scanner.scan str
+     let parsetree  = parse tokens
+     let tr = case parsetree  of
+              Left err -> "Error at Parser stage:\n" ++ err
+              Right g ->  "Parser output:\n" ++ groom g
+     trace tr parsetree
 }

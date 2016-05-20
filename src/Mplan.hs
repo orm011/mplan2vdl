@@ -13,7 +13,7 @@ import Text.Groom
 import Data.String.Utils(join)
 import Data.Int
 import Data.Monoid(mappend)
-
+import Debug.Trace
 
 data MType =
   MTinyint
@@ -249,8 +249,13 @@ fromParseTree :: P.Rel -> Either String RelExpr
 fromParseTree = solve
 
 fromString :: String -> Either String RelExpr
-fromString s = P.fromString s >>= fromParseTree
-
+fromString mplanstring =
+  do parsetree <- P.fromString mplanstring
+     let mplan = fromParseTree parsetree
+     let tr = case mplan of
+                Left err -> "Error at Mplan stage:\n" ++ err
+                Right g -> "Mplan output:\n" ++ groom g
+     trace tr mplan
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
 sc :: P.ScalarExpr -> Either String ScalarExpr
