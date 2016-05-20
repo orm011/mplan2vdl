@@ -273,7 +273,7 @@ fromString str =
   do tokens  <- sequence $ Scanner.scan str
      let parsetree  = parse tokens
      let tr = case parsetree  of
-              Left err -> "Error at Parser stage:\n" ++ err
-              Right g ->  "Parser output:\n" ++ groom g
+              Left err -> "\n--Error at Parser stage:\n" ++ err
+              Right g ->  "\n--Parser output:\n" ++ groom g
      trace tr parsetree
 }

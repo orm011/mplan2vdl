@@ -153,6 +153,6 @@ fromString mplanstring =
   do mplan <- M.fromString mplanstring
      let vlite = fromMplan mplan
      let tr = case vlite of
-                Left err -> "Error at Vlite stage:\n" ++ err
-                Right g -> "Vlite output\n: " ++ groom g
+                Left err -> "\n--Error at Vlite stage:\n" ++ err
+                Right g -> "\n--Vlite output:\n" ++ groom g
      trace tr vlite

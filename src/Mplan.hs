@@ -245,17 +245,6 @@ solve P.Node { P.relop = "group by"
 solve s_ = Left $ " parse tree not valid or case not implemented:  " ++ groom s_
 
 
-fromParseTree :: P.Rel -> Either String RelExpr
-fromParseTree = solve
-
-fromString :: String -> Either String RelExpr
-fromString mplanstring =
-  do parsetree <- P.fromString mplanstring
-     let mplan = fromParseTree parsetree
-     let tr = case mplan of
-                Left err -> "Error at Mplan stage:\n" ++ err
-                Right g -> "Mplan output:\n" ++ groom g
-     trace tr mplan
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
 sc :: P.ScalarExpr -> Either String ScalarExpr
@@ -304,3 +293,14 @@ readIntLiteral str =
     [(num, [])] -> Right num
     _ -> Left $ "cannot parse as integer literal: " ++ str
 
+fromParseTree :: P.Rel -> Either String RelExpr
+fromParseTree = solve
+
+fromString :: String -> Either String RelExpr
+fromString mplanstring =
+  do parsetree <- P.fromString mplanstring
+     let mplan = fromParseTree parsetree
+     let tr = case mplan of
+                Left err -> "\n--Error at Mplan stage:\n" ++ err
+                Right g -> "\n--Mplan output:\n" ++ groom g
+     trace tr mplan
