@@ -19,7 +19,7 @@ data ShOp = Gather | OpScatter
   deriving (Eq, Show, Generic)
 instance NFData ShOp
 
-data FoldOp = Sum | Max | Min
+data FoldOp = FSum | FMax | FMin
   deriving (Eq, Show, Generic)
 instance NFData FoldOp
 
@@ -34,7 +34,7 @@ we need max) -}
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
   | FoldSel  { fsdata :: Vexp, fsgroups :: Vexp }
-  | Fold { fop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
+  | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
   | Cross
   | Partition
   | Cast
@@ -118,19 +118,24 @@ solve M.Project { M.child, M.projectout, M.order = [] } =
         originalnames = map maybeGetName exprs
         finalnames = map solveName $ zip originalnames maliases
 
-{- need to partition the inputs by first group values...
-   then go on for a second group..
-   partition one column then apply to other column.
-
-   hardcoded assumptions: max value of columns.
-   (TODO: plug this through as a configuration param, as well as counts)
--}
-
--- solve M.Group { M.child,
---                 M.inputkeys,
---                 M.outputkeys,
---                 M.outputaggs } = Left "implement me " ++
-
+{- the easy group by case: static single group -}
+solve M.GroupBy { M.child,
+                M.inputkeys = [],
+                M.outputkeys = [],
+                M.outputaggs } =
+  do env <- solve' child
+     let (aggs, aliases) = unzip outputaggs
+     resolvedAggs <- sequence $ map (solveAgg env) aggs
+     return $ zip resolvedAggs aliases
+     where
+       solveAgg env (M.Sum exp) = do fdata <- sc env exp
+                                     return $ Fold { foldop = FSum,
+                                                     fdata,
+                                                     fgroups = zeros_ }
+       solveAgg _ M.Count = return $ Fold { foldop = FSum,
+                                 fdata = ones_,
+                                 fgroups = zeros_ }
+       solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
 solve r_  = Left $ "(Vlite) unsupported M.rel:  " ++ groom r_
 
@@ -144,6 +149,19 @@ sc env (M.Ref refname)  =
   case (Map.lookup refname env) :: Maybe Vexp of
    Nothing -> Left $ "no column named " ++ (join "." refname) ++ " within scope"
    Just v -> Right v
+
+
+-- TODO: strictly speaking, I need to know the orignal type in order
+-- to know What kind of computation is actually involved.
+-- Also, voodoo does not have support to express wider /narrower types.
+-- For now, make casting data into a noop
+sc env (M.Cast { M.mtype, M.arg }) =
+  case mtype of
+    M.MTinyint -> sc env arg
+    M.MInt -> sc env arg
+    M.MBigInt -> sc env arg
+    M.MSmallint -> sc env arg
+    othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 

@@ -58,4 +58,4 @@ makeTestTree compilername compiler  pairs   = map helper pairs
                              detailedName = compilername ++ plainName ++ "\n\n"
                              msg = "failed " ++ compilername  ++ " test"
                              tc = testCase detailedName $ (isRight prs) @? msg
-                             in localOption (mkTimeout 100000) {-100 milliseconds-} tc
+                             in localOption (mkTimeout 1000000) {-100 milliseconds-} tc

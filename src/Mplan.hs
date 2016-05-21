@@ -3,7 +3,9 @@ module Mplan( fromParseTree
             , Name
             , BinaryOp
             , RelExpr(..)
-            , ScalarExpr(..)) where
+            , ScalarExpr(..)
+            , GroupAgg(..)
+            , MType(..)) where
 
 import qualified Parser as P
 import Parser(Name)
@@ -141,9 +143,9 @@ data RelExpr =
               , order ::[(Name, OrderSpec)]
               }
   | Select    { child :: RelExpr
-              , selectpredicate :: ScalarExpr
+              , predicate :: ScalarExpr
               }
-  | Group     { child :: RelExpr
+  | GroupBy   { child :: RelExpr
               , inputkeys :: [Name]
               , outputkeys :: [(Name, Maybe Name)]
               , outputaggs :: [(GroupAgg, Maybe Name)]
@@ -206,7 +208,7 @@ solve P.Node { P.relop = "project"
              } =
   do child <- solve ch
      projectout <- solveOutputs out
-     order  <- (case rest of
+     order <- (case rest of
                  [] -> Right []
                  _ -> Left "not dealing with order-by clauses")
      return $ Project {child, projectout, order }
@@ -224,7 +226,7 @@ solve P.Node { P.relop = "group by"
   do child <- solve ch
      inputkeys <- sequence $ map extractKey igroupkeys
      (outputkeys, outputaggs) <- solveGroupOutputs igroupvalues
-     return $  Group {child, inputkeys, outputkeys, outputaggs}
+     return $ GroupBy {child, inputkeys, outputkeys, outputaggs}
        where extractKey P.Expr { P.expr = P.Ref { P.rname }
                                , P.alias = Nothing } = Right rname
              extractKey e_ =
