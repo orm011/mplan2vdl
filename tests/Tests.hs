@@ -8,6 +8,8 @@ import Configuration(defaultConfiguration)
 import Text.Groom
 import Debug.Trace
 import Data.List(intercalate)
+import qualified Name as N
+
 
 import qualified Parser as P
 import qualified Mplan as M
@@ -59,3 +61,5 @@ makeTestTree compilername compiler  pairs   = map helper pairs
                              msg = "failed " ++ compilername  ++ " test"
                              tc = testCase detailedName $ (isRight prs) @? msg
                              in localOption (mkTimeout 1000000) {-100 milliseconds-} tc
+
+

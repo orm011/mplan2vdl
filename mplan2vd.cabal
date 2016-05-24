@@ -23,6 +23,7 @@ library
                      , Configuration
                      , Configuration.Types
                      , Mplan
+                     , Name
                      , Vlite
   other-modules:       CLI
   build-depends:       base >= 4.7 && <5

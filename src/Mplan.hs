@@ -1,6 +1,5 @@
 module Mplan( fromParseTree
             , fromString
-            , Name
             , BinaryOp
             , RelExpr(..)
             , ScalarExpr(..)
@@ -8,11 +7,10 @@ module Mplan( fromParseTree
             , MType(..)) where
 
 import qualified Parser as P
-import Parser(Name)
+import Name(Name(..))
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Text.Groom
-import Data.String.Utils(join)
 import Data.Int
 import Data.Monoid(mappend)
 import Debug.Trace
@@ -33,11 +31,11 @@ instance NFData MType
 
 resolveTypeSpec :: P.TypeSpec -> Either String MType
 resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
-  where f ["int"] [] = Right MInt
-        f ["tinyint"] [] = Right MTinyint
-        f ["smallint"] [] = Right MSmallint
-        f ["bigint"] [] = Right MBigInt
-        f name _ = Left $  "unsupported typespec: " ++ join "," name
+  where f "int" [] = Right MInt
+        f "tinyint" [] = Right MTinyint
+        f "smallint" [] = Right MSmallint
+        f "bigint" [] = Right MBigInt
+        f name _ = Left $  "unsupported typespec: " ++ name
         -- f ["decimal"] [a, b] = Right (MDecimal a b)
         -- f ["sec_interval"] [a] = Right (MSecInterval a)
         -- f ["month_interval"] []  = Right MMonthInterval
@@ -59,11 +57,11 @@ instance NFData BinaryOp
 resolveBinopOpcode :: Name -> Either String BinaryOp
 resolveBinopOpcode nm =
   case nm of
-    ["sys", "sql_add"] -> Right Add
-    ["sys", "sql_sub"] -> Right Sub
-    ["sys", "sql_mul"] -> Right Mul
-    ["sys", "sql_div"] -> Right Div
-    _ -> Left $ "unsupported binary function: " ++ join "." nm
+    Name ["sys", "sql_add"] -> Right Add
+    Name ["sys", "sql_sub"] -> Right Sub
+    Name ["sys", "sql_mul"] -> Right Mul
+    Name ["sys", "sql_div"] -> Right Div
+    _ -> Left $ "unsupported binary function: " ++ show nm
 
  {- they must be semantically for a single tuple (see aggregates otherwise) -}
 data UnaryOp =
@@ -75,9 +73,9 @@ instance NFData UnaryOp
 resolveUnopOpcode :: Name -> Either String UnaryOp
 resolveUnopOpcode nm =
   case nm of
-    ["sys", "year"] -> Right Year
-    ["sys", "sql_neg"] -> Right Neg
-    _ -> Left $ "unsupported scalar function " ++ join "." nm
+    Name ["sys", "year"] -> Right Year
+    Name ["sys", "sql_neg"] -> Right Neg
+    _ -> Left $ "unsupported scalar function " ++ show nm
 
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
@@ -119,12 +117,12 @@ ghelper P.Expr
   , P.alias }
   = do inner <- sc singlearg
        case fname of
-         ["sys", "sum"] -> return ([], [(Sum inner, alias)])
-         ["sys", "avg"] -> return ([], [(Avg inner, alias)])
-         _ -> Left $ "unknown unary aggregate " ++ join "." fname
+         Name ["sys", "sum"] -> return ([], [(Sum inner, alias)])
+         Name ["sys", "avg"] -> return ([], [(Avg inner, alias)])
+         _ -> Left $ "unknown unary aggregate " ++ show fname
 
 ghelper  P.Expr
-  { P.expr = P.Call { P.fname=["sys", "count"]
+  { P.expr = P.Call { P.fname=Name ["sys", "count"]
                     , P.args=[] }
   , P.alias }
   = Right ([], [(Count, alias)] )

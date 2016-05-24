@@ -2,10 +2,10 @@ module Vlite( fromMplan
             , fromString) where
 
 import qualified Mplan as M
-import Mplan(BinaryOp, Name)
-import Data.String.Utils(join)
-
-import qualified Data.Map.Strict as Map
+import Mplan(BinaryOp)
+import Name(Name(..))
+import qualified Name as NameTable
+import Control.Monad(foldM)
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
@@ -13,7 +13,7 @@ import Control.DeepSeq(NFData)
 import Debug.Trace
 import Text.Groom
 
-type Map = Map.Map
+type NameTable = NameTable.NameTable
 
 data ShOp = Gather | OpScatter
   deriving (Eq, Show, Generic)
@@ -60,11 +60,11 @@ of the operator, so it only makes sense to use this in internal nodes
 whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
-solve' :: M.RelExpr -> Either String (Map Name Vexp)
-solve' relexp  = solve relexp >>= (return . makeEnv)
-  where makeEnv lst = foldl maybeadd Map.empty lst
-        maybeadd env (_, Nothing) = env
-        maybeadd env (vexp, Just newalias) = Map.insert newalias vexp env
+solve' :: M.RelExpr -> Either String (NameTable Vexp)
+solve' relexp  = solve relexp >>= makeEnv
+  where makeEnv lst = foldM maybeadd NameTable.empty lst
+        maybeadd env (_, Nothing) = Right env
+        maybeadd env (vexp, Just newalias) = NameTable.insert newalias vexp env
 
 kMaxval :: Int
 kMaxval = 255
@@ -141,14 +141,23 @@ solve r_  = Left $ "(Vlite) unsupported M.rel:  " ++ groom r_
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
-fromScalar ::  Map Name Vexp -> M.ScalarExpr  -> Either String Vexp
+fromScalar ::  NameTable Vexp -> M.ScalarExpr  -> Either String Vexp
 fromScalar = sc
 
-sc ::  Map Name Vexp -> M.ScalarExpr -> Either String Vexp
+{- notes about tmp naming in Monet:
+ -user columns are only named with lowercase.
+ -temporary columns are sometimes named things like L.L or L1.L1.
+ -to the right of 'as', we get fully qualified names
+ -but sometimes, as a reference, they don't include the fully qualified names.
+eg [L1 as L1]. This means we cannot just use a map in those cases, since
+a search for L1 should potentially mean L1.L1.
+-}
+
+sc ::  NameTable Vexp -> M.ScalarExpr -> Either String Vexp
 sc env (M.Ref refname)  =
-  case (Map.lookup refname env) :: Maybe Vexp of
-   Nothing -> Left $ "no column named " ++ (join "." refname) ++ " within scope"
-   Just v -> Right v
+  case (NameTable.lookup refname env) of
+    Right (_, v) -> Right v
+    Left s -> Left s
 
 
 -- TODO: strictly speaking, I need to know the orignal type in order

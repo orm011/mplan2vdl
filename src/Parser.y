@@ -2,7 +2,6 @@
 {
 module Parser ( parse
               , fromString
-              , Name
               , Rel(..)
               , ScalarExpr(..)
               , Expr(..)
@@ -16,6 +15,8 @@ import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Text.Groom
 import Debug.Trace
+
+import Name(Name(..))
 }
 
 --------------------------------- Directives ----------------------------------
@@ -72,8 +73,8 @@ Node
 : identifier '(' NodeListNE ')' BracketListNE { Node { relop = $1, children = $3, arg_lists = $5 } }
 
 TypeSpec
-: QualifiedName { TypeSpec { tname = $1, tparams=[]  } }
-| QualifiedName '(' NumberListNE ')' { TypeSpec { tname=$1, tparams=$3 } }
+: identifier   { TypeSpec { tname = $1, tparams=[]  } }
+| identifier '(' NumberListNE ')' { TypeSpec { tname=$1, tparams=$3 } }
 
 NumberListNE
 : number { ($1 : []) :: [Int] }
@@ -87,12 +88,13 @@ NodeListNE
 : Tree { ( $1 : [] ) :: [Rel] }
 | Tree ',' NodeListNE { ($1 : $3) :: [Rel] }
 
-QualifiedName
-: Iden { ($1 : []) :: [String] }
-| Iden '.' QualifiedName { ($1 : $3) :: [String] }
 
-Iden
-: identifier { $1  :: String }
+QualifiedName
+: QualifiedNameB { Name $1 }
+
+QualifiedNameB
+: identifier { ( [$1] ) }
+| identifier '.' QualifiedNameB { $1 : $3 }
 
 ExprList
 : { [] }
@@ -191,10 +193,8 @@ InExpr
 ----------------------------------- Haskell -----------------------------------
 {
 
-type Name = [String]
-
 {- eg decimal(15,2) , or smallint  -}
-data TypeSpec = TypeSpec { tname :: Name
+data TypeSpec = TypeSpec { tname :: String
                          , tparams :: [Int] } deriving (Eq,Show,Generic)
 
 instance NFData TypeSpec
