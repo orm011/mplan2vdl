@@ -14,6 +14,8 @@ import Text.Groom
 import Data.Int
 import Data.Monoid(mappend)
 import Debug.Trace
+import Control.Monad(foldM, mapM)
+import Text.Printf (printf)
 
 data MType =
   MTinyint
@@ -53,6 +55,20 @@ data BinaryOp =
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr  {- arith -}
   deriving (Eq, Show, Generic)
 instance NFData BinaryOp
+
+
+
+resolveInfix :: String -> Either String BinaryOp
+resolveInfix str =
+  case str of
+    "<" -> Right Lt
+    ">" -> Right Gt
+    "<=" -> Right Leq
+    ">=" -> Right Geq
+    "=" -> Right Eq
+    "!=" -> Right Neq
+    _ -> Left $ "unknown infix symbol: " ++ str
+
 
 resolveBinopOpcode :: Name -> Either String BinaryOp
 resolveBinopOpcode nm =
@@ -234,6 +250,13 @@ solve P.Node { P.relop = "group by"
  -single child node
  -predicate is a single scalar expression
  -}
+solve P.Node { P.relop = "select"
+             , P.children = [ch]
+             , P.arg_lists = props : []
+             } =
+  do child <- solve ch
+     predicate <- conjunction props
+     return $ Select { child, predicate }
 
 
   {- Semijoin invariants:
@@ -275,7 +298,9 @@ sc P.Cast { P.tspec
 
 sc P.Literal { P.tspec, P.stringRep } =
   do mtype <- resolveTypeSpec tspec
-     int <- ( let r = readIntLiteral stringRep in
+     let trimLeft = tail stringRep
+     let trimmed = reverse $ tail $ reverse trimLeft
+     int <- ( let r = readIntLiteral trimmed in
               case mtype of
                 MInt -> r
                 MTinyint -> r
@@ -284,14 +309,36 @@ sc P.Literal { P.tspec, P.stringRep } =
             )
      return $ IntLiteral int
 
+
+sc P.Infix {P.infixop
+           ,P.left
+           ,P.right} =
+  do l <- sc (P.expr left)
+     r <- sc (P.expr right)
+     binop <- resolveInfix infixop
+     return $ Binop { binop, left=l, right=r }
+
+sc (P.Nested exprs) = conjunction exprs
+
 sc s_ = Left $ "cannot handle this scalar: " ++ groom s_
+
+
+{- converts a list into ANDs -}
+conjunction :: [P.Expr] -> Either String ScalarExpr
+conjunction exprs =
+  do solved <- mapM (sc . P.expr) exprs
+     case solved of
+       [] -> Left $ "conjunction list cannot be empty (should check at parse time)"
+       [x] -> return x
+       x : y : rest -> return $ foldl makeAnd (makeAnd x y) rest
+       where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
 
 
 readIntLiteral :: String -> Either String Int64
 readIntLiteral str =
   case reads str :: [(Int64, String)] of
     [(num, [])] -> Right num
-    _ -> Left $ "cannot parse as integer literal: " ++ str
+    ow -> Left $ printf "cannot parse %s as integer literal: %s" str $ show ow
 
 fromParseTree :: P.Rel -> Either String RelExpr
 fromParseTree = solve
