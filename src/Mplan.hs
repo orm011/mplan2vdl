@@ -334,6 +334,21 @@ sc P.Infix {P.infixop
      binop <- resolveInfix infixop
      return $ Binop { binop, left=l, right=r }
 
+sc P.Interval {P.ifirst=P.Expr {P.expr=first }
+              ,P.firstop
+              ,P.imiddle=P.Expr {P.expr=middle }
+              ,P.secondop
+              ,P.ilast=P.Expr {P.expr=last }
+              } =
+  do sfirst <- sc first
+     smiddle <- sc middle
+     slast <- sc last
+     fop <- resolveInfix firstop
+     sop <- resolveInfix secondop
+     let left = Binop { binop=fop, left=sfirst, right=smiddle }
+     let right = Binop { binop=sop, left=smiddle, right=slast }
+     return $ Binop { binop=LogAnd, left, right}
+
 sc (P.Nested exprs) = conjunction exprs
 
 sc s_ = Left $ "cannot handle this scalar: " ++ groom s_

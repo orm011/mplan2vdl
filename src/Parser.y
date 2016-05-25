@@ -130,8 +130,17 @@ but in practice OR always shows up with parens around its two arguments.
 -}
 ExprNoComma
 : ExprBind  { $1 :: Expr }
-| ExprBind identifier ExprNoComma
-  { Expr { expr=Infix  { infixop = $2, left = ($1 :: Expr), right = ($3 :: Expr) }, alias=Nothing } }
+| ExprBind identifier ExprBind   { Expr { expr=Infix  { infixop = $2, left = ($1 :: Expr), right = ($3 :: Expr) }, alias=Nothing } }
+| ExprBind  identifier ExprBind  identifier ExprBind {
+    Expr { expr=Interval { ifirst=$1
+                         , firstop=$2
+                         , imiddle=$3
+                         , secondop=$4
+                         , ilast=$5
+                         }
+         , alias=Nothing
+         }
+    }
 
 ExprBind {- allows for the aliasing that happens sometimes -}
 : BasicExpr  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
@@ -233,6 +242,12 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                            , left :: Expr
                            , right :: Expr
                            }
+                   | Interval { ifirst :: Expr
+                              , firstop::String
+                              , imiddle::Expr
+                              , secondop::String
+                              , ilast::Expr
+                              }
                    | Filter{ arg :: Expr
                            , oper :: String {-eg like, or ilike or iregex -}
                            , negated :: Bool
