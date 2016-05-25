@@ -8,6 +8,7 @@ module Mplan( fromParseTree
 
 import qualified Parser as P
 import Name(Name(..))
+import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Text.Groom
@@ -16,6 +17,12 @@ import Data.Monoid(mappend)
 import Debug.Trace
 import Control.Monad(foldM, mapM)
 import Text.Printf (printf)
+
+import System.Locale
+import Data.Time.Format
+import Data.Time.Calendar
+import Data.Time
+
 
 data MType =
   MTinyint
@@ -37,13 +44,22 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f "tinyint" [] = Right MTinyint
         f "smallint" [] = Right MSmallint
         f "bigint" [] = Right MBigInt
+        f "date" []  = Right MDate
         f name _ = Left $  "unsupported typespec: " ++ name
         -- f ["decimal"] [a, b] = Right (MDecimal a b)
         -- f ["sec_interval"] [a] = Right (MSecInterval a)
         -- f ["month_interval"] []  = Right MMonthInterval
-        -- f ["date"] []  = Right MDate
+
         -- f ["char"] [a] = Right (MCharFix a)
         -- f ["char"] [] = Right MChar
+
+
+{- assumes date is formatted properly: todo. error handling for tis -}
+resolveDateString :: String -> Int64
+resolveDateString datestr =
+  fromIntegral $ diffDays day zero
+  where zero = (readTime System.Locale.defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
+        day = (readTime System.Locale.defaultTimeLocale "%Y-%m-%d" datestr) :: Day
 
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic)
 instance NFData OrderSpec
@@ -298,16 +314,16 @@ sc P.Cast { P.tspec
 
 sc P.Literal { P.tspec, P.stringRep } =
   do mtype <- resolveTypeSpec tspec
-     let trimLeft = tail stringRep
-     let trimmed = reverse $ tail $ reverse trimLeft
-     int <- ( let r = readIntLiteral trimmed in
-              case mtype of
-                MInt -> r
-                MTinyint -> r
-                MSmallint -> r
-                _ -> Left "need to add conversion to this literal"
-            )
-     return $ IntLiteral int
+     ret <- case mtype of
+       MDate -> Right $ resolveDateString stringRep
+       _ -> do int <- ( let r = readIntLiteral stringRep in
+                        case mtype of
+                          MInt -> r
+                          MTinyint -> r
+                          MSmallint -> r
+                          _ -> Left "need to add conversion to this literal" )
+               return $ int
+     return $ IntLiteral ret
 
 
 sc P.Infix {P.infixop

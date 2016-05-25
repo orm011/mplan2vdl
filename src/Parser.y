@@ -170,7 +170,10 @@ BasicExprBare
 | QualifiedName notnil '(' ExprList ')'
   { Call { fname = $1, args = $4 } }
 | TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
-| TypeSpec literal { Literal {tspec=$1, stringRep=$2 } }
+| TypeSpec literal { Literal {tspec=$1
+                             ,stringRep = reverse $ tail $ reverse $ tail $2
+                             }
+                   }
 | FilterExpr { $1 }
 | InExpr { $1 }
 | '(' ExprListNE ')' { Nested $2 }
