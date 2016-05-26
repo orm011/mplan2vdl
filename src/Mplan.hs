@@ -180,14 +180,16 @@ data RelExpr =
               , outputkeys :: [(Name, Maybe Name)]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
-  | SemiJoin  { lchild :: RelExpr
+  | Join      { lchild :: RelExpr
               , rchild :: RelExpr
               , condition :: ScalarExpr
               }
-  | TopN
+  | TopN      { child :: RelExpr
+              , n :: Int
+              }
   | Cross
-  | Join
   | AntiJoin
+  | SemiJoin
   | LeftOuter
   deriving (Eq,Show, Generic)
 instance NFData RelExpr
@@ -275,10 +277,26 @@ solve P.Node { P.relop = "select"
      return $ Select { child, predicate }
 
 
-  {- Semijoin invariants:
-     - binary relop
-     - condition may be complex (most are quality, but some aren't)
-  -}
+solve P.Node { P.relop = "join"
+             , P.children = [l, r]
+             , P.arg_lists = [ P.Expr { P.expr=cond, P.alias = _}]:[] {-only one condition-}
+             } =
+  do lchild  <- solve l
+     rchild <- solve r
+     condition  <- sc cond
+     return $ Join { lchild, rchild, condition }
+
+-- solve P.Node { P.relop = "top N"
+--              , P.children = [ch]
+--              , P.arg_lists = [lim] : []
+--                }
+--lim is : Literal {tspec = TypeSpec {tname = "wrd", tparams = []}, stringRep }
+
+{- Semijoin invariants:
+ - binary relop
+ - condition may be complex (most are quality, but some aren't)
+
+-}
 
 
 solve s_ = Left $ " parse tree not valid or case not implemented:  " ++ groom s_
