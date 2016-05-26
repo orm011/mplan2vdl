@@ -212,7 +212,10 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MInt -> sc env arg
     M.MBigInt -> sc env arg
     M.MSmallint -> sc env arg
-    M.MChar -> sc env arg -- assuming the string has been converted to int
+    M.MChar -> sc env arg -- assuming the input has already been converted
+    M.MDecimal _ dec ->
+      do ch <- sc env arg -- multiply by 10^dec. hope there is no overflow.
+         return  Binop { bop=M.Mul, bleft = ch, bright = const_ (10 ^ dec) }
     othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
