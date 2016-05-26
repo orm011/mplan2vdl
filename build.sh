@@ -36,7 +36,7 @@ done
 
 if [[ $# -lt 1  ]]
 then
-    FLAG="install --enable-tests"
+    FLAG="install --enable-tests --enable-executable-profiling --enable-library-profiling"
 else
     FLAG=$@
 fi
