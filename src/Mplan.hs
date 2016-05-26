@@ -1,6 +1,6 @@
 module Mplan( fromParseTree
             , fromString
-            , BinaryOp
+            , BinaryOp(..)
             , RelExpr(..)
             , ScalarExpr(..)
             , GroupAgg(..)
@@ -17,24 +17,26 @@ import Data.Monoid(mappend)
 import Debug.Trace
 import Control.Monad(foldM, mapM)
 import Text.Printf (printf)
+import qualified Data.Map.Strict as Map
 
 import System.Locale
 import Data.Time.Format
 import Data.Time.Calendar
 import Data.Time
 
+type Map = Map.Map
 
 data MType =
   MTinyint
   | MInt
   | MBigInt
   | MSmallint
+  | MDate
+  | MChar
   | MDecimal Int Int
   | MSecInterval Int
   | MMonthInterval
-  | MDate
-  | MCharFix Int
-  | MChar
+
   deriving (Eq, Show, Generic)
 instance NFData MType
 
@@ -45,6 +47,7 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f "smallint" [] = Right MSmallint
         f "bigint" [] = Right MBigInt
         f "date" []  = Right MDate
+        f "char" _ = Right MChar -- ignoring the length fields
         f name _ = Left $  "unsupported typespec: " ++ name
         -- f ["decimal"] [a, b] = Right (MDecimal a b)
         -- f ["sec_interval"] [a] = Right (MSecInterval a)
@@ -53,6 +56,26 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         -- f ["char"] [a] = Right (MCharFix a)
         -- f ["char"] [] = Right MChar
 
+resolveCharLiteral :: String -> Either String Int64
+resolveCharLiteral ch =
+  case ch of
+    "A" -> Right 64
+    "N"-> Right 16
+    "R"-> Right 40
+    "F"-> Right 40
+    "O"-> Right 16
+    "AIR"-> Right 88
+    "FOB"-> Right 112
+    "MAIL"-> Right 40
+    "RAIL"-> Right 136
+    "REG AIR"-> Right 64
+    "SHIP"-> Right 160
+    "TRUCK"-> Right 16
+    "COLLECT COD"-> Right 120
+    "DELIVER IN PERSON"-> Right 16
+    "NONE"-> Right 96
+    "TAKE BACK RETURN"-> Right 56
+    s_ -> Left $ "unable to dict encode this character literal :" ++ s_
 
 {- assumes date is formatted properly: todo. error handling for tis -}
 resolveDateString :: String -> Int64
@@ -71,7 +94,6 @@ data BinaryOp =
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr  {- arith -}
   deriving (Eq, Show, Generic)
 instance NFData BinaryOp
-
 
 
 resolveInfix :: String -> Either String BinaryOp
@@ -334,6 +356,7 @@ sc P.Literal { P.tspec, P.stringRep } =
   do mtype <- resolveTypeSpec tspec
      ret <- case mtype of
        MDate -> Right $ resolveDateString stringRep
+       MChar -> resolveCharLiteral stringRep
        _ -> do int <- ( let r = readIntLiteral stringRep in
                         case mtype of
                           MInt -> r
