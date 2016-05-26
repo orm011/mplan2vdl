@@ -143,19 +143,19 @@ solve M.GroupBy { M.child,
 for now, this join assumes but does not check
 that the two tables have a fk dependency between them
 -}
-solve M.Join { M.lchild = M.Table _,
-               M.rchild = M.Table _,
-               M.cond = M.Binop { M.binop=M.Eq
-                                , M.left=Ref leftcol
-                                , M.right=Ref rightcol
+solve M.Join { M.lchild = M.Table _ _,
+               M.rchild = M.Table _ _,
+               M.condition = M.Binop { M.binop=M.Eq
+                                , M.left=M.Ref leftcol
+                                , M.right=M.Ref rightcol
                                 }
              } = Left $ "under construction"
   -- do leftenv <- solve' lchild
   --    rightenv <- solve' rchild
-  --    -- TODO check table lchild has leftcol_rightcol fk, get that column
+  --    TODO check table lchild has leftcol_rightcol fk, get that column
 
 
-solve (M.Join _) = Left $ "unsupported join (only fk-like joins right now)"
+solve (M.Join _ _ _) = Left $ "unsupported join (only fk-like joins right now)"
 
 solve r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
