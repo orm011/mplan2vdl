@@ -214,6 +214,11 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MSmallint -> sc env arg
     othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
+sc env (M.Binop { M.binop, M.left, M.right }) =
+  do l <- sc env left
+     r <- sc env right
+     return $ Binop { bop=binop, bleft=l, bright=r }
+
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 
 -- string means monet plan string.
