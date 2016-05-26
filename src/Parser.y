@@ -6,6 +6,7 @@ module Parser ( parse
               , ScalarExpr(..)
               , Expr(..)
               , TypeSpec(..)
+              , Attr(..)
               ) where
 
 import Text.Printf (printf)
@@ -144,11 +145,11 @@ ExprNoComma
 
 ExprBind {- allows for the aliasing that happens sometimes -}
 : BasicExpr  { Expr { expr=($1 :: ScalarExpr ), alias=Nothing } }
-| BasicExpr  as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
+| BasicExpr as QualifiedName { Expr { expr=($1 :: ScalarExpr ), alias= Just $3 } }
 
 {-attributes only seem to show up next to column refernces, and sometimes functions -}
 BasicExpr
-: BasicExprBare AttrList { $1 :: ScalarExpr }
+: BasicExprBare  { $1 :: ScalarExpr }
 
 AttrList
 : { [] }
@@ -156,30 +157,30 @@ AttrList
 
 Attr
 {- NOTNULL shows up after columns marked NOT NULL in the schena, and sometimes function calls like sys.sum() -}
-: NOTNULL { undefined }
+: NOTNULL { NotNull }
 {- ASC shows up in 2nd bracket list of projects, after column references when ORDER BY is in the query
 Desc does not produce an explicit annotation.-}
-| ASC { undefined }
+| ASC { Asc }
 {- HASHCOL shows up next to column references, those that are primary keys -}
-| HASHCOL { undefined }
+| HASHCOL { HashCol }
 {- JOINIDX the name refers to a fk constraint name (which looks like a column name) in the schema on the right -}
-| JOINIDX QualifiedName { undefined }
+| JOINIDX QualifiedName { JoinIdx $2 }
 {- HASHIDX shows up on table() operators. foreign key constraint name on the left-}
-| HASHIDX { undefined }
+| HASHIDX { HashIdx }
 {- shows up in some join bracket lists -}
-| FETCH { undefined }
+| FETCH { Fetch }
 
 {- expression with no attributes yet.
   Almost always used followed by attributes, so use BasicExpr instead of this.
 -}
 BasicExprBare
-: QualifiedName  { Ref $1 }
-| QualifiedName '(' ExprList ')'
+: QualifiedName AttrList  { Ref $1 $2 }
+| QualifiedName '(' ExprList ')' AttrList -- not null and hashcol sometimes
   { Call { fname = $1, args = $3 } }
-| QualifiedName notnil '(' ExprList ')'
+| QualifiedName notnil '(' ExprList ')' AttrList
   { Call { fname = $1, args = $4 } }
 | TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
-| TypeSpec literal { Literal {tspec=$1
+| TypeSpec literal  { Literal {tspec=$1
                              ,stringRep = reverse $ tail $ reverse $ tail $2
                              }
                    }
@@ -227,11 +228,19 @@ with expressions (like NOT NULL seems to be)
 data Expr = Expr { expr :: ScalarExpr, alias :: Maybe Name } deriving (Eq,Show,Generic)
 instance NFData Expr
 
+data Attr = NotNull
+          | JoinIdx Name
+          | HashCol
+          | HashIdx
+          | Asc
+          | Fetch deriving (Eq,Show,Generic)
+instance NFData Attr
+
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tspec :: TypeSpec
                            , stringRep :: String
                            }
-                   | Ref   { rname :: Name }
+                   | Ref   { rname :: Name, attrs::[Attr] }
                    | Call  { fname :: Name
                            , args :: [Expr]
                            }
