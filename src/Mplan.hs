@@ -324,7 +324,7 @@ solve P.Leaf { P.source, P.columns  } =
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs } --attr => no alias
                  , P.alias=Nothing } =
       case getJoinIdx attrs of
-        [str] -> Right  (rname, Just str)
+        [str] -> Right  (str, Just rname) -- notice reversal
         [] -> Right (rname, Nothing)
         s_ -> Left $ "unexpected: multiple fkey indices" ++ groom attrs
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs } -- alias => no attr
