@@ -19,7 +19,7 @@ data ShOp = Gather | OpScatter
   deriving (Eq, Show, Generic)
 instance NFData ShOp
 
-data FoldOp = FSum | FMax | FMin
+data FoldOp = FSum | FMax | FMin | FSel
   deriving (Eq, Show, Generic)
 instance NFData FoldOp
 
@@ -33,7 +33,6 @@ we need max) -}
   | CRange { rmin :: Int, rstep :: Int, rmax :: Int } {- fixed length -}
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
-  | FoldSel  { fsdata :: Vexp, fsgroups :: Vexp }
   | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
   | Cross
   | Partition
@@ -142,20 +141,47 @@ solve M.GroupBy { M.child,
 {-direct, foreign key join of two tables.
 for now, this join assumes but does not check
 that the two tables have a fk dependency between them
+
+the reason only tables are allowed as right-children is
+that after filtering the right child, the old position pointers
+for the  are effectively invalid. On the other hand, the left table
+can be anything, as the pointers are still valid.
+
+(eg, after a filter on the right child...)
 -}
-solve M.Join { M.lchild = M.Table _ _,
-               M.rchild = M.Table _ _,
-               M.condition = M.Binop { M.binop=M.Eq
-                                , M.left=M.Ref leftcol
-                                , M.right=M.Ref rightcol
-                                }
-             } = Left $ "under construction"
-  -- do leftenv <- solve' lchild
-  --    rightenv <- solve' rchild
-  --    TODO check table lchild has leftcol_rightcol fk, get that column
+solve M.FKJoin { M.child -- can be derived rel
+               , M.parent = parent@(M.Table _ _) -- only unfiltered rel.
+               , M.idxcol
+               } =
+  do leftcols <- solve child
+     leftenv <- solve' child
+     rightcols <- solve parent
+     let (rightvecs, ralias) = unzip rightcols
+     (_, shpos) <- NameTable.lookup idxcol leftenv
+     let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
+     let gatheredcols = zip (map joinCol rightvecs) ralias
+     return $ leftcols ++ gatheredcols -- same names?
 
 
-solve (M.Join _ _ _) = Left $ "unsupported join (only fk-like joins right now)"
+solve (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
+\ joins with a plain table allowed)"
+
+solve M.Select { M.child -- can be derived rel
+               , M.predicate
+               } =
+  do childcols <- solve child
+     childenv <- solve' child
+     let (childvecs, chalias) = unzip childcols
+     preds <- sc childenv predicate
+     let idxs = Fold { foldop=FSel, fdata=preds, fgroups=zeros_ }
+     let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
+     let gatheredcols = zip (map gatherQual childvecs) chalias
+     return $ gatheredcols -- same names
+
+
+
+
+solve (M.Join ) = Left $ "unsupported join (only fk-like joins right now)"
 
 solve r_  = Left $ "unsupported M.rel:  " ++ groom r_
 

@@ -15,7 +15,7 @@ import Text.Groom
 import Data.Int
 import Data.Monoid(mappend)
 import Debug.Trace
-import Control.Monad(foldM, mapM)
+import Control.Monad(foldM, mapM, void)
 import Text.Printf (printf)
 import qualified Data.Map.Strict as Map
 
@@ -39,6 +39,13 @@ data MType =
 
   deriving (Eq, Show, Generic)
 instance NFData MType
+
+isJoinIdx :: P.Attr -> [Name]
+isJoinIdx (P.JoinIdx s) = [s]
+isJoinIdx _ = []
+
+getJoinIdx :: [P.Attr] -> [Name]
+getJoinIdx attrs = foldl (++) [] (map isJoinIdx attrs)
 
 resolveTypeSpec :: P.TypeSpec -> Either String MType
 resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
@@ -271,14 +278,15 @@ data RelExpr =
               , outputkeys :: [(Name, Maybe Name)]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
-  | Join      { lchild :: RelExpr
-              , rchild :: RelExpr
-              , condition :: ScalarExpr
+  | FKJoin    { child :: RelExpr
+              , parent :: RelExpr
+              , idxcol :: Name
               }
   | TopN      { child :: RelExpr
               , n :: Int
               }
   | Cross
+  | Join
   | AntiJoin
   | SemiJoin
   | LeftOuter
@@ -308,13 +316,22 @@ solve :: P.Rel -> Either String RelExpr
   -some of the names involve using schema (not for now)
    for concrete resolution to things like partsupp.%partsupp_fk1
 -}
-solve P.Leaf { P.source, P.columns } =
+solve P.Leaf { P.source, P.columns  } =
   do pcols <- sequence $ map split columns
      checkedcols <- check pcols ( /= []) "list of table columns must not be empty"
      return $ Table { tablename = source, tablecolumns = checkedcols}
   where
-    split P.Expr { P.expr = P.Ref { P.rname }
-                 , P.alias } = Right (rname, alias)
+    split P.Expr { P.expr = P.Ref { P.rname, P.attrs } --attr => no alias
+                 , P.alias=Nothing } =
+      case getJoinIdx attrs of
+        [str] -> Right  (rname, Just str)
+        [] -> Right (rname, Nothing)
+        s_ -> Left $ "unexpected: multiple fkey indices" ++ groom attrs
+    split P.Expr { P.expr = P.Ref { P.rname, P.attrs } -- alias => no attr
+                 , P.alias } =
+      case getJoinIdx attrs of
+        [] -> Right (rname, alias)
+        s_ -> Left $ "unexpected: have both alias and join idx" ++ groom s_
     split _ = Left "table outputs should only have reference expressions"
 
 
@@ -368,14 +385,27 @@ solve P.Node { P.relop = "select"
      return $ Select { child, predicate }
 
 
+{-only handling joins where the condition is
+done via  a foreign key -}
 solve P.Node { P.relop = "join"
              , P.children = [l, r]
-             , P.arg_lists = [ P.Expr { P.expr=cond, P.alias = _}]:[] {-only one condition-}
+             , P.arg_lists =
+               [ P.Expr
+                 { P.expr=P.Infix
+                   { P.infixop = "="
+                   , P.left = P.Expr (P.Ref idxcol _) Nothing
+                   , P.right = P.Expr (P.Ref _ attrs) Nothing
+                   }
+                 , P.alias = _}]:[] {-only one condition-}
              } =
-  do lchild  <- solve l
-     rchild <- solve r
-     condition  <- sc cond
-     return $ Join { lchild, rchild, condition }
+  do child  <- solve l
+     parent <- solve r
+     return $ FKJoin { child, parent, idxcol }
+
+solve arg@P.Node { P.relop="join"
+             , P.children= _
+             , P.arg_lists=_ } = Left $ "only handling joins via fk right now" ++ groom arg
+
 
 -- solve P.Node { P.relop = "top N"
 --              , P.children = [ch]
@@ -391,7 +421,6 @@ solve P.Node { P.relop = "join"
 
 
 solve s_ = Left $ " parse tree not valid or case not implemented:  " ++ groom s_
-
 
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
