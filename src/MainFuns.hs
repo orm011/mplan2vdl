@@ -9,7 +9,7 @@ terms of the MIT (X11) License as described in the LICENSE file.
 decafc is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE.  See the X11 license for more details. -}
-module MainFuns (main) where
+module MainFuns (main, fromFile) where
 
 import Prelude hiding (readFile)
 import qualified Prelude
@@ -32,6 +32,8 @@ import qualified CLI
 import Configuration (Configuration, CompilerStage(..))
 import qualified Configuration
 import qualified Vlite as V
+import qualified Name as Name
+
 
 ------------------------ Impure code: Fun with ExceptT ------------------------
 
@@ -51,7 +53,7 @@ main = do
     configuration <- ExceptT CLI.getConfiguration
     input <- readFile $ Configuration.input configuration
     -- Part II: Process it
-    hoistEither $ V.fromString input
+    hoistEither $ V.toVref input
   case result of
     -- Part III: Write output
     Left errorMessage -> fatal errorMessage
@@ -66,3 +68,9 @@ fatal message = do
   progName <- getProgName
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
+
+fromFile :: String -> IO (Either String [(V.Vexp, Maybe Name.Name)])
+fromFile f =
+  do input <- Prelude.readFile f
+     let sol = V.fromString input
+     return sol

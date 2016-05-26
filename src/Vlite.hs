@@ -1,5 +1,7 @@
 module Vlite( fromMplan
-            , fromString) where
+            , fromString
+            , Vexp(..)
+            , toVref) where
 
 import qualified Mplan as M
 import Mplan(BinaryOp)
@@ -8,7 +10,7 @@ import qualified Name as NameTable
 import Control.Monad(foldM)
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
-import Control.DeepSeq(NFData)
+import Control.DeepSeq(NFData,($!!))
 import Data.Int
 import Debug.Trace
 import Text.Groom
@@ -25,20 +27,25 @@ instance NFData FoldOp
 
 {- Range has no need for count arg at this point.
 may convert to differnt range after -}
-data Vexp =
+data Vexp  =
   Load Name
-  | Range  { rmin :: Int64, rstep :: Int64 } {- length deduced by context later.
-actually, we should just use the count as an input parameter (just like
-we need max) -}
-  | CRange { rmin :: Int64, rstep :: Int64, rmax :: Int64 } {- fixed length -}
+  | Range  { rmin :: Int64, rstep :: Int64 }
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
-  | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
+  | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
-  | Cross
-  | Partition
-  | Cast
-  deriving (Eq,Show, Generic)
+  deriving (Eq,Show,Generic)
 instance NFData Vexp
+
+
+data Vref  =
+  VLoad Name
+  | VRange  { vrmin :: Int64, vrstep :: Int64 }
+  | VBinop { vbop :: BinaryOp, vbleft :: Int, vbright :: Int }
+  | VShuffle { vshop :: ShOp,  vshsource :: Int, vshpos :: Int }
+  | VFold { vfoldop :: FoldOp, vfdata :: Int, vfgroups :: Int }
+  deriving (Eq,Show,Generic)
+instance NFData Vref
+
 
 {- some convenience vectors -}
 const_ :: Int64 -> Vexp
@@ -48,7 +55,7 @@ pos_ = Range { rmin = 0, rstep = 1 }
 ones_ = const_ 1
 zeros_ = const_ 0
 
-range_ n = CRange {rmin = 0, rstep = 1, rmax = n }
+range_ n = Range {rmin = 0, rstep = 1 }
 
 fromMplan :: M.RelExpr -> Either String [(Vexp, Maybe Name)]
 fromMplan = solve
@@ -166,6 +173,7 @@ solve M.FKJoin { M.table -- can be derived rel
 solve (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
 \ joins with a plain table allowed)"
 
+
 solve M.Select { M.child -- can be derived rel
                , M.predicate
                } =
@@ -231,10 +239,43 @@ sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 fromString :: String -> Either String [(Vexp, Maybe Name)]
 fromString mplanstring =
   do mplan <- M.fromString mplanstring
-     let vlite = fromMplan mplan
+     let vlite = fromMplan $!! mplan
      let tr = case vlite of
                 Left err -> "\n--Error at Vlite stage:\n" ++ err
                 Right g -> "\n--Vlite output:\n" ++ groom g
      trace tr vlite
 
 
+toVref :: String -> Either String [(Int, Vref)]
+toVref str = do vexps <-fromString str
+                return $ reverse $ foldl process [(0, VLoad $ Name ["dummy"])] (map fst vexps)
+                where process log vex  = let (newl, _) = printHelper log vex
+                                         in newl
+
+addToLog :: [(Int, Vref)] -> Vref -> ([(Int, Vref)], Int)
+addToLog log v = let (n, _) = head log
+                 in ((n+1, v) : log, n+1)
+
+printHelper :: [(Int, Vref)] -> Vexp-> ([(Int, Vref)], Int)
+printHelper log v@(Load n) = addToLog log (VLoad n)
+printHelper log v@(Range  { rmin , rstep  }) = addToLog log (VRange { vrmin=rmin, vrstep=rstep })
+
+printHelper log v@(Binop { bop , bleft , bright  }) =
+  let (newlog, newn) = printHelper log bleft
+      (newlog', newn') = printHelper newlog bright
+      newbinop = VBinop {vbop=bop, vbleft=newn, vbright=newn'}
+      in addToLog newlog' newbinop
+
+printHelper log v@(Shuffle { shop , shsource , shpos  }) =
+  let (newlog, newn) = printHelper log shsource
+      (newlog', newn') = printHelper newlog shpos
+      newbinop = VShuffle {vshop=shop, vshsource=newn, vshpos=newn'}
+      in addToLog newlog' newbinop
+
+printHelper log v@(Fold { foldop , fdata , fgroups  }) =
+  let (newlog, newn) = printHelper log fdata
+      (newlog', newn') = printHelper newlog fgroups
+      newbinop = VFold {vfoldop=foldop, vfdata=newn, vfgroups=newn'}
+      in addToLog newlog' newbinop
+
+  -- | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
