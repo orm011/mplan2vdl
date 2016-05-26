@@ -9,7 +9,7 @@ import Control.Monad(foldM)
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
-
+import Data.Int
 import Debug.Trace
 import Text.Groom
 
@@ -27,10 +27,10 @@ instance NFData FoldOp
 may convert to differnt range after -}
 data Vexp =
   Load Name
-  | Range  { rmin :: Int, rstep :: Int } {- length deduced by context later.
+  | Range  { rmin :: Int64, rstep :: Int64 } {- length deduced by context later.
 actually, we should just use the count as an input parameter (just like
 we need max) -}
-  | CRange { rmin :: Int, rstep :: Int, rmax :: Int } {- fixed length -}
+  | CRange { rmin :: Int64, rstep :: Int64, rmax :: Int64 } {- fixed length -}
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp  }
   | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
@@ -41,7 +41,7 @@ we need max) -}
 instance NFData Vexp
 
 {- some convenience vectors -}
-const_ :: Int -> Vexp
+const_ :: Int64 -> Vexp
 const_ c = Range { rmin = c, rstep = 0 }
 
 pos_ = Range { rmin = 0, rstep = 1 }
@@ -212,12 +212,15 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MInt -> sc env arg
     M.MBigInt -> sc env arg
     M.MSmallint -> sc env arg
+    M.MChar -> sc env arg -- assuming the string has been converted to int
     othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
   do l <- sc env left
      r <- sc env right
      return $ Binop { bop=binop, bleft=l, bright=r }
+
+sc env (M.IntLiteral n) = return $ const_ n
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 
