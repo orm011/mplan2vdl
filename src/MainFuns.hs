@@ -9,7 +9,7 @@ terms of the MIT (X11) License as described in the LICENSE file.
 decafc is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE.  See the X11 license for more details. -}
-module MainFuns (main, parse) where
+module MainFuns (main) where
 
 import Prelude hiding (readFile)
 import qualified Prelude
@@ -24,15 +24,14 @@ import System.Environment (getProgName)
 import qualified System.Exit
 import System.IO (IOMode(..), hClose, hPutStrLn, openFile, stdout, stderr)
 import Text.Printf (printf)
+import Text.Groom (groom)
 
 import Data.List.Utils (replace)
 
 import qualified CLI
 import Configuration (Configuration, CompilerStage(..))
 import qualified Configuration
-import qualified Parser
-import qualified Scanner
-
+import qualified Vlite as V
 
 ------------------------ Impure code: Fun with ExceptT ------------------------
 
@@ -52,11 +51,11 @@ main = do
     configuration <- ExceptT CLI.getConfiguration
     input <- readFile $ Configuration.input configuration
     -- Part II: Process it
-    hoistEither $ process configuration input
+    hoistEither $ V.fromString input
   case result of
     -- Part III: Write output
     Left errorMessage -> fatal errorMessage
-    Right actions -> sequence_ actions
+    Right vl -> putStrLn $ groom vl
   where hoistEither = ExceptT . return
 
 readFile :: FilePath -> ExceptT String IO String
@@ -67,57 +66,3 @@ fatal message = do
   progName <- getProgName
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
-
-
----------------------------- Pure code: Processing ----------------------------
-
-{- Since our compiler only handles single files, the 'Configuration' struct
-doesn't currently get passed through to the scanner and parser code.  (This may
-change--one can see the scanner and parser as acting in a reader monad.)  The
-big problem with this is that error messages generated in the scanner and
-parser won't contain the file name--the file name has to get added in this
-function. -}
-mungeErrorMessage :: Configuration -> Either String a -> Either String a
-mungeErrorMessage configuration =
-  ifLeft (\str -> (Configuration.input configuration ++ " ") ++ (replace "'\n'" "0xA" str |> replace "'\xc'" "0xC"))
-  where ifLeft f (Left v) = Left $ f v
-        ifLeft _ (Right a) = Right a
-
-{- The pure guts of the compiler convert input to output.  Exactly what output
-they produce, though, depends on the configuration. -}
-process :: Configuration -> String -> Either String [IO ()]
-process configuration input =
-  -- Dispatch on the configuration, modifying error messages appropriately.
-  case Configuration.target configuration of
-    Scan -> scan configuration input
-    Parse -> parse configuration input
-    phase -> Left $ show phase ++ " not implemented\n"
-
-scan :: Configuration -> String -> Either String [IO ()]
-scan configuration input =
-  let tokensAndErrors =
-        Scanner.scan input |>
-        map (mungeErrorMessage configuration) |>
-        map Scanner.formatTokenOrError
-  in
-    let there_are_errors =  partitionEithers tokensAndErrors |> fst |> null |> not
-    in
-  {- We have to interleave output to standard error (for errors) and standard
-  output or a file (for output), so we need to actually build an appropriate
-  set of IO actions. -}
-      Right $ [ bracket openOutputHandle hClose $ \hOutput ->
-                forM_ tokensAndErrors $ \tokOrError ->
-                case tokOrError of
-                  Left err -> hPutStrLn stderr err
-                  Right tok -> hPutStrLn hOutput tok
-              ] ++ (if there_are_errors then [System.Exit.exitFailure] else [])
-  where openOutputHandle = maybe (hDuplicate stdout) (flip openFile WriteMode) $ Configuration.outputFileName configuration
-
-parse :: Configuration -> String -> Either String [IO ()]
-parse configuration input = do
-  let (errors, tokens) = partitionEithers $ Scanner.scan input
-  -- If errors occurred, bail out.
-  mapM_ (mungeErrorMessage configuration . Left) errors
-  -- Otherwise, attempt a parse.
-  void $ mungeErrorMessage configuration $ Parser.parse tokens
-  Right []
