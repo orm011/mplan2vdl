@@ -127,16 +127,16 @@ solve M.GroupBy { M.child,
      resolvedAggs <- sequence $ map (solveAgg env) aggs
      return $ zip resolvedAggs aliases
      where
-       solveAgg env (M.Sum exp) = do fdata <- sc env exp
-                                     return $ Fold { foldop = FSum,
-                                                     fdata,
-                                                     fgroups = zeros_ }
-       solveAgg _ M.Count = return $ Fold { foldop = FSum,
-                                 fdata = ones_,
-                                 fgroups = zeros_ }
+       solveAgg env (M.Sum exp) =
+         do fdata <- sc env exp
+            return $ Fold { foldop = FSum, fdata, fgroups = zeros_ }
+       solveAgg _ M.Count =
+         return $ Fold { foldop = FSum, fdata = ones_, fgroups = zeros_ }
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
 
+solve (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
+                                \dependent grouping right now "
 
 {-direct, foreign key join of two tables.
 for now, this join assumes but does not check
@@ -149,18 +149,18 @@ can be anything, as the pointers are still valid.
 
 (eg, after a filter on the right child...)
 -}
-solve M.FKJoin { M.child -- can be derived rel
-               , M.parent = parent@(M.Table _ _) -- only unfiltered rel.
+solve M.FKJoin { M.table -- can be derived rel
+               , M.references = references@(M.Table _ _) -- only unfiltered rel.
                , M.idxcol
                } =
-  do leftcols <- solve child
-     leftenv <- solve' child
-     rightcols <- solve parent
+  do leftcols <- solve table
+     leftenv <- solve' table
+     rightcols <- solve references
      let (rightvecs, ralias) = unzip rightcols
      (_, shpos) <- NameTable.lookup idxcol leftenv
      let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
      let gatheredcols = zip (map joinCol rightvecs) ralias
-     return $ leftcols ++ gatheredcols -- same names?
+     return $ leftcols ++ gatheredcols -- names are preserved.
 
 
 solve (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
@@ -178,10 +178,6 @@ solve M.Select { M.child -- can be derived rel
      let gatheredcols = zip (map gatherQual childvecs) chalias
      return $ gatheredcols -- same names
 
-
-
-
-solve (M.Join ) = Left $ "unsupported join (only fk-like joins right now)"
 
 solve r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
@@ -229,3 +225,5 @@ fromString mplanstring =
                 Left err -> "\n--Error at Vlite stage:\n" ++ err
                 Right g -> "\n--Vlite output:\n" ++ groom g
      trace tr vlite
+
+

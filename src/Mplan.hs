@@ -278,18 +278,18 @@ data RelExpr =
               , outputkeys :: [(Name, Maybe Name)]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
-  | FKJoin    { child :: RelExpr
-              , parent :: RelExpr
+  | FKJoin    { table :: RelExpr
+              , references :: RelExpr
               , idxcol :: Name
               }
   | TopN      { child :: RelExpr
               , n :: Int
               }
-  | Cross
-  | Join
-  | AntiJoin
-  | SemiJoin
-  | LeftOuter
+  -- | Cross
+  -- | Join
+  -- | AntiJoin
+  -- | SemiJoin
+  -- | LeftOuter
   deriving (Eq,Show, Generic)
 instance NFData RelExpr
 
@@ -398,9 +398,9 @@ solve P.Node { P.relop = "join"
                    }
                  , P.alias = _}]:[] {-only one condition-}
              } =
-  do child  <- solve l
-     parent <- solve r
-     return $ FKJoin { child, parent, idxcol }
+  do table  <- solve l
+     references <- solve r
+     return $ FKJoin { table, references, idxcol }
 
 solve arg@P.Node { P.relop="join"
              , P.children= _
@@ -528,8 +528,43 @@ fromParseTree = solve
 fromString :: String -> Either String RelExpr
 fromString mplanstring =
   do parsetree <- P.fromString mplanstring
-     let mplan = fromParseTree parsetree
+     let mplan = fromParseTree parsetree >>= (return . pushFKJoins)
      let tr = case mplan of
                 Left err -> "\n--Error at Mplan stage:\n" ++ err
                 Right g -> "\n--Mplan output:\n" ++ groom g
      trace tr mplan
+
+
+{- this transform pushes select filters
+(on the right hand side) above fk joins -}
+-- the predicate output names are legal when moved up, bc
+-- join does not have bindings in its syntax
+-- todo: abstract traversal boilerplate
+pushFKJoins :: RelExpr -> RelExpr
+pushFKJoins FKJoin { table
+                   , references  = Select { child, predicate }
+                   , idxcol
+                   } =
+  Select { child=newjoin, predicate }
+  where newjoin = FKJoin { table, references = pushFKJoins child, idxcol }
+
+pushFKJoins b@FKJoin { table, references }
+  = b { table=pushFKJoins table, references=pushFKJoins references }
+
+pushFKJoins b@Select { child  }
+  = b { child=pushFKJoins child }
+
+pushFKJoins b@GroupBy { child }
+  = b { child=pushFKJoins child }
+
+pushFKJoins b@Table { } = b
+
+pushFKJoins b@Project { child }
+  = b { child=pushFKJoins child }
+
+pushFKJoins b@TopN { child }
+  = b { child=pushFKJoins child }
+
+--undefined for others (TODO: enable error on compiler warning for missing pattern match)
+-- for now, do nothing otherwise
+-- projects can be pushed as well.
