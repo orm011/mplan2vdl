@@ -50,11 +50,11 @@ main = do
     configuration <- ExceptT CLI.getConfiguration
     input <- readFile $ Configuration.input configuration
     -- Part II: Process it
-    hoistEither $ V.fromString input
+    hoistEither $ V.vdlFromMplan  input
   case result of
     -- Part III: Write output
     Left errorMessage -> fatal errorMessage
-    Right vl -> putStrLn $ groom vl
+    Right vl -> putStrLn $ vl
   where hoistEither = ExceptT . return
 
 readFile :: FilePath -> ExceptT String IO String

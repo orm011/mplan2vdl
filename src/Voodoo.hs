@@ -1,8 +1,10 @@
 module Voodoo (Voodoo(..)
-               , fromString
+               ,fromString
                ,Vref(..)
+               ,vdlFromMplan
                ) where
 
+import Control.Monad(foldM, mapM, void)
 import Name(Name(..))
 import Data.Int
 import Debug.Trace
@@ -18,12 +20,13 @@ type Map = Map.Map
 {-
 Aims to cover the subset of VoodooStdLib we need for Monet plans.
 Nothing in this type should be non-existant in Voodoo.
-Meant mostly so that it is easy to convert  to text format.
+its function is to be easy to convert to text format.
 -}
 data Voodoo =
   Load Name
   | Range { rmin::Int64, rstep::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
+  | Gather { input::Voodoo, positions::Voodoo }
   deriving (Eq,Show,Generic)
 instance NFData Voodoo
 
@@ -38,7 +41,6 @@ data Voodop =
   | Greater
   | Multiply
   | Divide
-  | Gather
   | FoldSelect
   | FoldMax
   | FoldSum
@@ -63,10 +65,10 @@ fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
        _ -> Left $ "bop not implemented" ++ show bop
 
 fromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
-  do arg1 <- fromVexp shsource
-     arg2 <- fromVexp shpos
+  do input <- fromVexp shsource
+     positions <- fromVexp shpos
      case shop of
-       V.Gather -> return $ Binary { op=Gather, arg1, arg2 }
+       V.Gather -> Right $ Gather { input, positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
 fromVexp (V.Fold { V.foldop, V.fdata, V.fgroups }) =
@@ -86,6 +88,7 @@ data Vref  =
   VLoad Name
   | VRange  { vrmin :: Int64, vrstep :: Int64 }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
+  | VGather { vinput :: Int, vpositions :: Int }
   deriving (Eq,Show,Generic)
 instance NFData Vref
 
@@ -106,12 +109,12 @@ vrefFromString :: String -> Either String [(Int, Vref)]
 vrefFromString str =
   do vecs <- voodooFromString str
      let log0 = [(0, VLoad $ Name ["dummy"])]
-     let processed = foldl process log0 vecs
+     processed <- foldM process log0 vecs
      let post = tail $ reverse $ processed -- remove dummy, reverse
      let tr = "\n--Vref output:\n" ++ groom post
      return $ trace tr post
-       where process log vec  = let (newl, _) = vrefFromVoodoo log vec
-                                in newl
+       where process log vec  = do (newl, _) <- vrefFromVoodoo log vec
+                                   return newl
 
 
 
@@ -120,27 +123,67 @@ addToLog log v = let (n, _) = head log
                  in ((n+1, v) : log, n+1)
 
 
-vrefFromVoodoo :: [(Int, Vref)] -> Voodoo -> ([(Int, Vref)], Int)
+vrefFromVoodoo :: [(Int, Vref)] -> Voodoo -> Either String ([(Int, Vref)], Int)
 
-vrefFromVoodoo log v@(Load n) = addToLog log (VLoad n)
+vrefFromVoodoo log v@(Load n) = return $ addToLog log (VLoad n)
 vrefFromVoodoo log v@(Range  { rmin , rstep  }) =
-  addToLog log (VRange { vrmin=rmin, vrstep=rstep })
+  return $ addToLog log (VRange { vrmin=rmin, vrstep=rstep })
 
 vrefFromVoodoo log v@(Binary { op , arg1 , arg2 }) =
-  let (newlog, newn) = vrefFromVoodoo log arg1
-      (newlog', newn') = vrefFromVoodoo newlog arg2
-      newbinop = VBinary {vop=op, varg1=newn, varg2=newn'}
-      in addToLog newlog' newbinop
+  do (newlog, newn) <- vrefFromVoodoo log arg1
+     (newlog', newn') <- vrefFromVoodoo newlog arg2
+     let newbinop = VBinary {vop=op, varg1=newn, varg2=newn'}
+     return $ addToLog newlog' newbinop
+
+vrefFromVoodoo log v@(Gather { input, positions }) =
+  do (log', newn') <- vrefFromVoodoo log input
+     (log'', newn'') <- vrefFromVoodoo log' positions
+     let newg = VGather { vinput=newn', vpositions=newn'' }
+     return $ addToLog log'' newg
+
+vrefFromVoodoo log s_ = Left $ "you need to implement: " ++ groom s_
+
 
 {- now a list of strings -}
-toVcsv :: Vref -> Either String [String]
-toVcsv (VLoad n) = Right ["Load", show n]
-toVcsv (VRange { vrmin, vrstep }) = Right ["Range", show vrmin, show vrstep]
-toVcsv (VBinary { vop, varg1, varg2}) =
+toList :: Vref -> Either String [String]
+
+toList (VLoad n) = Right ["Load", show n]
+
+toList (VRange { vrmin, vrstep }) =
+  Right ["Range", "val", show vrmin, {-show id,-} show vrstep]
+
+toList (VBinary { vop, varg1, varg2}) =
   do opstr <- printVoodop vop
      return $ [ opstr
+              , "val"
               , "Id " ++ show varg1
-              , "Id " ++ show varg2 ]
+              , "val"
+              , "Id " ++ show varg2
+              , "val" ]
+
+toList (VGather { vinput, vpositions }) =
+  return $ [ "Gather"
+           , "Id " ++ show vinput
+           , "Id " ++ show vpositions
+           , "val"]
+
+printVd :: [(Int, [String])] -> String
+printVd prs = join "\n" $ map makeline prs
+  where makeline (id, strs) =  join "," $ (show id) : strs
+
+dumpVref :: [(Int, Vref)] -> Either String String
+dumpVref prs = let (ids, vrefs) = unzip prs
+               in do lsts <- mapM toList vrefs
+                     return $ printVd $ zip ids lsts
+
+vdlFromMplan :: String -> Either String String
+vdlFromMplan mplanstring =
+  do vrefs <- vrefFromString mplanstring
+     let vdl = dumpVref vrefs
+     let tr = case vdl of
+                 Left err -> "\n--Error at Vdl stage:\n" ++ err
+                 Right g -> "\n--Vdl output:\n" ++ groom g
+     trace tr vdl
 
 {- string needs to be parsable by interpreter.h -}
 printVoodop :: Voodop -> Either String String
@@ -160,9 +203,9 @@ printVoodop op =
           ,(Greater , "Greater")
           ,(Multiply , "Multiply")
           ,(Divide , "Divide")
-          ,(Gather , "Gather")
           ,(FoldMax , "foldMax")
           ,(FoldSum , "foldSum")
           ,(FoldMin , "foldMin")
           ,(FoldCount , "foldCount")
+          ,(FoldSelect , "foldSelect")
           ]
