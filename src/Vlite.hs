@@ -1,7 +1,7 @@
 module Vlite( fromMplan
             , fromString
             , Vexp(..)
-            , toVref) where
+            , BinaryOp(..)) where
 
 import qualified Mplan as M
 import Mplan(BinaryOp)
@@ -15,13 +15,15 @@ import Data.Int
 import Debug.Trace
 import Text.Groom
 
+import Data.String.Utils(join)
+
 type NameTable = NameTable.NameTable
 
-data ShOp = Gather | OpScatter
+data ShOp = Gather | Scatter
   deriving (Eq, Show, Generic)
 instance NFData ShOp
 
-data FoldOp = FSum | FMax | FMin | FSel
+data FoldOp = FSum | FMax | FMin | FSel | FCount
   deriving (Eq, Show, Generic)
 instance NFData FoldOp
 
@@ -35,16 +37,6 @@ data Vexp  =
   | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
   deriving (Eq,Show,Generic)
 instance NFData Vexp
-
-
-data Vref  =
-  VLoad Name
-  | VRange  { vrmin :: Int64, vrstep :: Int64 }
-  | VBinop { vbop :: BinaryOp, vbleft :: Int, vbright :: Int }
-  | VShuffle { vshop :: ShOp,  vshsource :: Int, vshpos :: Int }
-  | VFold { vfoldop :: FoldOp, vfdata :: Int, vfgroups :: Int }
-  deriving (Eq,Show,Generic)
-instance NFData Vref
 
 
 {- some convenience vectors -}
@@ -231,7 +223,7 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
      r <- sc env right
      return $ Binop { bop=binop, bleft=l, bright=r }
 
-sc env (M.IntLiteral n) = return $ const_ n
+sc _ (M.IntLiteral n) = return $ const_ n
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
 
@@ -244,38 +236,3 @@ fromString mplanstring =
                 Left err -> "\n--Error at Vlite stage:\n" ++ err
                 Right g -> "\n--Vlite output:\n" ++ groom g
      trace tr vlite
-
-
-toVref :: String -> Either String [(Int, Vref)]
-toVref str = do vexps <-fromString str
-                return $ reverse $ foldl process [(0, VLoad $ Name ["dummy"])] (map fst vexps)
-                where process log vex  = let (newl, _) = printHelper log vex
-                                         in newl
-
-addToLog :: [(Int, Vref)] -> Vref -> ([(Int, Vref)], Int)
-addToLog log v = let (n, _) = head log
-                 in ((n+1, v) : log, n+1)
-
-printHelper :: [(Int, Vref)] -> Vexp-> ([(Int, Vref)], Int)
-printHelper log v@(Load n) = addToLog log (VLoad n)
-printHelper log v@(Range  { rmin , rstep  }) = addToLog log (VRange { vrmin=rmin, vrstep=rstep })
-
-printHelper log v@(Binop { bop , bleft , bright  }) =
-  let (newlog, newn) = printHelper log bleft
-      (newlog', newn') = printHelper newlog bright
-      newbinop = VBinop {vbop=bop, vbleft=newn, vbright=newn'}
-      in addToLog newlog' newbinop
-
-printHelper log v@(Shuffle { shop , shsource , shpos  }) =
-  let (newlog, newn) = printHelper log shsource
-      (newlog', newn') = printHelper newlog shpos
-      newbinop = VShuffle {vshop=shop, vshsource=newn, vshpos=newn'}
-      in addToLog newlog' newbinop
-
-printHelper log v@(Fold { foldop , fdata , fgroups  }) =
-  let (newlog, newn) = printHelper log fdata
-      (newlog', newn') = printHelper newlog fgroups
-      newbinop = VFold {vfoldop=foldop, vfdata=newn, vfgroups=newn'}
-      in addToLog newlog' newbinop
-
-  -- | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }

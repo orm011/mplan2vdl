@@ -545,8 +545,7 @@ pushFKJoins FKJoin { table
                    , references  = Select { child, predicate }
                    , idxcol
                    } =
-  Select { child=newjoin, predicate }
-  where newjoin = FKJoin { table, references = pushFKJoins child, idxcol }
+  Select { child=FKJoin { table = pushFKJoins table, references = pushFKJoins child, idxcol }, predicate }
 
 pushFKJoins b@FKJoin { table, references }
   = b { table=pushFKJoins table, references=pushFKJoins references }

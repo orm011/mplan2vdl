@@ -31,14 +31,11 @@ import Data.List.Utils (replace)
 import qualified CLI
 import Configuration (Configuration, CompilerStage(..))
 import qualified Configuration
-import qualified Vlite as V
+import qualified Voodoo as V
 import qualified Name as Name
 
 
 ------------------------ Impure code: Fun with ExceptT ------------------------
-
-(|>) :: a -> (a -> b) -> b
-(|>) v f = f v
 
 main :: IO ()
 main = do
@@ -53,7 +50,7 @@ main = do
     configuration <- ExceptT CLI.getConfiguration
     input <- readFile $ Configuration.input configuration
     -- Part II: Process it
-    hoistEither $ V.toVref input
+    hoistEither $ V.fromString input
   case result of
     -- Part III: Write output
     Left errorMessage -> fatal errorMessage
@@ -69,7 +66,7 @@ fatal message = do
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
 
-fromFile :: String -> IO (Either String [(V.Vexp, Maybe Name.Name)])
+fromFile :: String -> IO (Either String [(Int, V.Vref)])
 fromFile f =
   do input <- Prelude.readFile f
      let sol = V.fromString input

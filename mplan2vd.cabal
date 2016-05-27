@@ -25,6 +25,7 @@ library
                      , Mplan
                      , Name
                      , Vlite
+                     , Voodoo
   other-modules:       CLI
   build-depends:       base >= 4.7 && <5
                      , MissingH==1.3.0.*
