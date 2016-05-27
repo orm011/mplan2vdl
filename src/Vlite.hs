@@ -1,7 +1,9 @@
 module Vlite( fromMplan
             , fromString
             , Vexp(..)
-            , BinaryOp(..)) where
+            , BinaryOp(..)
+            , ShOp(..)
+            , FoldOp(..)) where
 
 import qualified Mplan as M
 import Mplan(BinaryOp)
@@ -23,7 +25,7 @@ data ShOp = Gather | Scatter
   deriving (Eq, Show, Generic)
 instance NFData ShOp
 
-data FoldOp = FSum | FMax | FMin | FSel | FCount
+data FoldOp = FSum | FMax | FMin | FSel
   deriving (Eq, Show, Generic)
 instance NFData FoldOp
 
