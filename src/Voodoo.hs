@@ -24,6 +24,7 @@ its function is to be easy to convert to text format.
 -}
 data Voodoo =
   Load Name
+  | Project { outname::Name , vec :: Voodoo } -- full rename only. used right after load
   | Range { rmin::Int64, rstep::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
   | Gather { input::Voodoo, positions::Voodoo }
@@ -52,7 +53,7 @@ instance NFData Voodop
 
 fromVexp :: V.Vexp -> Either String Voodoo
 
-fromVexp (V.Load n) = return $ Load n
+fromVexp (V.Load n) = return $ Project { outname=Name ["val"], vec = Load n }
 fromVexp (V.Range {V.rmin, V.rstep}) = return $ Range {rmin, rstep}
 fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
   do left <- fromVexp bleft
@@ -86,6 +87,7 @@ all pointers to other expressions now are explicit,
 needed for serialization -}
 data Vref  =
   VLoad Name
+  | VProject { voutname::Name , vvec :: Int } -- full rename only.
   | VRange  { vrmin :: Int64, vrstep :: Int64 }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
   | VGather { vinput :: Int, vpositions :: Int }
@@ -126,6 +128,10 @@ addToLog log v = let (n, _) = head log
 vrefFromVoodoo :: [(Int, Vref)] -> Voodoo -> Either String ([(Int, Vref)], Int)
 
 vrefFromVoodoo log v@(Load n) = return $ addToLog log (VLoad n)
+vrefFromVoodoo log v@(Project outname vec) =
+  do (log', n') <- vrefFromVoodoo log vec
+     return $ addToLog log' (VProject { voutname=outname, vvec=n' } )
+
 vrefFromVoodoo log v@(Range  { rmin , rstep  }) =
   return $ addToLog log (VRange { vrmin=rmin, vrstep=rstep })
 
@@ -147,10 +153,15 @@ vrefFromVoodoo log s_ = Left $ "you need to implement: " ++ groom s_
 {- now a list of strings -}
 toList :: Vref -> Either String [String]
 
-toList (VLoad n) = Right ["Load", show n]
+-- for printing: remove sys (really, we want the prefix only_
+toList (VLoad (Name lst)) = Right ["Load", show cleanname]
+  where cleanname = Name (if head lst == "sys" then tail lst else lst)
+
+toList (VProject voutname vvec) = Right ["Project",show voutname, "Id " ++ show vvec]
 
 toList (VRange { vrmin, vrstep }) =
-  Right ["Range", "val", show vrmin, {-show id,-} show vrstep]
+  {- for printing: hardcoded length 4billion right now, since backend only materializes what's needed -}
+  Right ["Range", "val", show vrmin, show 4000000000, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
   do opstr <- printVoodop vop
@@ -166,6 +177,8 @@ toList (VGather { vinput, vpositions }) =
            , "Id " ++ show vinput
            , "Id " ++ show vpositions
            , "val"]
+
+toList s_ = Left $ "TODO implement toList for: " ++ show s_
 
 printVd :: [(Int, [String])] -> String
 printVd prs = join "\n" $ map makeline prs
