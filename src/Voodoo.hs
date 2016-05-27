@@ -205,7 +205,7 @@ printVoodop op =
     Nothing -> Left $ "cannot find string for " ++ show op
     Just x -> Right  x
   where strings = Map.fromList $
-          [ (Greater , "Greater")
+          [(Greater , "Greater")
           ,(LogicalAnd , "LogicalAnd")
           ,(LogicalOr , "LogicalOr")
           ,(BitwiseAnd , "BitwiseAnd")
