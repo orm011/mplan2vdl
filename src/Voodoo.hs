@@ -165,7 +165,7 @@ toList (VRange { vrmin, vrstep }) =
   Right ["Range", "val", show vrmin, show 4000000000, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
-  do opstr <- printVoodop vop
+  do opstr <- show vop
      return $ [ opstr
               , "val"
               , "Id " ++ show varg1
@@ -198,28 +198,3 @@ vdlFromMplan mplanstring =
                  Left err -> "\n--Error at Vdl stage:\n" ++ err
                  Right g -> "\n--Vdl output:\n" ++ groom g
      trace tr vdl
-
-{- string needs to be parsable by interpreter.h -}
-printVoodop :: Voodop -> Either String String
-printVoodop op =
-  case Map.lookup op strings of
-    Nothing -> Left $ "cannot find string for " ++ show op
-    Just x -> Right  x
-  where strings = Map.fromList $
-          [(Greater , "Greater")
-          ,(LogicalAnd , "LogicalAnd")
-          ,(LogicalOr , "LogicalOr")
-          ,(BitwiseAnd , "BitwiseAnd")
-          ,(BitwiseOr , "BitwiseOr")
-          ,(Equals , "Equals")
-          ,(Add , "Add")
-          ,(Subtract , "Subtract")
-          ,(Greater , "Greater")
-          ,(Multiply , "Multiply")
-          ,(Divide , "Divide")
-          ,(FoldMax , "foldMax")
-          ,(FoldSum , "foldSum")
-          ,(FoldMin , "foldMin")
-          ,(FoldCount , "foldCount")
-          ,(FoldSelect , "foldSelect")
-          ]
