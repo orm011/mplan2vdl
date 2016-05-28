@@ -28,7 +28,7 @@ data Voodoo =
   | Project { outname::Name , vec :: Voodoo } -- full rename only. used right after load
   | Range { rmin::Int64, rstep::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Show,Generic,Ord)
 instance NFData Voodoo
 
 const_ k  = Range { rmin=k, rstep=0 }
@@ -50,7 +50,7 @@ data Voodop =
   | FoldMin
   | FoldCount
   | Gather
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Show,Generic,Ord)
 instance NFData Voodop
 
 (.^.) :: (Int,Int) -> (Int,Int) -> (Int,Int)
@@ -129,6 +129,7 @@ data Vref  =
   deriving (Eq,Show,Generic)
 instance NFData Vref
 
+
 voodooFromString :: String -> Either String [Voodoo]
 voodooFromString mplanstring =
   do vexps <- V.fromString mplanstring
@@ -139,45 +140,57 @@ voodooFromString mplanstring =
      vecs
 
 
-fromString :: String -> Either String [(Int, Vref)]
+fromString :: String -> Either String Log
 fromString = vrefFromString
 
-vrefFromString :: String -> Either String [(Int, Vref)]
+vrefFromString :: String -> Either String Log
 vrefFromString str =
   do vecs <- voodooFromString str
      let log0 = [(0, VLoad $ Name ["dummy"])]
-     processed <- foldM process log0 vecs
-     let post = tail $ reverse $ processed -- remove dummy, reverse
+     let state0 = ((Map.empty, log0), undefined)
+     ((_, finalLog),_) <- foldM process state0 vecs
+     let post = tail $ reverse $ finalLog -- remove dummy, reverse
      --let tr = "\n--Vref output:\n" ++ groom post
      --return $ trace tr post
      return $ trace (let s = dagSize  vecs in "vecs (depth,count): " ++ (show s) ++ "\npost len: " ++ (show $ length post)) post
-       where process log vec  = do (newl, _) <- vrefFromVoodoo log vec
-                                   return newl
+       where process (state, _) v  = memVrefFromVoodoo state v
 
 
+type LookupTable = Map Voodoo Int
+type Log = [(Int, Vref)]
+type State = (LookupTable, Log)
 
-addToLog :: [(Int, Vref)] -> Vref -> ([(Int, Vref)], Int)
+addToLog :: Log -> Vref -> (Log, Int)
 addToLog log v = let (n, _) = head log
                  in ((n+1, v) : log, n+1)
 
+--used to remember common expressions from before
+memVrefFromVoodoo :: State -> Voodoo -> Either String (State, Int)
+memVrefFromVoodoo state@(tab, log) vd =
+  case Map.lookup vd tab of
+    Nothing -> do ((tab', log'), vref) <- vrefFromVoodoo state vd
+                  let (log'', id) = addToLog log' vref
+                  let tab'' = Map.insert vd id tab'
+                    in return $ ((tab'', log''), id)
+    Just id -> Right ((tab, log), id) -- nothing changes
 
-vrefFromVoodoo :: [(Int, Vref)] -> Voodoo -> Either String ([(Int, Vref)], Int)
+vrefFromVoodoo :: State -> Voodoo -> Either String (State, Vref)
 
-vrefFromVoodoo log v@(Load n) = return $ addToLog log (VLoad n)
-vrefFromVoodoo log v@(Project outname vec) =
-  do (log', n') <- vrefFromVoodoo log vec
-     return $ addToLog log' (VProject { voutname=outname, vvec=n' } )
+vrefFromVoodoo state (Load n) = return $ (state, VLoad n)
 
-vrefFromVoodoo log v@(Range  { rmin , rstep  }) =
-  return $ addToLog log (VRange { vrmin=rmin, vrstep=rstep })
+vrefFromVoodoo state (Range  { rmin , rstep  }) =
+  return $ (state, VRange { vrmin=rmin, vrstep=rstep })
 
-vrefFromVoodoo log v@(Binary { op , arg1 , arg2 }) =
-  do (newlog, newn) <- vrefFromVoodoo log arg1
-     (newlog', newn') <- vrefFromVoodoo newlog arg2
-     let newbinop = VBinary {vop=op, varg1=newn, varg2=newn'}
-     return $ addToLog newlog' newbinop
+vrefFromVoodoo state (Project outname vec) =
+  do (state', n') <- memVrefFromVoodoo state vec
+     return $ (state', VProject { voutname=outname, vvec=n' })
 
-vrefFromVoodoo log s_ = Left $ "you need to implement: " ++ groom s_
+vrefFromVoodoo state (Binary { op , arg1 , arg2 }) =
+  do (state', n1) <- memVrefFromVoodoo state arg1
+     (state'', n2) <- memVrefFromVoodoo state' arg2
+     return $ (state'', VBinary {vop=op, varg1=n1, varg2=n2})
+
+vrefFromVoodoo state s_ = Left $ "you need to implement: " ++ groom s_
 
 
 {- now a list of strings -}
@@ -207,7 +220,7 @@ printVd :: [(Int, [String])] -> String
 printVd prs = join "\n" $ map makeline prs
   where makeline (id, strs) =  join "," $ (show id) : strs
 
-dumpVref :: [(Int, Vref)] -> String
+dumpVref :: Log -> String
 dumpVref prs = let (ids, vrefs) = unzip prs
                    lsts = map toList vrefs
                in printVd $ zip ids lsts
