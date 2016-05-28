@@ -49,8 +49,21 @@ data Voodop =
   | FoldSum
   | FoldMin
   | FoldCount
+  | Gather
   deriving (Eq,Show,Generic)
 instance NFData Voodop
+
+(.^.) :: (Int,Int) -> (Int,Int) -> (Int,Int)
+(a,b) .^. (a',b') = (max a a', b + b')
+
+size :: Voodoo -> (Int, Int)
+size (Load _) = (1,1)
+size (Range _ _) = (1,1)
+size (Project _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
+size (Binary _ ch1 ch2) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
+
+dagSize :: [Voodoo] -> (Int,Int)
+dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(length outputs))
 
 -- convenience expression library to translate more complex expressions
 a >.  b = Binary { op=Greater, arg1=a, arg2=b }
@@ -137,7 +150,7 @@ vrefFromString str =
      let post = tail $ reverse $ processed -- remove dummy, reverse
      --let tr = "\n--Vref output:\n" ++ groom post
      --return $ trace tr post
-     return $ post
+     return $ trace (let s = dagSize  vecs in "vecs (depth,count): " ++ (show s) ++ "\npost len: " ++ (show $ length post)) post
        where process log vec  = do (newl, _) <- vrefFromVoodoo log vec
                                    return newl
 
@@ -182,8 +195,8 @@ toList (VRange { vrmin, vrstep }) =
 
 toList (VBinary { vop, varg1, varg2}) =
   case vop of
-    | Gather -> [svop, id1, id2, "val"]
-    | _ ->      [svop, "val", id1, "val", id2, "val" ]
+    Gather -> [svop, id1, id2, "val"]
+    _ ->      [svop, "val", id1, "val", id2, "val" ]
   where svop = show vop
         id1 = "Id " ++ show varg2
         id2 = "Id " ++ show varg1
