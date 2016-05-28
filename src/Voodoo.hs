@@ -49,7 +49,7 @@ data Voodop =
   | FoldSum
   | FoldMin
   | FoldCount
-  deriving (Eq,Show,Generic,Ord)
+  deriving (Eq,Show,Generic)
 instance NFData Voodop
 
 -- convenience expression library to translate more complex expressions
