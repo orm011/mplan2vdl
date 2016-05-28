@@ -234,7 +234,8 @@ fromString :: String -> Either String [(Vexp, Maybe Name)]
 fromString mplanstring =
   do mplan <- M.fromString mplanstring
      let vlite = fromMplan $!! mplan
-     let tr = case vlite of
-                Left err -> "\n--Error at Vlite stage:\n" ++ err
-                Right g -> "\n--Vlite output:\n" ++ groom g
-     trace tr vlite
+     -- let tr = case vlite of
+     --            Left err -> "\n--Error at Vlite stage:\n" ++ err
+     --            Right g -> "\n--Vlite output:\n" ++ groom g
+     -- trace tr vlite
+     vlite

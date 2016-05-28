@@ -120,10 +120,10 @@ voodooFromString :: String -> Either String [Voodoo]
 voodooFromString mplanstring =
   do vexps <- V.fromString mplanstring
      let vecs = mapM (fromVexp  . fst) $!! vexps
-     let tr = case vecs of
-                Left err -> "\n--Error at Voodoo stage:\n" ++ err
-                Right g -> "\n--Voodoo output:\n" ++ groom g
-     trace tr vecs
+     -- let tr = case vecs of
+     --            Left err -> "\n--Error at Voodoo stage:\n" ++ err
+     --            Right g -> "\n--Voodoo output:\n" ++ groom g
+     vecs
 
 
 fromString :: String -> Either String [(Int, Vref)]
@@ -135,8 +135,9 @@ vrefFromString str =
      let log0 = [(0, VLoad $ Name ["dummy"])]
      processed <- foldM process log0 vecs
      let post = tail $ reverse $ processed -- remove dummy, reverse
-     let tr = "\n--Vref output:\n" ++ groom post
-     return $ trace tr post
+     --let tr = "\n--Vref output:\n" ++ groom post
+     --return $ trace tr post
+     return $ post
        where process log vec  = do (newl, _) <- vrefFromVoodoo log vec
                                    return newl
 
@@ -214,5 +215,4 @@ vdlFromMplan :: String -> Either String String
 vdlFromMplan mplanstring =
   do vrefs <- vrefFromString mplanstring
      return $ let vdl = dumpVref vrefs
-                  tr = "\n--Vdl output:\n" ++ groom vdl
-              in trace tr vdl
+              in vdl
