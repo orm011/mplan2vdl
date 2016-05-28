@@ -36,7 +36,6 @@ const_ k  = Range { rmin=k, rstep=0 }
 data Voodop =
   LogicalAnd
   | LogicalOr
-  | LogicalNot
   | BitwiseAnd
   | BitwiseOr
   | Equals
