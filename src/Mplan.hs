@@ -18,7 +18,7 @@ import Debug.Trace
 import Control.Monad(foldM, mapM, void)
 import Text.Printf (printf)
 import qualified Data.Map.Strict as Map
-
+import Data.List (foldl')
 import System.Locale
 import Data.Time.Format
 import Data.Time.Calendar
@@ -45,7 +45,7 @@ isJoinIdx (P.JoinIdx s) = [s]
 isJoinIdx _ = []
 
 getJoinIdx :: [P.Attr] -> [Name]
-getJoinIdx attrs = foldl (++) [] (map isJoinIdx attrs)
+getJoinIdx attrs = foldl' (++) [] (map isJoinIdx attrs)
 
 resolveTypeSpec :: P.TypeSpec -> Either String MType
 resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
@@ -225,7 +225,7 @@ solveGroupOutputs :: [P.Expr] -> Either String ([(Name, Maybe Name)], [(GroupAgg
 
 solveGroupOutputs exprs =
   do sifted <- sequence $ map ghelper exprs
-     return $ foldl mappend ([],[]) sifted
+     return $ foldl' mappend ([],[]) sifted
 
 {- sifts out key lists to the first meber,
  and aggregates to the second  -}
@@ -498,7 +498,7 @@ sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
      let inOr l r = Binop LogOr (check l) (check r)
      case solvedset of
        [] -> Left "empty 'in' clause"
-       x:rest -> return $ foldl inOr (check x) rest
+       x:rest -> return $ foldl' inOr (check x) rest
 
 sc (P.Nested exprs) = conjunction exprs
 
@@ -512,7 +512,7 @@ conjunction exprs =
      case solved of
        [] -> Left $ "conjunction list cannot be empty (should check at parse time)"
        [x] -> return x
-       x : y : rest -> return $ foldl makeAnd (makeAnd x y) rest
+       x : y : rest -> return $ foldl' makeAnd (makeAnd x y) rest
        where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
 
 
