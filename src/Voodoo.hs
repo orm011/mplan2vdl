@@ -173,48 +173,46 @@ vrefFromVoodoo log s_ = Left $ "you need to implement: " ++ groom s_
 
 
 {- now a list of strings -}
-toList :: Vref -> Either String [String]
+toList :: Vref -> [String]
 
 -- for printing: remove sys (really, we want the prefix only_
-toList (VLoad (Name lst)) = Right ["Load", show cleanname]
+toList (VLoad (Name lst)) = ["Load", show cleanname]
   where cleanname = Name (if head lst == "sys" then tail lst else lst)
 
-toList (VProject voutname vvec) = Right ["Project",show voutname, "Id " ++ show vvec]
+toList (VProject voutname vvec) = ["Project",show voutname, "Id " ++ show vvec]
 
 toList (VRange { vrmin, vrstep }) =
   {- for printing: hardcoded length 4billion right now, since backend only materializes what's needed -}
-  Right ["Range", "val", show vrmin, show 4000000000, show vrstep]
+  ["Range", "val", show vrmin, show 4000000000, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
-  return $ [ show vop
-              , "val"
-              , "Id " ++ show varg1
-              , "val"
-              , "Id " ++ show varg2
-              , "val" ]
+  [ show vop
+  , "val"
+  , "Id " ++ show varg1
+  , "val"
+  , "Id " ++ show varg2
+  , "val" ]
 
 toList (VGather { vinput, vpositions }) =
-  return $ [ "Gather"
-           , "Id " ++ show vinput
-           , "Id " ++ show vpositions
-           , "val"]
+  [ "Gather"
+  , "Id " ++ show vinput
+  , "Id " ++ show vpositions
+  , "val"]
 
-toList s_ = Left $ "TODO implement toList for: " ++ show s_
+toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 
 printVd :: [(Int, [String])] -> String
 printVd prs = join "\n" $ map makeline prs
   where makeline (id, strs) =  join "," $ (show id) : strs
 
-dumpVref :: [(Int, Vref)] -> Either String String
+dumpVref :: [(Int, Vref)] -> String
 dumpVref prs = let (ids, vrefs) = unzip prs
-               in do lsts <- mapM toList vrefs
-                     return $ printVd $ zip ids lsts
+                   lsts = map toList vrefs
+               in printVd $ zip ids lsts
 
 vdlFromMplan :: String -> Either String String
 vdlFromMplan mplanstring =
   do vrefs <- vrefFromString mplanstring
-     let vdl = dumpVref vrefs
-     let tr = case vdl of
-                 Left err -> "\n--Error at Vdl stage:\n" ++ err
-                 Right g -> "\n--Vdl output:\n" ++ groom g
-     trace tr vdl
+     return $ let vdl = dumpVref vrefs
+                  tr = "\n--Vdl output:\n" ++ groom vdl
+              in trace tr vdl
