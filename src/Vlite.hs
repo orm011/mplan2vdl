@@ -16,17 +16,20 @@ import Control.DeepSeq(NFData,($!!))
 import Data.Int
 import Debug.Trace
 import Text.Groom
-
+import qualified Data.Map.Strict as Map
 import Data.String.Utils(join)
+
+type Map = Map.Map
+type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 
 type NameTable = NameTable.NameTable
 
 data ShOp = Gather | Scatter
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic,Ord)
 instance NFData ShOp
 
 data FoldOp = FSum | FMax | FMin | FSel
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Ord)
 instance NFData FoldOp
 
 {- Range has no need for count arg at this point.
@@ -37,7 +40,7 @@ data Vexp  =
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
 
 

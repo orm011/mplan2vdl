@@ -14,6 +14,7 @@ import Data.String.Utils(join)
 import Control.DeepSeq(NFData,($!!))
 import qualified Vlite as V
 import qualified Data.Map.Strict as Map
+import Data.List (foldl')
 
 type Map = Map.Map
 

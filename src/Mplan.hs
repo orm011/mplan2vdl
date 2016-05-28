@@ -165,7 +165,7 @@ data BinaryOp =
   | Eq | Neq {- comp -}
   | LogAnd | LogOr {- logical -}
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max  {- arith -}
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Ord)
 instance NFData BinaryOp
 
 

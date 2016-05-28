@@ -27,7 +27,7 @@ We assume all lookups are either successful, or there was an error.
 
 -}
 
-data Name = Name [String] deriving (Eq, Generic)
+data Name = Name [String] deriving (Eq, Generic, Ord)
 
 type Map = Map.Map
 
