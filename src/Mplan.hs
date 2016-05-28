@@ -9,7 +9,7 @@ module Mplan( fromParseTree
 import qualified Parser as P
 import Name(Name(..))
 import Data.Time.Calendar
-import Control.DeepSeq(NFData)
+import Control.DeepSeq(NFData,($!!))
 import GHC.Generics (Generic)
 import Text.Groom
 import Data.Int
@@ -528,7 +528,7 @@ fromParseTree = solve
 fromString :: String -> Either String RelExpr
 fromString mplanstring =
   do parsetree <- P.fromString mplanstring
-     let mplan = fromParseTree parsetree >>= (return . pushFKJoins)
+     let mplan = (fromParseTree $!! parsetree) >>= (return . pushFKJoins)
      let tr = case mplan of
                 Left err -> "\n--Error at Mplan stage:\n" ++ err
                 Right g -> "\n--Mplan output:\n" ++ groom g

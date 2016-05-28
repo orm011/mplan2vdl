@@ -165,8 +165,7 @@ toList (VRange { vrmin, vrstep }) =
   Right ["Range", "val", show vrmin, show 4000000000, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
-  do opstr <- show vop
-     return $ [ opstr
+  return $ [ show vop
               , "val"
               , "Id " ++ show varg1
               , "val"
