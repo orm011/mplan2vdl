@@ -16,7 +16,7 @@ build-type:          Simple
 cabal-version:       >=1.20
 
 library
-  ghc-options:         -Wall -O0 -fprof-auto-calls -rtsopts=all -auto-all
+  ghc-options:         -Wall -O0 -fprof-auto-calls -rtsopts=all -auto-all -fprof-auto
   exposed-modules:     MainFuns
                      , Parser
                      , Scanner
