@@ -119,7 +119,7 @@ instance NFData Vref
 voodooFromString :: String -> Either String [Voodoo]
 voodooFromString mplanstring =
   do vexps <- V.fromString mplanstring
-     let vecs = mapM (fromVexp  . fst) vexps
+     let vecs = mapM (fromVexp  . fst) $!! vexps
      let tr = case vecs of
                 Left err -> "\n--Error at Voodoo stage:\n" ++ err
                 Right g -> "\n--Voodoo output:\n" ++ groom g
