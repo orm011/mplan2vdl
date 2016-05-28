@@ -78,6 +78,7 @@ fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
        V.Eq -> Right $ left ==. right
        V.Mul -> Right $ left *. right
        V.Sub -> Right $ left -. right
+       V.Add -> Right $ left +. right
        V.Lt -> Right $ left <. right
        V.Leq -> Right $ left <=. right
        V.Geq -> Right $ left >=. right
