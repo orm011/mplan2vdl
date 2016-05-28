@@ -34,6 +34,7 @@ instance NFData Voodoo
 data Voodop =
   LogicalAnd
   | LogicalOr
+  | LogicalNot
   | BitwiseAnd
   | BitwiseOr
   | Equals
