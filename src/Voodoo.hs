@@ -31,6 +31,8 @@ data Voodoo =
   deriving (Eq,Show,Generic)
 instance NFData Voodoo
 
+const_ k  = Range { rmin=k, rstep=0 }
+
 data Voodop =
   LogicalAnd
   | LogicalOr
@@ -51,6 +53,19 @@ data Voodop =
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodop
 
+-- convenience expression library to translate more complex expressions
+a >.  b = Binary { op=Greater, arg1=a, arg2=b }
+a ==. b = Binary { op=Equals, arg1=a, arg2=b }
+a <.  b = Binary { op=Greater, arg1=b, arg2=a } --notice argument swap
+a ||. b = Binary { op=LogicalOr, arg1=a, arg2=b }
+a &&. b = Binary { op=LogicalAnd, arg1=a, arg2=b }
+a <=. b = (a <. b) ||. (a ==. b)
+a >=. b = (a >. b) ||. (a ==. b)
+a +. b = Binary { op=Add, arg1=a, arg2=b }
+a -. b = Binary { op=Subtract, arg1=a, arg2=b }
+a *. b = Binary { op=Multiply, arg1=a, arg2=b }
+cond ?. (a,b) = (const_ 1 -. negcond) *. a +. negcond *. b
+  where negcond = (cond ==. const_ 0) -- NOTE: needed to make sure we only have 0 or 1 in the multiplication.
 
 fromVexp :: V.Vexp -> Either String Voodoo
 
@@ -60,11 +75,18 @@ fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
   do left <- fromVexp bleft
      right <- fromVexp bright
      case bop of
-       V.Gt -> Right $ Binary { op=Greater, arg1=left, arg2=right }
-       V.Lt -> Right $ Binary { op=Greater, arg1=right,arg2=left } --notice swap
-       V.Eq -> Right $ Binary { op=Equals, arg1=left, arg2=right }
-       V.Mul -> Right $ Binary { op=Multiply, arg1=left, arg2=right }
-       _ -> Left $ "bop not implemented" ++ show bop
+       V.Gt -> Right $ left >. right
+       V.Eq -> Right $ left ==. right
+       V.Mul -> Right $ left *. right
+       V.Sub -> Right $ left -. right
+       V.Lt -> Right $ left <. right
+       V.Leq -> Right $ left <=. right
+       V.Geq -> Right $ left >=. right
+       V.Min -> Right $ (left <=. right) ?. (left, right)
+       V.Max -> Right $ (left >=. right) ?. (left, right)
+       V.LogAnd -> Right $ (left &&. right)
+       V.LogOr -> Right $ (left ||. right)
+       _ -> Left $ "bop not implemented: " ++ show bop
 
 fromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
   do input <- fromVexp shsource
