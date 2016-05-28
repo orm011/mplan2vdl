@@ -27,7 +27,6 @@ data Voodoo =
   | Project { outname::Name , vec :: Voodoo } -- full rename only. used right after load
   | Range { rmin::Int64, rstep::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
-  | Gather { input::Voodoo, positions::Voodoo }
   deriving (Eq,Show,Generic)
 instance NFData Voodoo
 
@@ -92,7 +91,7 @@ fromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
   do input <- fromVexp shsource
      positions <- fromVexp shpos
      case shop of
-       V.Gather -> Right $ Gather { input, positions }
+       V.Gather -> Right $ Binary { op=Gather, arg1=input, arg2=positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
 fromVexp (V.Fold { V.foldop, V.fdata, V.fgroups }) =
@@ -113,7 +112,6 @@ data Vref  =
   | VProject { voutname::Name , vvec :: Int } -- full rename only.
   | VRange  { vrmin :: Int64, vrstep :: Int64 }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
-  | VGather { vinput :: Int, vpositions :: Int }
   deriving (Eq,Show,Generic)
 instance NFData Vref
 
@@ -165,12 +163,6 @@ vrefFromVoodoo log v@(Binary { op , arg1 , arg2 }) =
      let newbinop = VBinary {vop=op, varg1=newn, varg2=newn'}
      return $ addToLog newlog' newbinop
 
-vrefFromVoodoo log v@(Gather { input, positions }) =
-  do (log', newn') <- vrefFromVoodoo log input
-     (log'', newn'') <- vrefFromVoodoo log' positions
-     let newg = VGather { vinput=newn', vpositions=newn'' }
-     return $ addToLog log'' newg
-
 vrefFromVoodoo log s_ = Left $ "you need to implement: " ++ groom s_
 
 
@@ -188,18 +180,12 @@ toList (VRange { vrmin, vrstep }) =
   ["Range", "val", show vrmin, show 4000000000, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
-  [ show vop
-  , "val"
-  , "Id " ++ show varg1
-  , "val"
-  , "Id " ++ show varg2
-  , "val" ]
-
-toList (VGather { vinput, vpositions }) =
-  [ "Gather"
-  , "Id " ++ show vinput
-  , "Id " ++ show vpositions
-  , "val"]
+  case vop of
+    | Gather -> [svop, id1, id2, "val"]
+    | _ ->      [svop, "val", id1, "val", id2, "val" ]
+  where svop = show vop
+        id1 = "Id " ++ show varg2
+        id2 = "Id " ++ show varg1
 
 toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 
