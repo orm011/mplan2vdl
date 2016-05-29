@@ -32,6 +32,9 @@ data MType =
   | MBigInt
   | MSmallint
   | MDate
+  | MMillisec
+  | MMonth
+  | MDouble
   | MChar
   | MDecimal Int Int
   | MSecInterval Int
@@ -56,6 +59,9 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f "date" []  = Right MDate
         f "char" _ = Right MChar -- ignoring the length fields
         f "decimal" [a,b] = Right $ MDecimal a b
+        f "sec_interval" [_] = Right MMillisec -- they use millisecs to express their seconds
+        f "month_interval" [] = Right MMonth
+        f "double" [] = Right MDouble -- used for averages even if columns arent doubles
         f name _ = Left $  "unsupported typespec: " ++ name
         -- f ["decimal"] [a, b] = Right (MDecimal a b)
         -- f ["sec_interval"] [a] = Right (MSecInterval a)
@@ -457,6 +463,12 @@ sc P.Literal { P.tspec, P.stringRep } =
      ret <- case mtype of
        MDate -> Right $ resolveDateString stringRep
        MChar -> resolveCharLiteral stringRep
+       MMillisec -> do r <- readIntLiteral stringRep
+                       check r (/= 0) "weird zero interval"
+                       let days = quot r (1000 * 60* 60* 24)
+                       check days (/= 0)  "check that we are not rounding seconds down to 0"
+                       return $ days
+                       -- millis/secs/mins/hours normalize to days, since thats what tpch uses
        MDecimal _ _ -> Left $ "not supporting decimal literals yet"
        _ -> do int <- ( let r = readIntLiteral stringRep in
                         case mtype of
