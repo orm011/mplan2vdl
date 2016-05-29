@@ -214,7 +214,8 @@ sc env (M.Ref refname)  =
 
 
 -- TODO: strictly speaking, I need to know the orignal type in order
--- to know What kind of computation is actually involved.
+-- to know What kind of computation is actually involved. Right now,
+-- the original type is always assumed to be an integer...
 -- Also, voodoo does not have support to express wider /narrower types.
 -- For now, make casting data into a noop
 sc env (M.Cast { M.mtype, M.arg }) =
@@ -224,6 +225,7 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MBigInt -> sc env arg
     M.MSmallint -> sc env arg
     M.MChar -> sc env arg -- assuming the input has already been converted
+    M.MDouble -> sc env arg -- assume it was an integer originally...
     M.MDecimal _ dec ->
       do ch <- sc env arg -- multiply by 10^dec. hope there is no overflow.
          return  Binop { bop=M.Mul, bleft = ch, bright = const_ (10 ^ dec) }
