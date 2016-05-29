@@ -1,3 +1,5 @@
+-- same as q19, but added a foreign key between lineitem and
+-- parts, so that monet's plan reflects the FK relation between them.
 project (
 | group by (
 | | select (

@@ -26,7 +26,8 @@ import System.IO (IOMode(..), hClose, hPutStrLn, openFile, stdout, stderr)
 import Text.Printf (printf)
 import Text.Groom (groom)
 
-import Data.List.Utils (replace)
+import Data.List.Utils (replace, startswith)
+import Data.String.Utils (lstrip)
 
 import qualified CLI
 import Configuration (Configuration, CompilerStage(..))
@@ -48,9 +49,11 @@ main = do
   result <- runExceptT $ do
     -- Part I: Get input
     configuration <- ExceptT CLI.getConfiguration
-    input <- readFile $ Configuration.input configuration
+    contents <- readFile $ Configuration.input configuration
+    let lins = lines contents
+    let withoutComments = filter (not . startswith "--" . lstrip) lins
     -- Part II: Process it
-    hoistEither $ V.vdlFromMplan  input
+    hoistEither $ V.vdlFromMplan (concat withoutComments)
   case result of
     -- Part III: Write output
     Left errorMessage -> fatal errorMessage
