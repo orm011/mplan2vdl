@@ -203,8 +203,9 @@ toList (VLoad (Name lst)) = ["Load", show cleanname]
 toList (VProject voutname vvec) = ["Project",show voutname, "Id " ++ show vvec]
 
 toList (VRange { vrmin, vrstep }) =
-  {- for printing: hardcoded length 4billion right now, since backend only materializes what's needed -}
-  ["Range", "val", show vrmin, show 4000000000, show vrstep]
+  {- for printing: hardcoded length 2 billion right now, since backend only materializes what's needed -}
+  let maxC = 2*10^9 in
+  ["RangeC", "val", show vrmin, show maxC, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
   case vop of
