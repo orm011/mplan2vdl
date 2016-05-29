@@ -1,0 +1,7 @@
+project (
+| group by (
+| | select (
+| | | table(sys.lineitem) [ lineitem.l_quantity NOT NULL ] COUNT 
+| | ) [ lineitem.l_quantity NOT NULL > decimal(15,2)[tinyint "15"] ]
+| ) [  ] [ sys.sum no nil (lineitem.l_quantity NOT NULL) NOT NULL as L1.L1 ]
+) [ L1 NOT NULL as L1.L1 ]

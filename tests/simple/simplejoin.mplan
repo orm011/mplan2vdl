@@ -1,0 +1,6 @@
+project (
+| join (
+| | table(sys.lineitem) [ lineitem.l_quantity NOT NULL, lineitem.%lineitem_fk3 NOT NULL JOINIDX sys.lineitem.lineitem_fk3 ] COUNT ,
+| | table(sys.part) [ part.p_container NOT NULL, part.%TID% NOT NULL ] COUNT 
+| ) [ lineitem.%lineitem_fk3 NOT NULL = part.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_fk3 ]
+) [ lineitem.l_quantity NOT NULL, part.p_container NOT NULL ]
