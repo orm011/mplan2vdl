@@ -458,7 +458,7 @@ sc P.Cast { P.tspec
      arg <- sc parg
      return $ Cast { mtype, arg }
 
-sc P.Literal { P.tspec, P.stringRep } =
+sc arg@P.Literal { P.tspec, P.stringRep } =
   do mtype <- resolveTypeSpec tspec
      ret <- case mtype of
        MDate -> Right $ resolveDateString stringRep
@@ -469,13 +469,16 @@ sc P.Literal { P.tspec, P.stringRep } =
                        check days (/= 0)  "check that we are not rounding seconds down to 0"
                        return $ days
                        -- millis/secs/mins/hours normalize to days, since thats what tpch uses
-       MDecimal _ _ -> Left $ "not supporting decimal literals yet"
+       MMonth  -> do months  <- readIntLiteral stringRep -- really, the day value of month intervals isnt that simple,
+                          --it depends on the context it is used (eg the actual it is being added to). nvm
+                     return $ months * 30
+       MDecimal _ _ -> readIntLiteral stringRep -- sql 0.06 shows up as mplan Decimal (,2) "6", so just leave it as is.
        _ -> do int <- ( let r = readIntLiteral stringRep in
                         case mtype of
                           MInt -> r
                           MTinyint -> r
                           MSmallint -> r
-                          _ -> Left "need to add conversion to this literal" )
+                          _ -> Left $ "need to handle this literal: " ++ show arg )
                return $ int
      return $ IntLiteral ret
 
