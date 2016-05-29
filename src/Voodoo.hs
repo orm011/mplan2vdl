@@ -77,6 +77,7 @@ a >=. b = (a >. b) ||. (a ==. b)
 a +. b = Binary { op=Add, arg1=a, arg2=b }
 a -. b = Binary { op=Subtract, arg1=a, arg2=b }
 a *. b = Binary { op=Multiply, arg1=a, arg2=b }
+a /. b = Binary { op=Divide, arg1=a, arg2=b }
 cond ?. (a,b) = (const_ 1 -. negcond) *. a +. negcond *. b
   where negcond = (cond ==. const_ 0) -- NOTE: needed to make sure we only have 0 or 1 in the multiplication.
 
@@ -100,6 +101,7 @@ fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
        V.Max -> Right $ (left >=. right) ?. (left, right)
        V.LogAnd -> Right $ (left &&. right)
        V.LogOr -> Right $ (left ||. right)
+       V.Div -> Right $ (left /. right)
        _ -> Left $ "bop not implemented: " ++ show bop
 
 fromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
