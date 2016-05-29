@@ -294,8 +294,8 @@ data RelExpr =
 instance NFData RelExpr
 
 -- thsis  way to insert extra consistency checks
-check :: a -> (a -> Bool) -> String -> Either String a
-check val cond msg = if cond val then Right val else Left msg
+check :: a -> (a -> Bool) -> String -> Either String ()
+check val cond msg = if cond val then Right () else Left msg
 
 
 {-helper function uesd in multiple operators that introduce output
@@ -318,8 +318,8 @@ solve :: P.Rel -> Either String RelExpr
 -}
 solve P.Leaf { P.source, P.columns  } =
   do pcols <- sequence $ map split columns
-     checkedcols <- check pcols ( /= []) "list of table columns must not be empty"
-     return $ Table { tablename = source, tablecolumns = checkedcols}
+     check pcols ( /= []) "list of table columns must not be empty"
+     return $ Table { tablename = source, tablecolumns = pcols}
   where
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs } --attr => no alias
                  , P.alias=Nothing } =
@@ -387,7 +387,7 @@ solve P.Node { P.relop = "select"
 
 {-only handling joins where the condition is
 done via  a foreign key -}
-solve P.Node { P.relop = "join"
+solve arg@P.Node { P.relop = "join"
              , P.children = [l, r]
              , P.arg_lists =
                [ P.Expr
@@ -400,6 +400,8 @@ solve P.Node { P.relop = "join"
              } =
   do table  <- solve l
      references <- solve r
+     let hasJoinIdx attrs  = filter (\f -> case f of { P.JoinIdx _ -> True; _ -> False; }) attrs  /= []
+     check attrs hasJoinIdx $ "need a join index for a fk join at " ++ show arg
      return $ FKJoin { table, references, idxcol }
 
 solve arg@P.Node { P.relop="join"
