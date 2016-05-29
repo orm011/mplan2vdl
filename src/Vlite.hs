@@ -136,6 +136,12 @@ solve M.GroupBy { M.child,
             return $ Fold { foldop = FSum, fdata, fgroups = zeros_ }
        solveAgg _ M.Count =
          return $ Fold { foldop = FSum, fdata = ones_, fgroups = zeros_ }
+       solveAgg env (M.Avg exp) =
+         do fdata <- sc env exp
+            sums <- solveAgg env (M.Sum exp)
+            counts <- solveAgg env M.Count
+            return $ Binop { bop=M.Div, bleft=sums, bright=counts }
+
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
 
