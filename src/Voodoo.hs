@@ -65,7 +65,8 @@ size (Binary _ ch1 ch2) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
 dagSize :: [Voodoo] -> (Int,Int)
 dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(length outputs))
 
--- convenience expression library to translate more complex expressions
+-- convenience expression library to translate more complex
+-- all have type Voodoo -> Voodoo -> Voodoo
 a >.  b = Binary { op=Greater, arg1=a, arg2=b }
 a ==. b = Binary { op=Equals, arg1=a, arg2=b }
 a <.  b = Binary { op=Greater, arg1=b, arg2=a } --notice argument swap
