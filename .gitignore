@@ -17,3 +17,5 @@ cabal.config
 *.aux
 *~
 *.info
+mplan2vdl
+runtests
