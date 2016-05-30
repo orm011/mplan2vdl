@@ -466,7 +466,7 @@ sc arg@P.Literal { P.tspec, P.stringRep } =
        MMillisec -> do r <- readIntLiteral stringRep
                        check r (/= 0) "weird zero interval"
                        let days = quot r (1000 * 60* 60* 24)
-                       check days (/= 0)  "check that we are not rounding seconds down to 0"
+                       check days (/= 0)  "check that we are not rounding seconds down to 0 (its possible query is correct, but unlikely in tpch)"
                        return $ days
                        -- millis/secs/mins/hours normalize to days, since thats what tpch uses
        MMonth  -> do months  <- readIntLiteral stringRep -- really, the day value of month intervals isnt that simple,
