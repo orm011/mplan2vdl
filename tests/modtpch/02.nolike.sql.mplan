@@ -1,4 +1,36 @@
---TEST-- /scratch/TPCH/02.sql;
+#plan select
+#	s_acctbal,
+#	s_name,
+#	n_name,
+#	p_partkey,
+#	p_mfgr,
+#	s_address,
+#	s_phone,
+#	s_comment
+#from
+#	part,
+#	supplier,
+#	partsupp,
+#	nation,
+#	region
+#where
+#	p_partkey = ps_partkey
+#	and s_suppkey = ps_suppkey
+#	and p_size = 15
+#	and p_type in ( 'PROMO BRUSHED BRASS', 'MEDIUM BURNISHED BRASS', 'STANDARD ANODIZED BRASS' ) -- missing a bunch of others
+#	and s_nationkey = n_nationkey
+#	and n_regionkey = r_regionkey
+#	and r_name = 'EUROPE'
+#	and ps_supplycost = (
+#		select
+#			min(ps_supplycost)
+#		from
+#			partsupp,
+#			supplier,
+% .plan # table_name
+% rel # name
+% clob # type
+% 379 # length
 top N (
 | project (
 | | project (
@@ -25,7 +57,7 @@ top N (
 | | | | | | | | | | | table(sys.partsupp) [ partsupp.ps_supplycost NOT NULL, partsupp.%partsupp_fk1 NOT NULL JOINIDX sys.partsupp.partsupp_fk1, partsupp.%partsupp_fk2 NOT NULL JOINIDX sys.partsupp.partsupp_fk2 ] COUNT ,
 | | | | | | | | | | | select (
 | | | | | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, part.%TID% NOT NULL ] COUNT 
-| | | | | | | | | | | ) [ part.p_size NOT NULL = int[tinyint "15"], char[part.p_type NOT NULL] FILTER like (char[char(6) "%BRASS"], char "") ]
+| | | | | | | | | | | ) [ part.p_size NOT NULL = int[tinyint "15"], part.p_type NOT NULL in (varchar(25)[char(19) "PROMO BRUSHED BRASS"], varchar(25)[char(22) "MEDIUM BURNISHED BRASS"], varchar(25)[char(23) "STANDARD ANODIZED BRASS"]) ]
 | | | | | | | | | | ) [ partsupp.%partsupp_fk2 NOT NULL = part.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk2 ],
 | | | | | | | | | | table(sys.supplier) [ supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, supplier.%TID% NOT NULL, supplier.%supplier_fk1 NOT NULL JOINIDX sys.supplier.supplier_fk1 ] COUNT 
 | | | | | | | | | ) [ partsupp.%partsupp_fk1 NOT NULL = supplier.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_fk1 ],
