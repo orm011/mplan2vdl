@@ -238,7 +238,7 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
 
 sc _ (M.IntLiteral n) = return $ const_ n
 
-sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ groom r
+sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
 -- string means monet plan string.
 fromString :: String -> Either String [(Vexp, Maybe Name)]

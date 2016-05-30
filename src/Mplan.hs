@@ -288,7 +288,7 @@ data RelExpr =
               , idxcol :: Name
               }
   | TopN      { child :: RelExpr
-              , n :: Int
+              , n :: Int64
               }
   -- | Cross
   -- | Join
@@ -414,20 +414,21 @@ solve arg@P.Node { P.relop="join"
              , P.arg_lists=_ } = Left $ "only handling joins via fk right now" ++ groom arg
 
 
--- solve P.Node { P.relop = "top N"
---              , P.children = [ch]
---              , P.arg_lists = [lim] : []
---                }
---lim is : Literal {tspec = TypeSpec {tname = "wrd", tparams = []}, stringRep }
+solve P.Node { P.relop = "top N"
+             , P.children = [ch]
+             , P.arg_lists = [P.Expr {
+                                 P.expr = P.Literal
+                                 {P.tspec = P.TypeSpec "wrd" [],
+                                  P.stringRep },
+                              P.alias = Nothing
+                                 }
+                             ] : []
+             } =
+  do n  <- readIntLiteral stringRep
+     child <- solve ch
+     return $ TopN { child , n }
 
-{- Semijoin invariants:
- - binary relop
- - condition may be complex (most are quality, but some aren't)
-
--}
-
-
-solve s_ = Left $ " parse tree not valid or case not implemented:  " ++ groom s_
+solve s_ = Left $ " case not implemented:  " ++ (take 50 $  show s_)
 
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
@@ -519,7 +520,6 @@ sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
 sc (P.Nested exprs) = conjunction exprs
 
 sc s_ = Left $ "cannot handle this scalar: " ++ groom s_
-
 
 {- converts a list into ANDs -}
 conjunction :: [P.Expr] -> Either String ScalarExpr
