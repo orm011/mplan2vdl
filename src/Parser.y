@@ -16,6 +16,7 @@ import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Text.Groom
 import Debug.Trace
+import Data.String.Utils(join)
 
 import Name(Name(..))
 }
@@ -71,7 +72,11 @@ Leaf
   { Leaf { source=$3, columns=$6 }  }
 
 Node
-: identifier '(' NodeListNE ')' BracketListNE { Node { relop = $1, children = $3, arg_lists = $5 } }
+: IdentifierListNE '(' NodeListNE ')' BracketListNE { Node { relop = (join " " $1), children = $3, arg_lists = $5 } }
+
+IdentifierListNE
+: identifier { [$1] }
+| identifier IdentifierListNE { $1 : $2 }
 
 TypeSpec
 : identifier   { TypeSpec { tname = $1, tparams=[]  } }

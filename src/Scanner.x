@@ -30,12 +30,8 @@ tokens :-
   \.   { \posn _ -> scannedToken posn Dot }
   \"$withinquotes* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
   $num+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
-  "group by"  { \posn _ -> scannedToken posn (Word "group by") }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
-  "top N"   { \posn _ -> scannedToken posn (Word "top N") }
-  "left outer join" { \posn _ -> scannedToken posn (Word "left outer join") }
-  "distinct union"  { \posn _ -> scannedToken posn (Word "distinct union") }
   "!=" { \posn _ -> scannedToken posn (Word "!=") } -- must do this before !
   $name+ { \posn s -> scannedToken posn ( Word s ) }
 
