@@ -35,7 +35,6 @@ import qualified Configuration
 import qualified Voodoo as V
 import qualified Name as Name
 
-
 ------------------------ Impure code: Fun with ExceptT ------------------------
 
 main :: IO ()
@@ -51,9 +50,11 @@ main = do
     configuration <- ExceptT CLI.getConfiguration
     contents <- readFile $ Configuration.input configuration
     let lins = lines contents
-    let withoutComments = filter (not . startswith "--" . lstrip) lins
+    let ignore ln = let stripped = lstrip ln in
+          (startswith "#" stripped) || ( startswith "%" stripped)
+    let justThePlan = filter (not . ignore) lins
     -- Part II: Process it
-    hoistEither $ V.vdlFromMplan (concat withoutComments)
+    hoistEither $ V.vdlFromMplan $ concat justThePlan
   case result of
     -- Part III: Write output
     Left errorMessage -> fatal errorMessage
