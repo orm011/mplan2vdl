@@ -13,7 +13,8 @@ PARTICULAR PURPOSE.  See the X11 license for more details. -}
 {-#LINE 14 "AlexWrapper-6.035" #-}
 import Data.Word (Word8)
 import Text.Printf (printf)
-
+import Data.Text(ord)
+import Prelude
 import qualified Data.Bits
 
 -- | Encode a Haskell String to a list of Word8 values, in UTF8 format.

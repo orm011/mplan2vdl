@@ -297,11 +297,10 @@ parseError toks =
 
 fromString :: String -> Either String Rel
 fromString str =
-  do tokens  <- sequence $ Scanner.scan str
-     let parsetree  = parse tokens
+  let tokens = Scanner.scan str
+      in parse tokens
      -- let tr = case parsetree  of
      --          Left err -> "\n--Error at Parser stage:\n" ++ err
      --          Right g ->  "\n--Parser output:\n" ++ groom g
      -- trace tr parsetree
-     parsetree
 }

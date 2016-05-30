@@ -9,39 +9,39 @@
 # ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 # FOR A PARTICULAR PURPOSE.  See the X11 license for more details.
 
-declare -r GHC_VERSION=7.8.4
+# declare -r GHC_VERSION=7.8.4
 declare -r TOP="$(git rev-parse --show-toplevel)"
 
-function have {
-    type "$1" &>/dev/null
-}
+# function have {
+#     type "$1" &>/dev/null
+# }
 
 cd "$TOP"
 
-if [[ ! -d .cabal-sandbox ]]; then
-    # No Cabal sandbox yet.  Set one up.
-    cabal sandbox init
-fi
+# if [[ ! -d .cabal-sandbox ]]; then
+#     # No Cabal sandbox yet.  Set one up.
+#     cabal sandbox init
+# fi
 
-PATH="$TOP"/.cabal-sandbox/bin:"$PATH"
+# PATH="$TOP"/.cabal-sandbox/bin:"$PATH"
 
-for package in alex happy; do
-    if ! have $package; then
-	cabal install $package \
-	    -j \
-	    --enable-library-profiling --disable-executable-profiling \
-	    --enable-optimization
-    fi
-done
-
+# for package in alex happy; do
+#     if ! have $package; then
+# 	cabal install $package \
+# 	    -j \
+# 	    --enable-library-profiling --disable-executable-profiling \
+# 	    --enable-optimization
+#     fi
+# done
+# --enable-tests
 if [[ $# -lt 1  ]]
 then
-    FLAG="install --enable-tests --enable-executable-profiling --enable-library-profiling"
+    FLAG="build --test --no-run-tests --enable-executable-profiling --enable-library-profiling"
 else
     FLAG=$@
 fi
 
 OPTS="-g --debug --info"
 set -x
-cabal $FLAG \
+stack build --test --no-run-tests --ghc-options="-Wall"
       --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options="-g --info"

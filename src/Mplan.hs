@@ -19,7 +19,6 @@ import Control.Monad(foldM, mapM, void)
 import Text.Printf (printf)
 import qualified Data.Map.Strict as Map
 import Data.List (foldl')
-import System.Locale
 import Data.Time.Format
 import Data.Time.Calendar
 import Data.Time
@@ -160,8 +159,8 @@ resolveCharLiteral ch =
 resolveDateString :: String -> Int64
 resolveDateString datestr =
   fromIntegral $ diffDays day zero
-  where zero = (readTime System.Locale.defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
-        day = (readTime System.Locale.defaultTimeLocale "%Y-%m-%d" datestr) :: Day
+  where zero = (readTime defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
+        day = (readTime defaultTimeLocale "%Y-%m-%d" datestr) :: Day
 
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic)
 instance NFData OrderSpec

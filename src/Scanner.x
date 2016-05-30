@@ -9,7 +9,7 @@ module Scanner ( ScannedToken(..)
 
 }
 
-%wrapper "6.035"
+%wrapper "posn"
 
 ----------------------------------- Tokens ------------------------------------
 
@@ -86,7 +86,7 @@ scannedToken (AlexPn _ lineNo columnNo) tok = ScannedToken lineNo columnNo tok
 
 ---------------------------- Scanning entry point -----------------------------
 
-scan :: String -> [Either String ScannedToken]
+scan :: String -> [ScannedToken] -- [Either String ScannedToken]
 scan = alexScanTokens
 
 formatTokenOrError :: Either String ScannedToken -> Either String String
