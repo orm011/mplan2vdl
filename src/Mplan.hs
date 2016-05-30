@@ -22,6 +22,7 @@ import Data.List (foldl')
 import Data.Time.Format
 import Data.Time.Calendar
 import Data.Time
+import Dict(dictEncode)
 
 type Map = Map.Map
 
@@ -56,104 +57,16 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f "smallint" [] = Right MSmallint
         f "bigint" [] = Right MBigInt
         f "date" []  = Right MDate
-        f "char" _ = Right MChar -- ignoring the length fields
+        f "char" _ = Right MChar -- ignoring length fields
+        f "varchar" [_] = Right MChar --ignore length fields
         f "decimal" [a,b] = Right $ MDecimal a b
         f "sec_interval" [_] = Right MMillisec -- they use millisecs to express their seconds
         f "month_interval" [] = Right MMonth
         f "double" [] = Right MDouble -- used for averages even if columns arent doubles
         f name _ = Left $  "unsupported typespec: " ++ name
-        -- f ["decimal"] [a, b] = Right (MDecimal a b)
-        -- f ["sec_interval"] [a] = Right (MSecInterval a)
-        -- f ["month_interval"] []  = Right MMonthInterval
-
-        -- f ["char"] [a] = Right (MCharFix a)
-        -- f ["char"] [] = Right MChar
 
 resolveCharLiteral :: String -> Either String Int64
-resolveCharLiteral ch =
-  case ch of
-    "A" -> Right 64
-    "N"-> Right 16
-    "R"-> Right 40
-    "F"-> Right 40
-    "O"-> Right 16
-    "AIR"-> Right 88
-    "FOB"-> Right 112
-    "MAIL"-> Right 40
-    "RAIL"-> Right 136
-    "AIR REG"-> Right 64
-    "SHIP"-> Right 160
-    "TRUCK"-> Right 16
-    "COLLECT COD"-> Right 120
-    "DELIVER IN PERSON"-> Right 16
-    "NONE"-> Right 96
-    "TAKE BACK RETURN"-> Right 56
-    "Brand#11"-> Right 176
-    "Brand#12"-> Right 464
-    "Brand#13"-> Right 16
-    "Brand#14"-> Right 560
-    "Brand#15"-> Right 400
-    "Brand#21"-> Right 688
-    "Brand#22"-> Right 624
-    "Brand#23"-> Right 432
-    "Brand#24"-> Right 144
-    "Brand#25"-> Right 304
-    "Brand#31"-> Right 784
-    "Brand#32"-> Right 112
-    "Brand#33"-> Right 336
-    "Brand#34"-> Right 80
-    "Brand#35"-> Right 496
-    "Brand#41"-> Right 720
-    "Brand#42"-> Right 48
-    "Brand#43"-> Right 240
-    "Brand#44"-> Right 208
-    "Brand#45"-> Right 656
-    "Brand#51"-> Right 752
-    "Brand#52"-> Right 528
-    "Brand#53"-> Right 592
-    "Brand#54"-> Right 272
-    "Brand#55"-> Right 368
-    "JUMBO BAG"-> Right 504
-    "JUMBO BOX"-> Right 352
-    "JUMBO CAN"-> Right 632
-    "JUMBO CASE"-> Right 288
-    "JUMBO DRUM"-> Right 1096
-    "JUMBO JAR"-> Right 440
-    "JUMBO PACK"-> Right 320
-    "JUMBO PKG"-> Right 16
-    "LG BAG"-> Right 584
-    "LG BOX"-> Right 416
-    "LG CAN"-> Right 232
-    "LG CASE"-> Right 48
-    "LG DRUM"-> Right 208
-    "LG JAR"-> Right 912
-    "LG PACK"-> Right 840
-    "LG PKG"-> Right 608
-    "MED BAG"-> Right 160
-    "MED BOX"-> Right 1072
-    "MED CAN"-> Right 864
-    "MED CASE"-> Right 472
-    "MED DRUM"-> Right 104
-    "MED JAR"-> Right 992
-    "MED PACK"-> Right 384
-    "MED PKG"-> Right 560
-    "SM BAG"-> Right 184
-    "SM BOX"-> Right 888
-    "SM CAN"-> Right 936
-    "SM CASE"-> Right 536
-    "SM DRUM"-> Right 1048
-    "SM JAR"-> Right 664
-    "SM PACK"-> Right 720
-    "SM PKG"-> Right 136
-    "WRAP BAG"-> Right 744
-    "WRAP BOX"-> Right 256
-    "WRAP CAN"-> Right 1016
-    "WRAP CASE"-> Right 72
-    "WRAP DRUM"-> Right 808
-    "WRAP JAR"-> Right 688
-    "WRAP PACK"-> Right 960
-    "WRAP PKG"-> Right 776
-    s_ -> Left $ "unable to dict encode this character literal :" ++ s_
+resolveCharLiteral ch = dictEncode ch
 
 {- assumes date is formatted properly: todo. error handling for tis -}
 resolveDateString :: String -> Int64

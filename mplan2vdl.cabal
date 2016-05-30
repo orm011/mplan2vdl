@@ -27,12 +27,14 @@ library
                      , Vlite
                      , Voodoo
   other-modules:       CLI
+                     , Dict
   build-depends:       base >= 4.7 && <5
                      , MissingH
                      , containers
                      , groom
                      , split
                      , array
+                     , bytestring
                      , transformers
                      , deepseq
                      , semigroups
