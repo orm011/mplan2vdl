@@ -417,6 +417,8 @@ solve arg@P.Node { P.relop="join"
 solve P.Node { P.relop = "top N"
              , P.children = [ch]
              , P.arg_lists = [P.Expr {
+                                 -- this kind of "wrd" literal only shows up in the topN oper.
+                                 -- so, so far no need to deal with it elsewhere
                                  P.expr = P.Literal
                                  {P.tspec = P.TypeSpec "wrd" [],
                                   P.stringRep },
