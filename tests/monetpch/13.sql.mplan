@@ -1,0 +1,38 @@
+#plan select
+#	c_count,
+#	count(*) as custdist
+#from
+#	(
+#		select
+#			c_custkey,
+#			count(o_orderkey)
+#		from
+#			customer left outer join orders on
+#				c_custkey = o_custkey
+#				and o_comment not like '%special%requests%'
+#		group by
+#			c_custkey
+#	) as c_orders (c_custkey, c_count)
+#group by
+#	c_count
+#order by
+#	custdist desc,
+#	c_count desc;
+% .plan # table_name
+% rel # name
+% clob # type
+% 193 # length
+project (
+| group by (
+| | project (
+| | | group by (
+| | | | project (
+| | | | | left outer join (
+| | | | | | table(sys.customer) [ customer.c_custkey NOT NULL HASHCOL , customer.%TID% NOT NULL ] COUNT ,
+| | | | | | table(sys.orders) [ orders.o_orderkey NOT NULL HASHCOL , orders.o_comment NOT NULL, orders.%orders_fk1 NOT NULL JOINIDX sys.orders.orders_fk1 ] COUNT 
+| | | | | ) [ orders.%orders_fk1 NOT NULL = customer.%TID% NOT NULL JOINIDX sys.orders.orders_fk1, char[orders.o_comment NOT NULL] ! FILTER like (char[char(18) "%special%requests%"], char "") ]
+| | | | ) [ customer.c_custkey NOT NULL HASHCOL , orders.o_orderkey HASHCOL  ]
+| | | ) [ customer.c_custkey NOT NULL HASHCOL  ] [ customer.c_custkey NOT NULL HASHCOL , sys.count no nil (orders.o_orderkey HASHCOL ) as L1.L1 ]
+| | ) [ L1 as c_orders.c_count ]
+| ) [ c_orders.c_count ] [ c_orders.c_count, sys.count() NOT NULL as L2.L2 ]
+) [ c_orders.c_count, L2 NOT NULL as L2.custdist ] [ L2.custdist NOT NULL, c_orders.c_count ]
