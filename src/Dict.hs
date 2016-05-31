@@ -5902,7 +5902,7 @@ dict = Map.fromList $  map (packFirst . lastTwo)
  ,(lineitem,l_shipmode,"FOB",112)
  ,(lineitem,l_shipmode,"MAIL",40)
  ,(lineitem,l_shipmode,"RAIL",136)
- ,(lineitem,l_shipmode,"REG AIR",64)
+ ,(lineitem,l_shipmode,"AIR REG",64)
  ,(lineitem,l_shipmode,"SHIP",160)
  ,(lineitem,l_shipmode,"TRUCK",16)
  ]
