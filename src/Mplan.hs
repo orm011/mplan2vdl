@@ -177,7 +177,7 @@ ghelper  P.Expr
 
 
 ghelper s_ = Left $
-  "expression not supported as output of group_by: " ++ groom s_
+  "expression not supported as output of group_by: " ++ (take 50 $ show  s_)
 
 
 data RelExpr =
@@ -319,12 +319,12 @@ solve arg@P.Node { P.relop = "join"
   do table  <- solve l
      references <- solve r
      let hasJoinIdx attrs  = filter (\f -> case f of { P.JoinIdx _ -> True; _ -> False; }) attrs  /= []
-     check attrs hasJoinIdx $ "need a join index for a fk join at " ++ show arg
+     check attrs hasJoinIdx $ "need a join index for a fk join at " ++ (take 100 $ show arg)
      return $ FKJoin { table, references, idxcol }
 
 solve arg@P.Node { P.relop="join"
              , P.children= _
-             , P.arg_lists=_ } = Left $ "only handling joins via fk right now" ++ groom arg
+             , P.arg_lists=_ } = Left $ "only handling joins via fk right now" ++( take 100 $ show arg)
 
 
 solve P.Node { P.relop = "top N"
@@ -434,7 +434,7 @@ sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
 
 sc (P.Nested exprs) = conjunction exprs
 
-sc s_ = Left $ "cannot handle this scalar: " ++ groom s_
+sc s_ = Left $ "cannot handle this scalar: " ++ (take 50 $ show s_)
 
 {- converts a list into ANDs -}
 conjunction :: [P.Expr] -> Either String ScalarExpr
