@@ -105,26 +105,30 @@ resolveInfix str =
 resolveBinopOpcode :: Name -> Either String BinaryOp
 resolveBinopOpcode nm =
   case nm of
-    Name ["sys", "sql_add"] -> Right Add
-    Name ["sys", "sql_sub"] -> Right Sub
-    Name ["sys", "sql_mul"] -> Right Mul
-    Name ["sys", "sql_div"] -> Right Div
-    Name ["sys", "sql_min"] -> Right Min
-    Name ["sys", "sql_max"] -> Right Max
-    _ -> Left $ "unsupported binary function: " ++ show nm
+    Name ["sql_add"] -> Right Add
+    Name ["sql_sub"] -> Right Sub
+    Name ["sql_mul"] -> Right Mul
+    Name ["sql_div"] -> Right Div
+    Name ["sql_min"] -> Right Min
+    Name ["sql_max"] -> Right Max
+    Name ["="] -> Right Eq
+    Name ["or"] -> Right LogOr
+    Name [">"] -> Right Gt
+    _ -> Left $ "unknown binary function: " ++ show nm
 
- {- they must be semantically for a single tuple (see aggregates otherwise) -}
+
+  {- they must be semantically for a single tuple (see aggregates otherwise) -}
 data UnaryOp =
-  Neg | Year
+  Neg | Year | IsNull
   deriving (Eq, Show, Generic)
 instance NFData UnaryOp
-
 
 resolveUnopOpcode :: Name -> Either String UnaryOp
 resolveUnopOpcode nm =
   case nm of
-    Name ["sys", "year"] -> Right Year
-    Name ["sys", "sql_neg"] -> Right Neg
+    Name ["year"] -> Right Year
+    Name ["sql_neg"] -> Right Neg
+    Name ["isnull"] -> Right IsNull
     _ -> Left $ "unsupported scalar function " ++ show nm
 
  {- a Ref can be a column or a previously bound name for an intermediate -}
@@ -167,12 +171,12 @@ ghelper P.Expr
   , P.alias }
   = do inner <- sc singlearg
        case fname of
-         Name ["sys", "sum"] -> return ([], [(Sum inner, alias)])
-         Name ["sys", "avg"] -> return ([], [(Avg inner, alias)])
+         Name ["sum"] -> return ([], [(Sum inner, alias)])
+         Name ["avg"] -> return ([], [(Avg inner, alias)])
          _ -> Left $ "unknown unary aggregate " ++ show fname
 
 ghelper  P.Expr
-  { P.expr = P.Call { P.fname=Name ["sys", "count"]
+  { P.expr = P.Call { P.fname=Name ["count"]
                     , P.args=[] }
   , P.alias }
   = Right ([], [(Count, alias)] )

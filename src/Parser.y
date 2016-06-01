@@ -96,7 +96,7 @@ NodeListNE
 
 
 QualifiedName
-: QualifiedNameB { Name $1 }
+: QualifiedNameB { Name  $ dropsys $1 }
 
 QualifiedNameB
 : identifier { ( [$1] ) }
@@ -308,4 +308,10 @@ fromString str =
      --          Left err -> "\n--Error at Parser stage:\n" ++ err
      --          Right g ->  "\n--Parser output:\n" ++ groom g
      -- trace tr parsetree
+
+-- drop the 'sys' prefix that shows up some times (but not all of the time)
+dropsys :: [String] -> [String]
+dropsys ("sys":rest) = rest
+dropsys x = x
+
 }
