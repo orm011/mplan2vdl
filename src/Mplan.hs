@@ -137,6 +137,7 @@ data ScalarExpr =
   | IntLiteral Int64 {- use the widest possible type to not lose info -}
   | Unary { unop:: UnaryOp, arg::ScalarExpr }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
+  | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
   | Cast { mtype :: MType, arg::ScalarExpr }
   deriving (Eq, Show, Generic)
 instance NFData ScalarExpr
@@ -371,6 +372,18 @@ sc P.Call { P.fname
      right <- sc secondarg
      binop <- resolveBinopOpcode fname
      return $ Binop { binop, left, right }
+
+
+sc P.Call { P.fname=Name ["ifthenelse"]
+          , P.args = [ P.Expr { P.expr = mif, P.alias = _ }
+                     , P.Expr { P.expr = mthen, P.alias = _ }
+                     , P.Expr { P.expr = melse, P.alias = _ }
+                     ]
+          } =
+  do if_ <- sc mif
+     then_ <- sc mthen
+     else_ <- sc melse
+     return $ IfThenElse { if_, then_, else_ }
 
 sc P.Cast { P.tspec
           , P.value = P.Expr { P.expr = parg, P.alias = _  }
