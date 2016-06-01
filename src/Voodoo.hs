@@ -214,7 +214,7 @@ toList (VProject {voutname, vinname, vvec}) = ["Project",show voutname, "Id " ++
 
 toList (VRange { vrmin, vrstep }) =
   {- for printing: hardcoded length 2 billion right now, since backend only materializes what's needed -}
-  let maxC = 2*10^9 in
+  let maxC = 2*10^2 in
   ["RangeC", "val", show vrmin, show maxC, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
@@ -222,8 +222,8 @@ toList (VBinary { vop, varg1, varg2}) =
     Gather -> [svop, id1, id2, "val"]
     _ ->      [svop, "val", id1, "val", id2, "val" ]
   where svop = show vop
-        id1 = "Id " ++ show varg2
-        id2 = "Id " ++ show varg1
+        id1 = "Id " ++ show varg1
+        id2 = "Id " ++ show varg2
 
 toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 
