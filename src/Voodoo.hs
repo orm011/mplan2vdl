@@ -25,7 +25,7 @@ its function is to be easy to convert to text format.
 -}
 data Voodoo =
   Load Name
-  | Project { outname::Name , vec :: Voodoo } -- full rename only. used right after load
+  | Project { outname::Name , inname::Name, vec :: Voodoo } -- full rename only. used right after load
   | Range { rmin::Int64, rstep::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
   deriving (Eq,Show,Generic,Ord)
@@ -59,7 +59,7 @@ instance NFData Voodop
 size :: Voodoo -> (Int, Int)
 size (Load _) = (1,1)
 size (Range _ _) = (1,1)
-size (Project _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
+size (Project _ _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
 size (Binary _ ch1 ch2) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
 
 dagSize :: [Voodoo] -> (Int,Int)
@@ -83,7 +83,13 @@ cond ?. (a,b) = (const_ 1 -. negcond) *. a +. negcond *. b
 
 fromVexp :: V.Vexp -> Either String Voodoo
 
-fromVexp (V.Load n) = return $ Project { outname=Name ["val"], vec = Load n }
+fromVexp (V.Load n) =
+  do inname <- (case n of
+                   Name (f:s:rest) -> Right $ Name $ s:rest
+                   _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
+     return $ Project { outname=Name ["val"]
+                      , inname
+                      , vec = Load n }
 fromVexp (V.Range {V.rmin, V.rstep}) = return $ Range {rmin, rstep}
 fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
   do left <- fromVexp bleft
@@ -126,7 +132,7 @@ all pointers to other expressions now are explicit,
 needed for serialization -}
 data Vref  =
   VLoad Name
-  | VProject { voutname::Name , vvec :: Int } -- full rename only.
+  | VProject { voutname::Name , vinname::Name, vvec :: Int } -- full rename only.
   | VRange  { vrmin :: Int64, vrstep :: Int64 }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
   deriving (Eq,Show,Generic)
@@ -184,9 +190,10 @@ vrefFromVoodoo state (Load n) = return $ (state, VLoad n)
 vrefFromVoodoo state (Range  { rmin , rstep  }) =
   return $ (state, VRange { vrmin=rmin, vrstep=rstep })
 
-vrefFromVoodoo state (Project outname vec) =
+vrefFromVoodoo state (Project {outname, inname, vec}) =
   do (state', n') <- memVrefFromVoodoo state vec
-     return $ (state', VProject { voutname=outname, vvec=n' })
+     return $ (state', VProject { voutname=outname, vinname=inname, vvec=n' })
+
 
 vrefFromVoodoo state (Binary { op , arg1 , arg2 }) =
   do (state', n1) <- memVrefFromVoodoo state arg1
@@ -203,7 +210,7 @@ toList :: Vref -> [String]
 toList (VLoad (Name lst)) = ["Load", show cleanname]
   where cleanname = Name (if head lst == "sys" then tail lst else lst)
 
-toList (VProject voutname vvec) = ["Project",show voutname, "Id " ++ show vvec]
+toList (VProject {voutname, vinname, vvec}) = ["Project",show voutname, "Id " ++ show vvec, show vinname ]
 
 toList (VRange { vrmin, vrstep }) =
   {- for printing: hardcoded length 2 billion right now, since backend only materializes what's needed -}
