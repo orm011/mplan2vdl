@@ -246,17 +246,17 @@ solve P.Leaf { P.source, P.columns  } =
      check pcols ( /= []) "list of table columns must not be empty"
      return $ Table { tablename = source, tablecolumns = pcols}
   where
-    split P.Expr { P.expr = P.Ref { P.rname, P.attrs } --attr => no alias
+    split P.Expr { P.expr = P.Ref { P.rname, P.attrs } --no alias. then use attr or name
                  , P.alias=Nothing } =
       case getJoinIdx attrs of
-        [str] -> Right  (str, Just rname) -- notice reversal
+        [fkcol] -> Right  (fkcol, Just rname) -- notice reversal
         [] -> Right (rname, Nothing)
         s_ -> Left $ "unexpected: multiple fkey indices" ++ groom attrs
-    split P.Expr { P.expr = P.Ref { P.rname, P.attrs } -- alias => no attr
-                 , P.alias } =
+    split P.Expr { P.expr = P.Ref { P.rname, P.attrs }
+                 , P.alias=as@(Just _) } =
       case getJoinIdx attrs of
-        [] -> Right (rname, alias)
-        s_ -> Left $ "unexpected: have both alias and join idx" ++ groom s_
+        [] -> Right (rname, as) --
+        [fkcol] -> Right (fkcol, as)  -- here, we have both an alias and joinidx (eg q8 nation_fk1)
     split _ = Left "table outputs should only have reference expressions"
 
 
