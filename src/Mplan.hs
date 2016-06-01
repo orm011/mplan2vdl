@@ -39,6 +39,7 @@ data MType =
   | MDecimal Int Int
   | MSecInterval Int
   | MMonthInterval
+  | MBoolean
 
   deriving (Eq, Show, Generic)
 instance NFData MType
@@ -63,6 +64,7 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f "sec_interval" [_] = Right MMillisec -- they use millisecs to express their seconds
         f "month_interval" [] = Right MMonth
         f "double" [] = Right MDouble -- used for averages even if columns arent doubles
+        f "boolean" [] = Right MBoolean
         f name _ = Left $  "unsupported typespec: " ++ name
 
 resolveCharLiteral :: String -> Either String Int64
@@ -388,6 +390,11 @@ sc arg@P.Literal { P.tspec, P.stringRep } =
                           --it depends on the context it is used (eg the actual it is being added to). nvm
                      return $ months * 30
        MDecimal _ _ -> readIntLiteral stringRep -- sql 0.06 shows up as mplan Decimal (,2) "6", so just leave it as is.
+       MBoolean  -> (case stringRep of
+                        "true" -> Right 1
+                        "false" -> Right 0
+                        s_ -> Left $ "invalid boolean literal: " ++ show s_)
+
        _ -> do int <- ( let r = readIntLiteral stringRep in
                         case mtype of
                           MInt -> r
