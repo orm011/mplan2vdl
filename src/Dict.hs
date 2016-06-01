@@ -64,6 +64,8 @@ dict = Map.fromList $  map (packFirst . lastTwo)
  ,(region,r_name,"MIDDLE EAST",112)
  ,(nation,n_name,"ALGERIA",16)
  ,(nation,n_name,"ARGENTINA",40)
+ ,(nation,n_name,"BRAZIL",41) -- added manually, made up code
+ ,(nation,n_name,"FRANCE",42) -- added manually, made up code.
  ,(nation,n_name,"CANADA",96)
  ,(nation,n_name,"EGYPT",120)
  ,(nation,n_name,"ETHIOPIA",144)
@@ -5902,7 +5904,7 @@ dict = Map.fromList $  map (packFirst . lastTwo)
  ,(lineitem,l_shipmode,"FOB",112)
  ,(lineitem,l_shipmode,"MAIL",40)
  ,(lineitem,l_shipmode,"RAIL",136)
- ,(lineitem,l_shipmode,"AIR REG",64)
+ ,(lineitem,l_shipmode,"AIR REG",64) -- used to be REG AIR. modified
  ,(lineitem,l_shipmode,"SHIP",160)
  ,(lineitem,l_shipmode,"TRUCK",16)
  ]
