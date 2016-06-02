@@ -117,9 +117,9 @@ fromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
        V.Gather -> Right $ Binary { op=Gather, arg1=input, arg2=positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
-fromVexp (V.Fold { V.foldop, V.fdata, V.fgroups }) =
-  do arg1 <- fromVexp fdata
-     arg2 <- fromVexp fgroups
+fromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
+  do arg1 <- fromVexp fgroups
+     arg2 <- fromVexp fdata
      case foldop of
        V.FSum -> return $ Binary { op=FoldSum, arg1, arg2 }
        V.FMax -> return $ Binary { op=FoldMax, arg1, arg2 }

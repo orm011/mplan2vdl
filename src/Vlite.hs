@@ -39,7 +39,7 @@ data Vexp  =
   | Range  { rmin :: Int64, rstep :: Int64 }
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
-  | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
+  | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp}
   | IfThenElse { if_::Vexp, then_::Vexp, else_::Vexp }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
@@ -134,9 +134,9 @@ solve M.GroupBy { M.child,
      where
        solveAgg env (M.Sum exp) =
          do fdata <- sc env exp
-            return $ Fold { foldop = FSum, fdata, fgroups = zeros_ }
+            return $ Fold { foldop = FSum, fgroups = zeros_, fdata }
        solveAgg _ M.Count =
-         return $ Fold { foldop = FSum, fdata = ones_, fgroups = zeros_ }
+         return $ Fold { foldop = FSum,  fgroups = zeros_, fdata = ones_}
        solveAgg env (M.Avg exp) =
          do fdata <- sc env exp
             sums <- solveAgg env (M.Sum exp)
@@ -185,7 +185,7 @@ solve M.Select { M.child -- can be derived rel
      childenv <- solve' child
      let (childvecs, chalias) = unzip childcols
      preds <- sc childenv predicate
-     let idxs = Fold { foldop=FSel, fdata=preds, fgroups=zeros_ }
+     let idxs = Fold { foldop=FSel, fgroups=zeros_, fdata=preds }
      let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
      let gatheredcols = zip (map gatherQual childvecs) chalias
      return $ gatheredcols -- same names
