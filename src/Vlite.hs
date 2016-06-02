@@ -40,6 +40,7 @@ data Vexp  =
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fdata :: Vexp, fgroups :: Vexp }
+  | IfThenElse { if_::Vexp, then_::Vexp, else_::Vexp }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
 

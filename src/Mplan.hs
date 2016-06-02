@@ -487,7 +487,7 @@ fromParseTree = solve
 fromString :: String -> Either String RelExpr
 fromString mplanstring =
   do parsetree <- P.fromString mplanstring
-     let mplan = (fromParseTree $!! parsetree) >>= (return . pushFKJoins)
+     let mplan = (fromParseTree $!! parsetree) >>= (return . fuseSelects . pushFKJoins)
      -- let tr = case mplan of
      --            Left err -> "\n--Error at Mplan stage:\n" ++ err
      --            Right g -> "\n--Mplan output:\n" ++ groom g
@@ -512,3 +512,15 @@ pushFKJoins = rewrite swap
                             , idxcol }
              , predicate }
     swap _ = Nothing
+
+
+fuseSelects :: RelExpr -> RelExpr
+fuseSelects = rewrite fuse
+  where
+    fuse Select { child=Select { child=inner
+                               , predicate=predicateBottom }
+                , predicate=predicateTop
+                } = Just $
+      Select { child=inner
+             , predicate= Binop {binop=LogAnd, left=predicateTop, right=predicateBottom } }
+    fuse _ = Nothing
