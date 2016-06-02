@@ -10,6 +10,7 @@ import GHC.Generics (Generic)
 import Text.Printf
 import Prelude hiding (lookup)
 import Control.DeepSeq(NFData)
+import Data.Data
 
 {- the current implementation
 works correctly under three key assumptions about the input:
@@ -27,7 +28,7 @@ We assume all lookups are either successful, or there was an error.
 
 -}
 
-data Name = Name [String] deriving (Eq, Generic, Ord)
+data Name = Name [String] deriving (Eq, Generic, Ord, Data)
 
 type Map = Map.Map
 

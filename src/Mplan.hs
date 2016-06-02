@@ -23,6 +23,8 @@ import Data.Time.Format
 import Data.Time.Calendar
 import Data.Time
 import Dict(dictEncode)
+import Data.Data
+import Data.Generics.Uniplate.Data
 
 type Map = Map.Map
 
@@ -40,8 +42,7 @@ data MType =
   | MSecInterval Int
   | MMonthInterval
   | MBoolean
-
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Data)
 instance NFData MType
 
 isJoinIdx :: P.Attr -> [Name]
@@ -77,7 +78,7 @@ resolveDateString datestr =
   where zero = (readTime defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
         day = (readTime defaultTimeLocale "%Y-%m-%d" datestr) :: Day
 
-data OrderSpec = Asc | Desc deriving (Eq,Show, Generic)
+data OrderSpec = Asc | Desc deriving (Eq,Show, Generic, Data)
 instance NFData OrderSpec
 
 data BinaryOp =
@@ -85,7 +86,7 @@ data BinaryOp =
   | Eq | Neq {- comp -}
   | LogAnd | LogOr {- logical -}
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max  {- arith -}
-  deriving (Eq, Show, Generic, Ord)
+  deriving (Eq, Show, Generic, Ord, Data)
 instance NFData BinaryOp
 
 
@@ -120,7 +121,7 @@ resolveBinopOpcode nm =
   {- they must be semantically for a single tuple (see aggregates otherwise) -}
 data UnaryOp =
   Neg | Year | IsNull
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Data)
 instance NFData UnaryOp
 
 resolveUnopOpcode :: Name -> Either String UnaryOp
@@ -139,11 +140,12 @@ data ScalarExpr =
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
   | Cast { mtype :: MType, arg::ScalarExpr }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
+
 data GroupAgg = Sum ScalarExpr | Avg ScalarExpr | Count
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
 solveGroupOutputs :: [P.Expr] -> Either String ([(Name, Maybe Name)], [(GroupAgg, Maybe Name)])
@@ -210,12 +212,7 @@ data RelExpr =
   | TopN      { child :: RelExpr
               , n :: Int64
               }
-  -- | Cross
-  -- | Join
-  -- | AntiJoin
-  -- | SemiJoin
-  -- | LeftOuter
-  deriving (Eq,Show, Generic)
+  deriving (Eq,Show, Generic, Data)
 instance NFData RelExpr
 
 -- thsis  way to insert extra consistency checks
@@ -397,16 +394,23 @@ sc arg@P.Literal { P.tspec, P.stringRep } =
      ret <- case mtype of
        MDate -> Right $ resolveDateString stringRep
        MChar -> resolveCharLiteral stringRep
-       MMillisec -> do r <- readIntLiteral stringRep
-                       check r (/= 0) "weird zero interval"
-                       let days = quot r (1000 * 60* 60* 24)
-                       check days (/= 0)  "check that we are not rounding seconds down to 0 (its possible query is correct, but unlikely in tpch)"
-                       return $ days
-                       -- millis/secs/mins/hours normalize to days, since thats what tpch uses
-       MMonth  -> do months  <- readIntLiteral stringRep -- really, the day value of month intervals isnt that simple,
-                          --it depends on the context it is used (eg the actual it is being added to). nvm
-                     return $ months * 30
-       MDecimal _ _ -> readIntLiteral stringRep -- sql 0.06 shows up as mplan Decimal (,2) "6", so just leave it as is.
+       MMillisec ->
+         do r <- readIntLiteral stringRep
+            check r (/= 0) "weird zero interval"
+            let days = quot r (1000 * 60* 60* 24)
+            check days (/= 0)  "check that we are not rounding seconds down to 0 (its possible query is correct, but unlikely in tpch)"
+            return $ days
+            -- millis/secs/mins/hours normalize to days,
+            --since thats what tpch uses
+       MMonth  ->
+         do months  <- readIntLiteral stringRep
+            return $ months * 30
+            -- really, the day value of month intervals isnt that simple,
+            --it depends on the context it is used
+            --(eg the actual it is being added to). nvm
+       MDecimal _ _ -> readIntLiteral stringRep
+       -- sql 0.06 shows up
+       -- as mplan Decimal (,2) "6", so just leave it as is.
        MBoolean  -> (case stringRep of
                         "true" -> Right 1
                         "false" -> Right 0
@@ -491,35 +495,20 @@ fromString mplanstring =
      mplan
 
 
-{- this transform pushes select filters
-(on the right hand side) above fk joins -}
--- the predicate output names are legal when moved up, bc
--- join does not have bindings in its syntax
--- todo: abstract traversal boilerplate
+-- The predicate output names are legal when moved up, bc
+-- join does not have bindings in its syntax.
+-- Note: this code will repeat the transform below
+-- until it no longer applies to the data structure (see uniplate package)
 pushFKJoins :: RelExpr -> RelExpr
-pushFKJoins FKJoin { table
-                   , references  = Select { child, predicate }
-                   , idxcol
-                   } =
-  Select { child=FKJoin { table = pushFKJoins table, references = pushFKJoins child, idxcol }, predicate }
-
-pushFKJoins b@FKJoin { table, references }
-  = b { table=pushFKJoins table, references=pushFKJoins references }
-
-pushFKJoins b@Select { child  }
-  = b { child=pushFKJoins child }
-
-pushFKJoins b@GroupBy { child }
-  = b { child=pushFKJoins child }
-
-pushFKJoins b@Table { } = b
-
-pushFKJoins b@Project { child }
-  = b { child=pushFKJoins child }
-
-pushFKJoins b@TopN { child }
-  = b { child=pushFKJoins child }
-
---undefined for others (TODO: enable error on compiler warning for missing pattern match)
--- for now, do nothing otherwise
--- projects can be pushed as well.
+pushFKJoins = rewrite swap
+  where
+    swap FKJoin { table
+                , references = Select { child
+                                       , predicate }
+                , idxcol
+                } = Just $
+      Select { child=FKJoin { table
+                            , references = child
+                            , idxcol }
+             , predicate }
+    swap _ = Nothing
