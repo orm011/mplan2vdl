@@ -502,13 +502,22 @@ fromString mplanstring =
 pushFKJoins :: RelExpr -> RelExpr
 pushFKJoins = rewrite swap
   where
-    swap FKJoin { table
+    swap FKJoin { table --push right select
                 , references = Select { child
                                        , predicate }
                 , idxcol
                 } = Just $
       Select { child=FKJoin { table
                             , references = child
+                            , idxcol }
+             , predicate }
+    swap FKJoin { table = Select { child -- push left select
+                                 , predicate }
+                , references
+                , idxcol
+                } = Just $
+      Select { child=FKJoin { table = child
+                            , references
                             , idxcol }
              , predicate }
     swap _ = Nothing
