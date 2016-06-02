@@ -501,35 +501,42 @@ fromString mplanstring =
 -- until it no longer applies to the data structure (see uniplate package)
 pushFKJoins :: RelExpr -> RelExpr
 pushFKJoins = rewrite swap
-  where
-    swap FKJoin { table --push right select
+  where -- pattern order matters in terms of which gets preferred
+    --dimension table selects get pushed up as well, after fact table ones
+    swap FKJoin { table
                 , references = Select { child
                                        , predicate }
                 , idxcol
-                } = Just $
-      Select { child=FKJoin { table
-                            , references = child
-                            , idxcol }
-             , predicate }
-    swap FKJoin { table = Select { child -- push left select
+                } =
+      Just $ Select { child=FKJoin { table
+                                   , references = child
+                                   , idxcol }
+                    , predicate }
+    -- fact table selects get pushed up as well, after dim table
+    -- NOTE: the predicate merge step is meant to map bottommost to leftmost
+    swap FKJoin { table = Select { child=selectchild -- push left select
                                  , predicate }
                 , references
                 , idxcol
-                } = Just $
-      Select { child=FKJoin { table = child
-                            , references
-                            , idxcol }
-             , predicate }
+                } =
+      Just $ Select { child=FKJoin { table = selectchild
+                                   , references
+                                   , idxcol }
+                    , predicate }
     swap _ = Nothing
 
 
 fuseSelects :: RelExpr -> RelExpr
 fuseSelects = rewrite fuse
   where
-    fuse Select { child=Select { child=inner
-                               , predicate=predicateBottom }
-                , predicate=predicateTop
-                } = Just $
-      Select { child=inner
-             , predicate= Binop {binop=LogAnd, left=predicateTop, right=predicateBottom } }
+    fuse Select { child=Select { child=grandchild
+                               , predicate=bottompred }
+                , predicate=toppred
+                } =
+      -- bottompred is left (since we still want it to apply before top pred)
+      Just $ Select { child=grandchild
+                    , predicate= Binop {binop=LogAnd
+                                       , left=bottompred
+                                       , right=toppred}
+                    }
     fuse _ = Nothing
