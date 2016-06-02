@@ -1,6 +1,7 @@
 module Mplan( fromParseTree
             , fromString
             , BinaryOp(..)
+            , UnaryOp(..)
             , RelExpr(..)
             , ScalarExpr(..)
             , GroupAgg(..)
@@ -88,7 +89,6 @@ data BinaryOp =
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max  {- arith -}
   deriving (Eq, Show, Generic, Ord, Data)
 instance NFData BinaryOp
-
 
 resolveInfix :: String -> Either String BinaryOp
 resolveInfix str =

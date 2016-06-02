@@ -6,7 +6,7 @@ module Vlite( fromMplan
             , FoldOp(..)) where
 
 import qualified Mplan as M
-import Mplan(BinaryOp)
+import Mplan(BinaryOp(..), UnaryOp)
 import Name(Name(..))
 import qualified Name as NameTable
 import Control.Monad(foldM)
@@ -140,7 +140,7 @@ solve M.GroupBy { M.child,
          do fdata <- sc env exp
             sums <- solveAgg env (M.Sum exp)
             counts <- solveAgg env M.Count
-            return $ Binop { bop=M.Div, bleft=sums, bright=counts }
+            return $ Binop { bop=Div, bleft=sums, bright=counts }
 
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
@@ -237,6 +237,12 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
      return $ Binop { bop=binop, bleft=l, bright=r }
 
 sc _ (M.IntLiteral n) = return $ const_ n
+
+sc env (M.Unary { M.unop=M.Year, M.arg }) =
+  --assuming input is well formed and the column is an integer representing
+  --a day count from 0000-01-01)
+  do dateval <- sc env arg
+     return $ Binop { bop=Div, bleft=dateval, bright=const_ 365 }
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
