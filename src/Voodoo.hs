@@ -210,10 +210,12 @@ toList :: Vref -> [String]
 toList (VLoad (Name lst)) = ["Load", show cleanname]
   where cleanname = Name (if head lst == "sys" then tail lst else lst)
 
-toList (VProject {voutname, vinname, vvec}) = ["Project",show voutname, "Id " ++ show vvec, show vinname ]
+toList (VProject {voutname, vinname, vvec}) =
+  ["Project",show voutname, "Id " ++ show vvec, show vinname ]
 
 toList (VRange { vrmin, vrstep }) =
-  {- for printing: hardcoded length 2 billion right now, since backend only materializes what's needed -}
+  {- for printing: hardcoded length 2 billion right now,
+  since backend only materializes what's needed -}
   let maxC = 2*10^2 in
   ["RangeC", "val", show vrmin, show maxC, show vrstep]
 
