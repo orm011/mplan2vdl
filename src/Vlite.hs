@@ -36,7 +36,7 @@ instance NFData FoldOp
 may convert to differnt range after -}
 data Vexp  =
   Load Name
-  | Range  { rmin :: Int64, rstep :: Int64 }
+  | Range  { rmin :: Int64, rstep :: Int64, rref::Vexp } -- reference Vector
   | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp}
@@ -46,17 +46,29 @@ instance NFData Vexp
 
 
 {- some convenience vectors -}
-const_ :: Int64 -> Vexp
-const_ c = Range { rmin = c, rstep = 0 }
-
-pos_ = Range { rmin = 0, rstep = 1 }
+const_ :: Int64 -> Vexp -> Vexp
+const_ k v = Range { rmin = k, rstep = 0, rref = v }
+pos_ v = Range { rmin = 0, rstep = 1, rref = v }
 ones_ = const_ 1
 zeros_ = const_ 0
 
 range_ n = Range {rmin = 0, rstep = 1 }
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
-vexpsFromMplan _1 _  = solve _1
+vexpsFromMplan _1 _  =
+  do Env a _ <- solve _1
+     return a
+
+-- the table only includes list elements that have a name
+data Env = Env [(Vexp, Maybe Name)] (NameTable Vexp)
+
+makeEnv :: [(Vexp, Maybe Name)] -> Either String Env
+makeEnv lst =
+  do tbl <- makeTable lst
+     return $ Env lst tbl
+  where makeTable lst = foldM maybeadd NameTable.empty lst
+        maybeadd env (_, Nothing) = Right env
+        maybeadd env (vexp, Just newalias) = NameTable.insert newalias vexp env
 
 {- helper function that makes a lookup table from the output of a previous
 operator. the lookup table loses information about the anonymous outputs
@@ -64,16 +76,13 @@ of the operator, so it only makes sense to use this in internal nodes
 whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
-solve' :: M.RelExpr -> Either String (NameTable Vexp)
-solve' relexp  = solve relexp >>= makeEnv
-  where makeEnv lst = foldM maybeadd NameTable.empty lst
-        maybeadd env (_, Nothing) = Right env
-        maybeadd env (vexp, Just newalias) = NameTable.insert newalias vexp env
+solve :: M.RelExpr -> Either String Env
+solve relexp = solve' relexp >>= makeEnv
 
 kMaxval :: Int
 kMaxval = 255
 
-solve :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
+solve' :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 
 {- Table is a Special case. It gets vexprs for all the output columns.
 
@@ -85,7 +94,7 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve M.Table { M.tablename, M.tablecolumns } =
+solve' M.Table { M.tablename, M.tablecolumns } =
   Right $ map deduceName tablecolumns
   where deduceName (orig, Nothing) = (Load orig, Just orig)
         deduceName (orig, Just x) = (Load orig, Just x)
@@ -109,8 +118,8 @@ as case 2 actually. (Vexpr sum(bar, baz), sum2)
 but could be the topmost result, so we must return it as well.
 as (vexpr .., Nothing)
 -}
-solve M.Project { M.child, M.projectout, M.order = [] } =
-  do env <- solve' child
+solve' M.Project { M.child, M.projectout, M.order = [] } =
+  do env <- solve child
      vexprs <- sequence $ map (fromScalar env) exprs
      return (zip vexprs finalnames)
   where maybeGetName (M.Ref orig) = Just orig
@@ -123,30 +132,34 @@ solve M.Project { M.child, M.projectout, M.order = [] } =
         finalnames = map solveName $ zip originalnames maliases
 
 {- the easy group by case: static single group -}
-solve M.GroupBy { M.child,
+solve' M.GroupBy { M.child,
                 M.inputkeys = [],
                 M.outputkeys = [],
                 M.outputaggs } =
-  do env <- solve' child
+  do env@(Env childvecs _) <- solve child
+     let (firstvec,_) =  head childvecs -- nonempty.
      let (aggs, aliases) = unzip outputaggs
      resolvedAggs <- sequence $ map (solveAgg env) aggs
      return $ zip resolvedAggs aliases
      where
-       solveAgg env (M.Sum exp) =
+       solveAgg env@(Env ((v,_):_) _) (M.Sum exp) =
          do fdata <- sc env exp
-            return $ Fold { foldop = FSum, fgroups = zeros_, fdata }
-       solveAgg _ M.Count =
-         return $ Fold { foldop = FSum,  fgroups = zeros_, fdata = ones_}
-       solveAgg env (M.Avg exp) =
-         do fdata <- sc env exp
-            sums <- solveAgg env (M.Sum exp)
+            return $ Fold { foldop = FSum
+                          , fgroups = zeros_ v
+                          , fdata }
+       solveAgg env@(Env ((v,_):_) _) M.Count =
+         -- no explicit context to use for vector length, so we use the first
+         -- in the list
+         return $ Fold { foldop = FSum
+                       , fgroups = zeros_ v
+                       , fdata = ones_ v }
+       solveAgg env@(Env ((v,_):_) _) (M.Avg exp) =
+         do sums <- solveAgg env (M.Sum exp)
             counts <- solveAgg env M.Count
             return $ Binop { bop=Div, bleft=sums, bright=counts }
-
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
-
-solve (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
+solve' (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
                                 \dependent grouping right now "
 
 {-direct, foreign key join of two tables.
@@ -160,13 +173,12 @@ can be anything, as the pointers are still valid.
 
 (eg, after a filter on the right child...)
 -}
-solve M.FKJoin { M.table -- can be derived rel
+solve' M.FKJoin { M.table -- can be derived rel
                , M.references = references@(M.Table _ _) -- only unfiltered rel.
                , M.idxcol
                } =
-  do leftcols <- solve table
-     leftenv <- solve' table
-     rightcols <- solve references
+  do Env leftcols leftenv  <- solve table
+     Env rightcols  _ <- solve references
      let (rightvecs, ralias) = unzip rightcols
      (_, shpos) <- NameTable.lookup idxcol leftenv
      let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
@@ -174,29 +186,28 @@ solve M.FKJoin { M.table -- can be derived rel
      return $ leftcols ++ gatheredcols -- names are preserved.
 
 
-solve (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
+solve' (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
 \ joins with a plain table allowed)"
 
 
-solve M.Select { M.child -- can be derived rel
+solve' M.Select { M.child -- can be derived rel
                , M.predicate
                } =
-  do childcols <- solve child
-     childenv <- solve' child
+  do childenv@(Env childcols _) <- solve child
      let (childvecs, chalias) = unzip childcols
      preds <- sc childenv predicate
-     let idxs = Fold { foldop=FSel, fgroups=pos_, fdata=preds }
+     let idxs = Fold { foldop=FSel, fgroups=pos_ preds, fdata=preds }
      -- use 0,1,2... for fold select groups
      let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
      let gatheredcols = zip (map gatherQual childvecs) chalias
      return $ gatheredcols -- same names
 
 
-solve r_  = Left $ "unsupported M.rel:  " ++ groom r_
+solve' r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
-fromScalar ::  NameTable Vexp -> M.ScalarExpr  -> Either String Vexp
+fromScalar ::  Env -> M.ScalarExpr  -> Either String Vexp
 fromScalar = sc
 
 {- notes about tmp naming in Monet:
@@ -208,8 +219,10 @@ eg [L1 as L1]. This means we cannot just use a map in those cases, since
 a search for L1 should potentially mean L1.L1.
 -}
 
-sc ::  NameTable Vexp -> M.ScalarExpr -> Either String Vexp
-sc env (M.Ref refname)  =
+
+
+sc ::  Env -> M.ScalarExpr -> Either String Vexp
+sc (Env _ env) (M.Ref refname)  =
   case (NameTable.lookup refname env) of
     Right (_, v) -> Right v
     Left s -> Left s
@@ -230,7 +243,7 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MDouble -> sc env arg -- assume it was an integer originally...
     M.MDecimal _ dec ->
       do ch <- sc env arg -- multiply by 10^dec. hope there is no overflow.
-         return  Binop { bop=M.Mul, bleft = ch, bright = const_ (10 ^ dec) }
+         return  Binop { bop=M.Mul, bleft = ch, bright = const_ (10 ^ dec) ch }
     othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
@@ -238,13 +251,13 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
      r <- sc env right
      return $ Binop { bop=binop, bleft=l, bright=r }
 
-sc _ (M.IntLiteral n) = return $ const_ n
+sc (Env lst _) (M.IntLiteral n) = return $ const_ n (fst $ head lst)
 
 sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
   --a day count from 0000-01-01)
   do dateval <- sc env arg
-     return $ Binop { bop=Div, bleft=dateval, bright=const_ 365 }
+     return $ Binop { bop=Div, bleft=dateval, bright=const_ 365 dateval}
 
 -- sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
 --   do if_ = sc env mif_
