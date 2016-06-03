@@ -185,7 +185,8 @@ solve M.Select { M.child -- can be derived rel
      childenv <- solve' child
      let (childvecs, chalias) = unzip childcols
      preds <- sc childenv predicate
-     let idxs = Fold { foldop=FSel, fgroups=zeros_, fdata=preds }
+     let idxs = Fold { foldop=FSel, fgroups=pos_, fdata=preds }
+     -- use 0,1,2... for fold select groups
      let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
      let gatheredcols = zip (map gatherQual childvecs) chalias
      return $ gatheredcols -- same names
@@ -244,6 +245,11 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --a day count from 0000-01-01)
   do dateval <- sc env arg
      return $ Binop { bop=Div, bleft=dateval, bright=const_ 365 }
+
+-- sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
+--   do if_ = sc env mif_
+--      then_ = sc env mthen_
+--      else_ = sc env melse_
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
