@@ -28,8 +28,8 @@ main :: IO ()
 main = do
   config <- cmdArgs cmdTemplate
   if mplanfile config == []
-    then (hPutStrLn stderr (printf "Usage: need an input filename (see --help)")
-         >> System.Exit.exitFailure)
+    then (hPutStrLn stderr "usage: need an input filename (see --help)")
+         >> System.Exit.exitFailure
     else return  ()
   contents <- readFile $ mplanfile config
   let lins = lines contents

@@ -484,7 +484,6 @@ readIntLiteral str =
 mplanFromParseTree :: P.Rel -> Config -> Either String RelExpr
 mplanFromParseTree _1 _ = solve _1
 
-
 -- The predicate output names are legal when moved up, bc
 -- join does not have bindings in its syntax.
 -- Note: this code will repeat the transform below
