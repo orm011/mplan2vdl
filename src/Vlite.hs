@@ -1,10 +1,10 @@
-module Vlite( fromMplan
-            , fromString
+module Vlite( vexpsFromMplan
             , Vexp(..)
             , BinaryOp(..)
             , ShOp(..)
             , FoldOp(..)) where
 
+import Config
 import qualified Mplan as M
 import Mplan(BinaryOp(..), UnaryOp)
 import Name(Name(..))
@@ -55,8 +55,8 @@ zeros_ = const_ 0
 
 range_ n = Range {rmin = 0, rstep = 1 }
 
-fromMplan :: M.RelExpr -> Either String [(Vexp, Maybe Name)]
-fromMplan = solve
+vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
+vexpsFromMplan _1 _  = solve _1
 
 {- helper function that makes a lookup table from the output of a previous
 operator. the lookup table loses information about the anonymous outputs
@@ -253,13 +253,3 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
--- string means monet plan string.
-fromString :: String -> Either String [(Vexp, Maybe Name)]
-fromString mplanstring =
-  do mplan <- M.fromString mplanstring
-     let vlite = fromMplan $!! mplan
-     -- let tr = case vlite of
-     --            Left err -> "\n--Error at Vlite stage:\n" ++ err
-     --            Right g -> "\n--Vlite output:\n" ++ groom g
-     -- trace tr vlite
-     vlite

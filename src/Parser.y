@@ -17,6 +17,7 @@ import GHC.Generics (Generic)
 import Text.Groom
 import Debug.Trace
 import Data.String.Utils(join)
+import Config
 
 import Name(Name(..))
 }
@@ -300,8 +301,8 @@ parseError toks =
         columnNo = Scanner.column firstBadToken
         badTokenText = concatMap ((++ "  ") . show . extractRawToken) (take numToks toks)
 
-fromString :: String -> Either String Rel
-fromString str =
+fromString :: String -> Config -> Either String Rel
+fromString str cfg  =
   let tokens = Scanner.scan str
       in parse tokens
      -- let tr = case parsetree  of

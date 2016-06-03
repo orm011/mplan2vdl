@@ -1,8 +1,5 @@
-module Voodoo (Voodoo(..)
-               ,fromString
-               ,Vref(..)
-               ,vdlFromMplan
-               ) where
+module Voodoo (vdlFromVexps
+              ) where
 
 import Control.Monad(foldM, mapM, void)
 import Name(Name(..))
@@ -15,7 +12,7 @@ import Control.DeepSeq(NFData,($!!))
 import qualified Vlite as V
 import qualified Data.Map.Strict as Map
 import Data.List (foldl')
-
+import Config
 type Map = Map.Map
 
 {-
@@ -81,19 +78,18 @@ a /. b = Binary { op=Divide, arg1=a, arg2=b }
 cond ?. (a,b) = (const_ 1 -. negcond) *. a +. negcond *. b
   where negcond = (cond ==. const_ 0) -- NOTE: needed to make sure we only have 0 or 1 in the multiplication.
 
-fromVexp :: V.Vexp -> Either String Voodoo
-
-fromVexp (V.Load n) =
+voodooFromVexp :: V.Vexp -> Either String Voodoo
+voodooFromVexp (V.Load n) =
   do inname <- (case n of
                    Name (f:s:rest) -> Right $ Name $ s:rest
                    _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
      return $ Project { outname=Name ["val"]
                       , inname
                       , vec = Load n }
-fromVexp (V.Range {V.rmin, V.rstep}) = return $ Range {rmin, rstep}
-fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
-  do left <- fromVexp bleft
-     right <- fromVexp bright
+voodooFromVexp (V.Range {V.rmin, V.rstep}) = return $ Range {rmin, rstep}
+voodooFromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
+  do left <- voodooFromVexp bleft
+     right <- voodooFromVexp bright
      case bop of
        V.Gt -> Right $ left >. right
        V.Eq -> Right $ left ==. right
@@ -110,22 +106,22 @@ fromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
        V.Div -> Right $ (left /. right)
        _ -> Left $ "bop not implemented: " ++ show bop
 
-fromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
-  do input <- fromVexp shsource
-     positions <- fromVexp shpos
+voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
+  do input <- voodooFromVexp shsource
+     positions <- voodooFromVexp shpos
      case shop of
        V.Gather -> Right $ Binary { op=Gather, arg1=input, arg2=positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
-fromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
-  do arg1 <- fromVexp fgroups
-     arg2 <- fromVexp fdata
+voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
+  do arg1 <- voodooFromVexp fgroups
+     arg2 <- voodooFromVexp fdata
      case foldop of
        V.FSum -> return $ Binary { op=FoldSum, arg1, arg2 }
        V.FMax -> return $ Binary { op=FoldMax, arg1, arg2 }
        V.FSel -> return $ Binary { op=FoldSelect, arg1, arg2 }
 
-fromVexp s_ = Left $ "implement me: " ++ show s_
+voodooFromVexp s_ = Left $ "implement me: " ++ show s_
 
 {- the difference now is that
 all pointers to other expressions now are explicit,
@@ -138,24 +134,13 @@ data Vref  =
   deriving (Eq,Show,Generic)
 instance NFData Vref
 
+voodoosFromVexps :: [(V.Vexp, Maybe Name)] -> Either String [Voodoo]
 
-voodooFromString :: String -> Either String [Voodoo]
-voodooFromString mplanstring =
-  do vexps <- V.fromString mplanstring
-     let vecs = mapM (fromVexp  . fst) $!! vexps
-     -- let tr = case vecs of
-     --            Left err -> "\n--Error at Voodoo stage:\n" ++ err
-     --            Right g -> "\n--Voodoo output:\n" ++ groom g
-     vecs
+voodoosFromVexps vexps = mapM (voodooFromVexp  . fst) $!! vexps
 
-
-fromString :: String -> Either String Log
-fromString = vrefFromString
-
-vrefFromString :: String -> Either String Log
-vrefFromString str =
-  do vecs <- voodooFromString str
-     let log0 = [(0, VLoad $ Name ["dummy"])]
+vrefsFromVoodoos :: [Voodoo] -> Either String Log
+vrefsFromVoodoos vecs =
+  do let log0 = [(0, VLoad $ Name ["dummy"])]
      let state0 = ((Map.empty, log0), undefined)
      ((_, finalLog),_) <- foldM process state0 vecs
      let post = tail $ reverse $ finalLog -- remove dummy, reverse
@@ -163,7 +148,6 @@ vrefFromString str =
      --return $ trace tr post
      return $ trace (let s = dagSize  vecs in "vecs (depth,count): " ++ (show s) ++ "\npost len: " ++ (show $ length post)) post
        where process (state, _) v  = memVrefFromVoodoo state v
-
 
 type LookupTable = Map Voodoo Int
 type Log = [(Int, Vref)]
@@ -238,8 +222,8 @@ dumpVref prs = let (ids, vrefs) = unzip prs
                    lsts = map toList vrefs
                in printVd $ zip ids lsts
 
-vdlFromMplan :: String -> Either String String
-vdlFromMplan mplanstring =
-  do vrefs <- vrefFromString mplanstring
-     return $ let vdl = dumpVref vrefs
-              in vdl
+vdlFromVexps :: [(V.Vexp, Maybe Name)] -> Config -> Either String String
+vdlFromVexps vexps _ =
+  do voodoos <- voodoosFromVexps vexps
+     vrefs <- vrefsFromVoodoos voodoos
+     return $ dumpVref vrefs

@@ -24,7 +24,9 @@ library
                      , Name
                      , Vlite
                      , Voodoo
+                     , Config
   other-modules:       Dict
+                       Error
   build-depends:       base >= 4.7 && <5
                      , MissingH
                      , containers

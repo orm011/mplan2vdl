@@ -30,8 +30,8 @@ main = do adhoc <- readFile "tests/ad_hoc_tests.txt"
 
              -- testGroup "AdHocMplanGenTests" $ makeTestTree "mplan" M.fromString  adhoc_cases,
              -- testGroup "TPCHMplanGenTests" $ makeTestTree "mplan" M.fromString tpch_cases,
-             testGroup "AdHocVliteGenTests" $ makeTestTree "vlite" V.fromString adhoc_cases,
-             testGroup "TPCHVliteGenTests" $ makeTestTree "vlite" V.fromString tpch_cases,
+             -- testGroup "AdHocVliteGenTests" $ makeTestTree "vlite" V.fromString adhoc_cases,
+             -- testGroup "TPCHVliteGenTests" $ makeTestTree "vlite" V.fromString tpch_cases,
              testGroup "end" []
            ]
 

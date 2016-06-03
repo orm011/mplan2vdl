@@ -1,5 +1,4 @@
-module Mplan( fromParseTree
-            , fromString
+module Mplan( mplanFromParseTree
             , BinaryOp(..)
             , UnaryOp(..)
             , RelExpr(..)
@@ -12,12 +11,10 @@ import Name(Name(..))
 import Data.Time.Calendar
 import Control.DeepSeq(NFData,($!!))
 import GHC.Generics (Generic)
-import Text.Groom
 import Data.Int
 import Data.Monoid(mappend)
 import Debug.Trace
 import Control.Monad(foldM, mapM, void)
-import Text.Printf (printf)
 import qualified Data.Map.Strict as Map
 import Data.List (foldl')
 import Data.Time.Format
@@ -26,6 +23,8 @@ import Data.Time
 import Dict(dictEncode)
 import Data.Data
 import Data.Generics.Uniplate.Data
+import Config
+import qualified Error as E
 
 type Map = Map.Map
 
@@ -67,7 +66,7 @@ resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
         f "month_interval" [] = Right MMonth
         f "double" [] = Right MDouble -- used for averages even if columns arent doubles
         f "boolean" [] = Right MBoolean
-        f name _ = Left $  "unsupported typespec: " ++ name
+        f name _ = Left $ E.unexpected  "unsupported typespec" name
 
 resolveCharLiteral :: String -> Either String Int64
 resolveCharLiteral ch = dictEncode ch
@@ -100,7 +99,7 @@ resolveInfix str =
     "=" -> Right Eq
     "!=" -> Right Neq
     "or" -> Right LogOr
-    _ -> Left $ "unknown infix symbol: " ++ str
+    _ -> Left $ E.unexpected "infix symbol" str
 
 
 resolveBinopOpcode :: Name -> Either String BinaryOp
@@ -115,7 +114,7 @@ resolveBinopOpcode nm =
     Name ["="] -> Right Eq
     Name ["or"] -> Right LogOr
     Name [">"] -> Right Gt
-    _ -> Left $ "unknown binary function: " ++ show nm
+    _ -> Left $ E.unexpected "binary function" nm
 
 
   {- they must be semantically for a single tuple (see aggregates otherwise) -}
@@ -130,7 +129,7 @@ resolveUnopOpcode nm =
     Name ["year"] -> Right Year
     Name ["sql_neg"] -> Right Neg
     Name ["isnull"] -> Right IsNull
-    _ -> Left $ "unsupported scalar function " ++ show nm
+    _ -> Left $ E.unexpected "scalar function " nm
 
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
@@ -176,7 +175,7 @@ ghelper P.Expr
        case fname of
          Name ["sum"] -> return ([], [(Sum inner, alias)])
          Name ["avg"] -> return ([], [(Avg inner, alias)])
-         _ -> Left $ "unknown unary aggregate " ++ show fname
+         _ -> Left $ E.unexpected  "unary aggregate" fname
 
 ghelper  P.Expr
   { P.expr = P.Call { P.fname=Name ["count"]
@@ -185,8 +184,7 @@ ghelper  P.Expr
   = Right ([], [(Count, alias)] )
 
 
-ghelper s_ = Left $
-  "expression not supported as output of group_by: " ++ (take 50 $ show  s_)
+ghelper s_ = Left $ E.unexpected "group_by output expression" s_
 
 
 data RelExpr =
@@ -216,8 +214,8 @@ data RelExpr =
 instance NFData RelExpr
 
 -- thsis  way to insert extra consistency checks
-check :: a -> (a -> Bool) -> String -> Either String ()
-check val cond msg = if cond val then Right () else Left msg
+check :: (Show a) => a -> (a -> Bool) -> String -> Either String ()
+check val cond msg = if cond val then Right () else Left $ E.unexpected msg val
 
 
 {-helper function uesd in multiple operators that introduce output
@@ -248,7 +246,7 @@ solve P.Leaf { P.source, P.columns  } =
       case getJoinIdx attrs of
         [fkcol] -> Right  (fkcol, Just rname) -- notice reversal
         [] -> Right (rname, Nothing)
-        s_ -> Left $ "unexpected: multiple fkey indices" ++ groom attrs
+        s_ -> Left $ E.unexpected " multiple fkey indices" attrs
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs }
                  , P.alias=as@(Just _) } =
       case getJoinIdx attrs of
@@ -272,7 +270,7 @@ solve P.Node { P.relop = "project"
      projectout <- solveOutputs out
      order <- (case rest of
                  [] -> Right []
-                 _ -> Left "not dealing with order-by clauses")
+                 _ -> Left $ E.unexpected "order-by clauses" rest)
      return $ Project {child, projectout, order }
 
 
@@ -292,7 +290,7 @@ solve P.Node { P.relop = "group by"
        where extractKey P.Expr { P.expr = P.Ref { P.rname }
                                , P.alias = Nothing } = Right rname
              extractKey e_ =
-               Left $ "unexpected alias in input group key: " ++ groom e_
+               Left $ E.unexpected "alias in input group key" e_
 
  {- Select invariants:
  -single child node
@@ -328,7 +326,7 @@ solve arg@P.Node { P.relop = "join"
 
 solve arg@P.Node { P.relop="join"
              , P.children= _
-             , P.arg_lists=_ } = Left $ "only handling joins via fk right now" ++( take 100 $ show arg)
+             , P.arg_lists=_ } = Left $ E.unexpected "only handling joins via fk right now" arg
 
 
 solve P.Node { P.relop = "top N"
@@ -347,7 +345,7 @@ solve P.Node { P.relop = "top N"
      child <- solve ch
      return $ TopN { child , n }
 
-solve s_ = Left $ " case not implemented:  " ++ (take 50 $  show s_)
+solve s_ = Left $ E.unexpected " case not implemented:  " s_
 
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
@@ -414,14 +412,14 @@ sc arg@P.Literal { P.tspec, P.stringRep } =
        MBoolean  -> (case stringRep of
                         "true" -> Right 1
                         "false" -> Right 0
-                        s_ -> Left $ "invalid boolean literal: " ++ show s_)
+                        s_ -> Left $ E.unexpected "boolean literal" s_)
 
        _ -> do int <- ( let r = readIntLiteral stringRep in
                         case mtype of
                           MInt -> r
                           MTinyint -> r
                           MSmallint -> r
-                          _ -> Left $ "need to handle this literal: " ++ show arg )
+                          _ -> Left $ E.unexpected "literal" arg )
                return $ int
      return $ IntLiteral ret
 
@@ -449,7 +447,7 @@ sc P.Interval {P.ifirst=P.Expr {P.expr=first }
      let right = Binop { binop=sop, left=smiddle, right=slast }
      return $ Binop { binop=LogAnd, left, right}
 
-sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
+sc arg@P.In { P.arg = P.Expr { P.expr, P.alias = _}
         , P.negated = False
         , P.set } =
   do exp <- sc expr
@@ -457,19 +455,19 @@ sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
      let check x = Binop Eq exp x
      let inOr l r = Binop LogOr (check l) (check r)
      case solvedset of
-       [] -> Left "empty 'in' clause"
+       [] -> Left $ E.unexpected "empty 'in' clause" arg
        x:rest -> return $ foldl' inOr (check x) rest
 
 sc (P.Nested exprs) = conjunction exprs
 
-sc s_ = Left $ "cannot handle this scalar: " ++ (take 50 $ show s_)
+sc s_ = Left $ E.unexpected "scalar" s_
 
 {- converts a list into ANDs -}
 conjunction :: [P.Expr] -> Either String ScalarExpr
 conjunction exprs =
   do solved <- mapM (sc . P.expr) exprs
      case solved of
-       [] -> Left $ "conjunction list cannot be empty (should check at parse time)"
+       [] -> Left $ E.unexpected  "empty conjunction list" exprs
        [x] -> return x
        x : y : rest -> return $ foldl' makeAnd (makeAnd x y) rest
        where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
@@ -479,20 +477,10 @@ readIntLiteral :: String -> Either String Int64
 readIntLiteral str =
   case reads str :: [(Int64, String)] of
     [(num, [])] -> Right num
-    ow -> Left $ printf "cannot parse %s as integer literal: %s" str $ show ow
+    ow -> Left $ E.unexpected "integer literal" str
 
-fromParseTree :: P.Rel -> Either String RelExpr
-fromParseTree = solve
-
-fromString :: String -> Either String RelExpr
-fromString mplanstring =
-  do parsetree <- P.fromString mplanstring
-     let mplan = (fromParseTree $!! parsetree) >>= (return . fuseSelects . pushFKJoins)
-     -- let tr = case mplan of
-     --            Left err -> "\n--Error at Mplan stage:\n" ++ err
-     --            Right g -> "\n--Mplan output:\n" ++ groom g
-     -- trace tr mplan
-     mplan
+mplanFromParseTree :: P.Rel -> Config -> Either String RelExpr
+mplanFromParseTree _1 _ = solve _1
 
 
 -- The predicate output names are legal when moved up, bc
