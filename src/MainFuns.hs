@@ -35,16 +35,10 @@ main = do
   let lins = lines contents
   let ignore ln = (startswith "#" stripped) || ( startswith "%" stripped)
         where stripped = lstrip ln
-  let justThePlan = concat $ filter (not . ignore) lins
-  let res = do parseTree <- P.fromString justThePlan config
-               mplan <- M.mplanFromParseTree parseTree config
-               let mplan' = (M.fuseSelects . M.pushFKJoins) mplan
-               vexps <- Vl.vexpsFromMplan mplan' config
-               vdl <- Vdl.vdlFromVexps vexps config
-               return $ vdl
-  case res of
+  let cleanPlan = concat $ filter (not . ignore) lins
+  case compile cleanPlan config of
     Left errorMessage -> fatal errorMessage
-    Right result -> putStrLn $ show result
+    Right result -> putStrLn $ result
 
 fatal :: String -> IO ()
 fatal message = do
@@ -52,25 +46,19 @@ fatal message = do
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
 
-{-
-fromString :: String -> Either String RelExpr
-fromString mplanstring =
-  do parsetree <- P.fromString mplanstring
-     let mplan = (fromParseTree $!! parsetree) >>= (return . fuseSelects . pushFKJoins)
-     -- let tr = case mplan of
-     --            Left err -> "\n--Error at Mplan stage:\n" ++ err
-     --            Right g -> "\n--Mplan output:\n" ++ groom g
-     -- trace tr mplan
-     mplan
-
--- string means monet plan string.
-fromString :: String -> Either String [(Vexp, Maybe Name)]
-fromString mplanstring =
-  do mplan <- M.fromString mplanstring
-     let vlite = fromMplan $!! mplan
-     -- let tr = case vlite of
-     --            Left err -> "\n--Error at Vlite stage:\n" ++ err
-     --            Right g -> "\n--Vlite output:\n" ++ groom g
-     -- trace tr vlite
-     vlite
--}
+compile :: String -> Config -> Either String String
+compile planstring config =
+  do parseTree <- case P.fromString planstring config of
+                    Left err -> Left $ "(at Parse stage)" ++ err
+                    other -> other
+     mplan <- case M.mplanFromParseTree parseTree config of
+                  Left err -> Left $ "(at Mplan stage)" ++ err
+                  other -> other
+     let mplan' = (M.fuseSelects . M.pushFKJoins) mplan
+     vexps <- case Vl.vexpsFromMplan mplan' config of
+                  Left err -> Left $ "(at Vlite stage)" ++ err
+                  other -> other
+     vdl <- case Vdl.vdlFromVexps vexps config of
+                  Left err -> Left $ "(at Vdl stage)" ++ err
+                  other -> other
+     return $ show vdl
