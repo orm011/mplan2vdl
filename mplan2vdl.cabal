@@ -20,14 +20,11 @@ library
   exposed-modules:     MainFuns
                      , Parser
                      , Scanner
-                     , Configuration
-                     , Configuration.Types
                      , Mplan
                      , Name
                      , Vlite
                      , Voodoo
-  other-modules:       CLI
-                     , Dict
+  other-modules:       Dict
   build-depends:       base >= 4.7 && <5
                      , MissingH
                      , containers

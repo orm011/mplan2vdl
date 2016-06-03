@@ -4,7 +4,6 @@ import Test.Tasty.QuickCheck as QC -}
 import Test.Tasty.HUnit
 import Data.Either(isRight,partitionEithers, rights)
 import qualified Data.Text as T
-import Configuration(defaultConfiguration)
 import Text.Groom
 import Debug.Trace
 import Data.List(intercalate)
