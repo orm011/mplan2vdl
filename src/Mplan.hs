@@ -1,4 +1,6 @@
 module Mplan( mplanFromParseTree
+            , pushFKJoins
+            , fuseSelects
             , BinaryOp(..)
             , UnaryOp(..)
             , RelExpr(..)

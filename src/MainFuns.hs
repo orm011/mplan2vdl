@@ -38,7 +38,8 @@ main = do
   let justThePlan = concat $ filter (not . ignore) lins
   let res = do parseTree <- P.fromString justThePlan config
                mplan <- M.mplanFromParseTree parseTree config
-               vexps <- Vl.vexpsFromMplan mplan config
+               let mplan' = (M.fuseSelects . M.pushFKJoins) mplan
+               vexps <- Vl.vexpsFromMplan mplan' config
                vdl <- Vd.vdlFromVexps vexps config
                return $ vdl
   case res of
