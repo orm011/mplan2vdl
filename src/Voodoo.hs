@@ -222,8 +222,14 @@ dumpVref prs = let (ids, vrefs) = unzip prs
                    lsts = map toList vrefs
                in printVd $ zip ids lsts
 
-vdlFromVexps :: [(V.Vexp, Maybe Name)] -> Config -> Either String String
+-- forces the printer to use our custom format rather than
+-- a default
+data Vdl = Vdl String
+instance Show Vdl where
+  show (Vdl s) = s
+
+vdlFromVexps :: [(V.Vexp, Maybe Name)] -> Config -> Either String Vdl
 vdlFromVexps vexps _ =
   do voodoos <- voodoosFromVexps vexps
      vrefs <- vrefsFromVoodoos voodoos
-     return $ dumpVref vrefs
+     return $ Vdl $ dumpVref vrefs

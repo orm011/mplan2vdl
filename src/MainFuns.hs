@@ -36,7 +36,7 @@ main = do
   let ignore ln = ( startswith "#" stripped) || ( startswith "%" stripped)
         where stripped = lstrip ln
   let justThePlan = concat $ filter (not . ignore) lins
-  let res = do parseTree <- P.fromString justThePlan config 
+  let res = do parseTree <- P.fromString justThePlan config
                mplan <- M.mplanFromParseTree parseTree config
                vexps <- Vl.vexpsFromMplan mplan config
                vdl <- Vd.vdlFromVexps vexps config
