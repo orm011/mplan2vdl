@@ -1,5 +1,4 @@
-module Voodoo (vdlFromVexps
-              ) where
+module Vdl (vdlFromVexps) where
 
 import Control.Monad(foldM, mapM, void)
 import Name(Name(..))

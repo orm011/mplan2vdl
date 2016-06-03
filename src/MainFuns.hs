@@ -14,9 +14,9 @@ import Config
 
 --compiler stages
 import qualified Parser as P -- raw parse tree.
-import qualified Mplan as M -- parse tree.knows about differences between operators.
-import qualified Vlite as Vl -- light vector language similar to voodoo.
-import qualified Voodoo as Vd -- for pretty printing ./Driver readable code
+import qualified Mplan as M -- monet relational plan
+import qualified Vlite as Vl -- voodoo like language
+import qualified Vdl -- for pretty printing ./Driver readable code
 
 cmdTemplate = Config
   { mplanfile = def &= args &= typ "FILE"
@@ -33,14 +33,14 @@ main = do
     else return  ()
   contents <- readFile $ mplanfile config
   let lins = lines contents
-  let ignore ln = ( startswith "#" stripped) || ( startswith "%" stripped)
+  let ignore ln = (startswith "#" stripped) || ( startswith "%" stripped)
         where stripped = lstrip ln
   let justThePlan = concat $ filter (not . ignore) lins
   let res = do parseTree <- P.fromString justThePlan config
                mplan <- M.mplanFromParseTree parseTree config
                let mplan' = (M.fuseSelects . M.pushFKJoins) mplan
                vexps <- Vl.vexpsFromMplan mplan' config
-               vdl <- Vd.vdlFromVexps vexps config
+               vdl <- Vdl.vdlFromVexps vexps config
                return $ vdl
   case res of
     Left errorMessage -> fatal errorMessage
@@ -51,12 +51,6 @@ fatal message = do
   progName <- getProgName
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
-
--- fromFile :: String -> IO (Either String [(Int, V.Vref)])
--- fromFile f =
---   do input <- readFile f
---      let sol = V.fromString input
---      return sol
 
 {-
 fromString :: String -> Either String RelExpr
@@ -79,5 +73,4 @@ fromString mplanstring =
      --            Right g -> "\n--Vlite output:\n" ++ groom g
      -- trace tr vlite
      vlite
-
 -}

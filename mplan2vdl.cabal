@@ -23,7 +23,7 @@ library
                      , Mplan
                      , Name
                      , Vlite
-                     , Voodoo
+                     , Vdl
                      , Config
   other-modules:       Dict
                        Error
