@@ -12,15 +12,14 @@ import Data.String.Utils (lstrip)
 import qualified Voodoo as V
 import System.Console.CmdArgs.Implicit
 
------------------------- Impure code: Fun with ExceptT ------------------------
 
 data Mplan2Vdl = Mplan2Vdl  {mplanfile :: String
-                           , groupwidths :: Int
+                           , grainsize :: Int
                            } deriving (Show, Data, Typeable)
 
 cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
-  , groupwidths = def &= opt "8192" &= typ "INT" &= help "Grain size for foldSum/foldMax/etc"
+  , grainsize = def &= opt "8192" &= typ "INT" &= help "Grain size for foldSum/foldMax/etc"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
 
