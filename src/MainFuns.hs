@@ -54,6 +54,7 @@ compile planstring config =
      mplan <- case M.mplanFromParseTree parseTree config of
                   Left err -> Left $ "(at Mplan stage)" ++ err
                   other -> other
+     --apply logical plan transforms here
      let mplan' = (M.fuseSelects . M.pushFKJoins) mplan
      vexps <- case Vl.vexpsFromMplan mplan' config of
                   Left err -> Left $ "(at Vlite stage)" ++ err
