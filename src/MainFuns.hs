@@ -2,9 +2,9 @@ module MainFuns (main) where
 
 import System.Environment (getProgName)
 import qualified System.Exit
-import System.IO (IOMode(..), hClose, hPutStrLn, openFile, stdout, stderr)
+import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
-import Text.Groom (groom)
+--import Text.Groom (groom)
 
 import Data.List.Utils (startswith)
 import Data.String.Utils (lstrip)
@@ -18,6 +18,8 @@ import qualified Mplan as M -- monet relational plan
 import qualified Vlite as Vl -- voodoo like language
 import qualified Vdl -- for pretty printing ./Driver readable code
 
+
+cmdTemplate :: Config
 cmdTemplate = Config
   { mplanfile = def &= args &= typ "FILE"
   , grainsize = def &= opt "8192" &= typ "INT" &= help "Grain size for foldSum/foldMax/etc"
@@ -33,9 +35,9 @@ main = do
     else return  ()
   contents <- readFile $ mplanfile config
   let lins = lines contents
-  let ignore ln = (startswith "#" stripped) || ( startswith "%" stripped)
+  let iscomment ln = (startswith "#" stripped) || ( startswith "%" stripped)
         where stripped = lstrip ln
-  let cleanPlan = concat $ filter (not . ignore) lins
+  let cleanPlan = concat $ filter (not . iscomment) lins
   case compile cleanPlan config of
     Left errorMessage -> fatal errorMessage
     Right result -> putStrLn $ result
