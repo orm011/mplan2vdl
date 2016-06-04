@@ -1,6 +1,6 @@
 module Vdl (vdlFromVexps) where
 
-import Control.Monad(foldM, mapM, void)
+import Control.Monad(foldM)
 import Name(Name(..))
 import Data.Int
 import Debug.Trace
@@ -12,6 +12,8 @@ import qualified Vlite as V
 import qualified Data.Map.Strict as Map
 import Data.List (foldl')
 import Config
+import Prelude hiding (log)
+import qualified Error as E
 type Map = Map.Map
 
 {-
@@ -27,6 +29,7 @@ data Voodoo =
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodoo
 
+const_ :: Int64 -> Voodoo
 const_ k  = Range { rmin=k, rstep=0 }
 
 data Voodop =
@@ -63,47 +66,72 @@ dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(l
 
 -- convenience expression library to translate more complex
 -- all have type Voodoo -> Voodoo -> Voodoo
+(>.) :: Voodoo -> Voodoo -> Voodoo
 a >.  b = Binary { op=Greater, arg1=a, arg2=b }
+
+(==.) :: Voodoo -> Voodoo -> Voodoo
 a ==. b = Binary { op=Equals, arg1=a, arg2=b }
+
+(<.) :: Voodoo -> Voodoo -> Voodoo
 a <.  b = Binary { op=Greater, arg1=b, arg2=a } --notice argument swap
+
+(||.) :: Voodoo -> Voodoo -> Voodoo
 a ||. b = Binary { op=LogicalOr, arg1=a, arg2=b }
+
+(&&.) :: Voodoo -> Voodoo -> Voodoo
 a &&. b = Binary { op=LogicalAnd, arg1=a, arg2=b }
+
+(<=.) :: Voodoo -> Voodoo -> Voodoo
 a <=. b = (a <. b) ||. (a ==. b)
+
+(>=.) :: Voodoo -> Voodoo -> Voodoo
 a >=. b = (a >. b) ||. (a ==. b)
+
+(+.) :: Voodoo -> Voodoo -> Voodoo
 a +. b = Binary { op=Add, arg1=a, arg2=b }
+
+(-.) :: Voodoo -> Voodoo -> Voodoo
 a -. b = Binary { op=Subtract, arg1=a, arg2=b }
+
+(*.) :: Voodoo -> Voodoo -> Voodoo
 a *. b = Binary { op=Multiply, arg1=a, arg2=b }
+
+(/.) :: Voodoo -> Voodoo -> Voodoo
 a /. b = Binary { op=Divide, arg1=a, arg2=b }
+
+(?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
 cond ?. (a,b) = (const_ 1 -. negcond) *. a +. negcond *. b
-  where negcond = (cond ==. const_ 0) -- NOTE: needed to make sure we only have 0 or 1 in the multiplication.
+  where negcond = (cond ==. const_ 0)
+-- NOTE: check needed to make sure we
+-- only have 0 or 1 in the multiplication.
 
 voodooFromVexp :: V.Vexp -> Either String Voodoo
 voodooFromVexp (V.Load n) =
   do inname <- (case n of
-                   Name (f:s:rest) -> Right $ Name $ s:rest
+                   Name (_:s:rest) -> Right $ Name $ s:rest
                    _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
      return $ Project { outname=Name ["val"]
                       , inname
                       , vec = Load n }
 voodooFromVexp (V.Range {V.rmin, V.rstep}) = return $ Range {rmin, rstep}
-voodooFromVexp (V.Binop { V.bop, V.bleft, V.bright}) =
-  do left <- voodooFromVexp bleft
-     right <- voodooFromVexp bright
-     case bop of
-       V.Gt -> Right $ left >. right
-       V.Eq -> Right $ left ==. right
-       V.Mul -> Right $ left *. right
-       V.Sub -> Right $ left -. right
-       V.Add -> Right $ left +. right
-       V.Lt -> Right $ left <. right
-       V.Leq -> Right $ left <=. right
-       V.Geq -> Right $ left >=. right
-       V.Min -> Right $ (left <=. right) ?. (left, right)
-       V.Max -> Right $ (left >=. right) ?. (left, right)
-       V.LogAnd -> Right $ (left &&. right)
-       V.LogOr -> Right $ (left ||. right)
-       V.Div -> Right $ (left /. right)
-       _ -> Left $ "bop not implemented: " ++ show bop
+voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
+  do l <- voodooFromVexp left
+     r <- voodooFromVexp right
+     case binop of
+       V.Gt -> Right $ l >. r
+       V.Eq -> Right $ l ==. r
+       V.Mul -> Right $ l *. r
+       V.Sub -> Right $ l -. r
+       V.Add -> Right $ l +. r
+       V.Lt -> Right $ l <. r
+       V.Leq -> Right $ l <=. r
+       V.Geq -> Right $ l >=. r
+       V.Min -> Right $ (l <=. r) ?. (l, r)
+       V.Max -> Right $ (l >=. r) ?. (l, r)
+       V.LogAnd -> Right $ (l &&. r)
+       V.LogOr -> Right $ (l ||. r)
+       V.Div -> Right $ (l /. r)
+       _ -> Left $ "binop not implemented: " ++ show binop
 
 voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
   do input <- voodooFromVexp shsource
@@ -119,6 +147,7 @@ voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
        V.FSum -> return $ Binary { op=FoldSum, arg1, arg2 }
        V.FMax -> return $ Binary { op=FoldMax, arg1, arg2 }
        V.FSel -> return $ Binary { op=FoldSelect, arg1, arg2 }
+       s_ -> Left $ E.unexpected "fold operator" s_
 
 voodooFromVexp s_ = Left $ "implement me: " ++ show s_
 
@@ -161,10 +190,10 @@ memVrefFromVoodoo :: State -> Voodoo -> Either String (State, Int)
 memVrefFromVoodoo state@(tab, log) vd =
   case Map.lookup vd tab of
     Nothing -> do ((tab', log'), vref) <- vrefFromVoodoo state vd
-                  let (log'', id) = addToLog log' vref
-                  let tab'' = Map.insert vd id tab'
-                    in return $ ((tab'', log''), id)
-    Just id -> Right ((tab, log), id) -- nothing changes
+                  let (log'', iden) = addToLog log' vref
+                  let tab'' = Map.insert vd iden tab'
+                    in return $ ((tab'', log''), iden)
+    Just iden -> Right ((tab, log), iden) -- nothing changes
 
 vrefFromVoodoo :: State -> Voodoo -> Either String (State, Vref)
 
@@ -183,8 +212,7 @@ vrefFromVoodoo state (Binary { op , arg1 , arg2 }) =
      (state'', n2) <- memVrefFromVoodoo state' arg2
      return $ (state'', VBinary {vop=op, varg1=n1, varg2=n2})
 
-vrefFromVoodoo state s_ = Left $ "you need to implement: " ++ groom s_
-
+vrefFromVoodoo _ s_ = Left $ "you need to implement: " ++ groom s_
 
 {- now a list of strings -}
 toList :: Vref -> [String]
@@ -199,7 +227,7 @@ toList (VProject {voutname, vinname, vvec}) =
 toList (VRange { vrmin, vrstep }) =
   {- for printing: hardcoded length 2 billion right now,
   since backend only materializes what's needed -}
-  let maxC = 2*10^2 in
+  let maxC = (200::Int64) in
   ["RangeC", "val", show vrmin, show maxC, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
@@ -214,7 +242,7 @@ toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 
 printVd :: [(Int, [String])] -> String
 printVd prs = join "\n" $ map makeline prs
-  where makeline (id, strs) =  join "," $ (show id) : strs
+  where makeline (iden, strs) =  join "," $ (show iden) : strs
 
 dumpVref :: Log -> String
 dumpVref prs = let (ids, vrefs) = unzip prs
