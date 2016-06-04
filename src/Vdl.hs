@@ -24,13 +24,13 @@ its function is to be easy to convert to text format.
 data Voodoo =
   Load Name
   | Project { outname::Name , inname::Name, vec :: Voodoo } -- full rename only. used right after load
-  | Range { rmin::Int64, rstep::Int64 }
+  | Range { rmin::Int64, rstep::Int64, rvec :: Voodoo }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodoo
 
-const_ :: Int64 -> Voodoo
-const_ k  = Range { rmin=k, rstep=0 }
+const_ :: Int64 -> Voodoo -> Voodoo
+const_ k v  = Range { rmin=k, rstep=0, rvec=v }
 
 data Voodop =
   LogicalAnd
@@ -57,7 +57,7 @@ instance NFData Voodop
 
 size :: Voodoo -> (Int, Int)
 size (Load _) = (1,1)
-size (Range _ _) = (1,1)
+size (Range _ _ _) = (1,1)
 size (Project _ _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
 size (Binary _ ch1 ch2) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
 
@@ -100,8 +100,8 @@ a *. b = Binary { op=Multiply, arg1=a, arg2=b }
 a /. b = Binary { op=Divide, arg1=a, arg2=b }
 
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
-cond ?. (a,b) = (const_ 1 -. negcond) *. a +. negcond *. b
-  where negcond = (cond ==. const_ 0)
+cond ?. (a,b) = (const_ 1 a  -. negcond) *. a +. negcond *. b
+  where negcond = (cond ==. const_ 0 a)
 -- NOTE: check needed to make sure we
 -- only have 0 or 1 in the multiplication.
 
@@ -113,7 +113,10 @@ voodooFromVexp (V.Load n) =
      return $ Project { outname=Name ["val"]
                       , inname
                       , vec = Load n }
-voodooFromVexp (V.Range {V.rmin, V.rstep}) = return $ Range {rmin, rstep}
+voodooFromVexp (V.Range {V.rmin, V.rstep, V.rref}) =
+  do v <- voodooFromVexp rref
+     return $ Range {rmin, rstep, rvec=v}
+
 voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
   do l <- voodooFromVexp left
      r <- voodooFromVexp right
@@ -157,7 +160,7 @@ needed for serialization -}
 data Vref  =
   VLoad Name
   | VProject { voutname::Name , vinname::Name, vvec :: Int } -- full rename only.
-  | VRange  { vrmin :: Int64, vrstep :: Int64 }
+  | VRange  { vrmin :: Int64, vrstep :: Int64, vrvec :: Int }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
   deriving (Eq,Show,Generic)
 instance NFData Vref
@@ -199,8 +202,9 @@ vrefFromVoodoo :: State -> Voodoo -> Either String (State, Vref)
 
 vrefFromVoodoo state (Load n) = return $ (state, VLoad n)
 
-vrefFromVoodoo state (Range  { rmin , rstep  }) =
-  return $ (state, VRange { vrmin=rmin, vrstep=rstep })
+vrefFromVoodoo state (Range  { rmin , rstep, rvec  }) =
+  do (state', n') <- memVrefFromVoodoo state rvec
+     return $ (state', VRange { vrmin=rmin, vrstep=rstep, vrvec=n' })
 
 vrefFromVoodoo state (Project {outname, inname, vec}) =
   do (state', n') <- memVrefFromVoodoo state vec
@@ -224,11 +228,10 @@ toList (VLoad (Name lst)) = ["Load", show cleanname]
 toList (VProject {voutname, vinname, vvec}) =
   ["Project",show voutname, "Id " ++ show vvec, show vinname ]
 
-toList (VRange { vrmin, vrstep }) =
+toList (VRange { vrmin, vrstep, vrvec }) =
   {- for printing: hardcoded length 2 billion right now,
   since backend only materializes what's needed -}
-  let maxC = (200::Int64) in
-  ["RangeC", "val", show vrmin, show maxC, show vrstep]
+  ["RangeV", "val", show vrmin, "Id " ++ show vrvec, show vrstep]
 
 toList (VBinary { vop, varg1, varg2}) =
   case vop of
