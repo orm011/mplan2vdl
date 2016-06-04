@@ -26,6 +26,7 @@ import Data.Data
 import Data.Generics.Uniplate.Data
 import Config
 import qualified Error as E
+import Data.List(foldl')
 
 --type Map = Map.Map
 
