@@ -17,23 +17,35 @@ import qualified Parser as P -- raw parse tree.
 import qualified Mplan as M -- monet relational plan
 import qualified Vlite as Vl -- voodoo like language
 import qualified Vdl -- for pretty printing ./Driver readable code
+import Data.Bits
+--import Data.Int
 
+data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
+                            , grainsize :: Int
+                            } deriving (Show, Data, Typeable)
 
-cmdTemplate :: Config
-cmdTemplate = Config
+cmdTemplate :: Mplan2Vdl
+cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
-  , grainsize = def &= opt "8192" &= typ "INT" &= help "Grain size for foldSum/foldMax/etc"
+  , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for foldSum/foldMax/etc (default 8192)" &= name "g"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
+  &= program "mplan2vdl"
 
 main :: IO ()
 main = do
-  config <- cmdArgs cmdTemplate
-  if mplanfile config == []
+  cmdargs <- cmdArgs cmdTemplate
+  if mplanfile cmdargs == []
     then (hPutStrLn stderr "usage: need an input filename (see --help)")
          >> System.Exit.exitFailure
     else return  ()
-  contents <- readFile $ mplanfile config
+  let mgrainsize = grainsize cmdargs
+  if (mgrainsize  < 0) || (popCount mgrainsize  /= 1)
+    then (hPutStrLn stderr $ "usage: grainsize must be a power of 2 " ++  (show mgrainsize ) ++  (show . popCount) mgrainsize)
+          >> System.Exit.exitFailure
+    else return ()
+  contents <- readFile $ mplanfile cmdargs
+  let config = Config { grainsizelg = fromInteger $ toInteger $ countTrailingZeros $ grainsize cmdargs  }
   let lins = lines contents
   let iscomment ln = (startswith "#" stripped) || ( startswith "%" stripped)
         where stripped = lstrip ln

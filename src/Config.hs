@@ -1,9 +1,7 @@
 module Config (Config(..)
               ) where
 
-import Data.Typeable
-import Data.Data
+import Data.Int
 
-data Config =  Config  { mplanfile :: String
-                       , grainsize :: Int
-                       } deriving (Show, Data, Typeable)
+data Config =  Config  { grainsizelg :: Int64
+                       } deriving (Show,Eq)
