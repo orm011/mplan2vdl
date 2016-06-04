@@ -7,7 +7,7 @@ import Debug.Trace
 import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join)
-import Control.DeepSeq(NFData,($!!))
+import Control.DeepSeq(NFData)
 import qualified Vlite as V
 import qualified Data.Map.Strict as Map
 import Data.List (foldl')
@@ -164,7 +164,7 @@ instance NFData Vref
 
 voodoosFromVexps :: [(V.Vexp, Maybe Name)] -> Either String [Voodoo]
 
-voodoosFromVexps vexps = mapM (voodooFromVexp  . fst) $!! vexps
+voodoosFromVexps vexps = mapM (voodooFromVexp  . fst) vexps
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =

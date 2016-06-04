@@ -265,7 +265,9 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
 sc env M.In { M.left, M.set } =
   do sleft <- sc env left
      sset <- mapM (sc env) set
-     let f:rest = map (.== sleft) sset
+     (f,rest) <- case map (.== sleft) sset of
+                      [] -> Left "empty list"
+                      a:b -> Right (a,b)
      return $ foldl' (.||) f rest
 
 sc (Env lst _) (M.IntLiteral n) = return $ const_ n (fst $ head lst)
