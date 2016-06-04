@@ -5,7 +5,7 @@ module Dict
 import qualified  Data.Map.Strict as Map
 import qualified Data.ByteString as B
 import Data.Int
-import Data.Word
+--import Data.Word
 
 type Map = Map.Map
 
@@ -18,39 +18,69 @@ dictEncode str =
 lastTwo :: (a,b,c,d) -> (c,d)
 lastTwo (_,_,k,v) = (k,v)
 
+region :: ()
 region = ()
+r_name :: ()
 r_name = ()
 
+nation ::()
 nation = ()
+n_name ::  ()
 n_name = ()
 
+part ::()
 part = ()
+p_name ::()
 p_name = ()
+p_type ::()
 p_type = ()
+p_mfgr :: ()
 p_mfgr = ()
+p_brand :: ()
 p_brand = ()
+p_container :: ()
 p_container = ()
 
+lineitem :: ()
 lineitem = ()
+l_shipmode :: ()
 l_shipmode = ()
+l_shipinstruct :: ()
 l_shipinstruct = ()
+l_returnflag ::()
 l_returnflag = ()
+l_linestatus :: ()
 l_linestatus = ()
 
+customer ::()
 customer = ()
+c_name ::()
 c_name = ()
+c_phone :: ()
 c_phone = ()
+c_mktsegment ::()
 c_mktsegment = ()
 
+orders ::()
 orders = ()
+
+o_clerk :: ()
 o_clerk = ()
+
+o_orderstatus ::()
 o_orderstatus = ()
+
+o_orderpriority ::()
 o_orderpriority = ()
 
+supplier :: ()
 supplier = ()
+s_name :: ()
 s_name = ()
+s_phone :: ()
 s_phone = ()
 
+packFirst :: ([Char],b) -> (B.ByteString,b)
 packFirst (a,b) =
   let w8 = map (toEnum . fromEnum) a in
   (B.pack w8, b)
