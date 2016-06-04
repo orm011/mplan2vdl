@@ -41,7 +41,6 @@ data Vexp  =
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp}
-  | IfThenElse { if_::Vexp, then_::Vexp, else_::Vexp }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
 
@@ -59,11 +58,11 @@ ones_ = const_ 1
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
 
-(.==) :: Vexp -> Vexp -> Vexp
-a .== b = Binop { binop=Eq, left=a, right = b}
+(==.) :: Vexp -> Vexp -> Vexp
+a ==. b = Binop { binop=Eq, left=a, right = b}
 
-(.||) :: Vexp -> Vexp -> Vexp
-a .|| b = Binop { binop=LogOr, left=a, right=b}
+(||.) :: Vexp -> Vexp -> Vexp
+a ||. b = Binop { binop=LogOr, left=a, right=b}
 
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
@@ -265,10 +264,10 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
 sc env M.In { M.left, M.set } =
   do sleft <- sc env left
      sset <- mapM (sc env) set
-     (f,rest) <- case map (.== sleft) sset of
+     (f,rest) <- case map (==. sleft) sset of
                       [] -> Left "empty list"
                       a:b -> Right (a,b)
-     return $ foldl' (.||) f rest
+     return $ foldl' (||.) f rest
 
 sc (Env lst _) (M.IntLiteral n) = return $ const_ n (fst $ head lst)
 
@@ -278,10 +277,24 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
   do dateval <- sc env arg
      return $ Binop { binop=Div, left=dateval, right=const_ 365 dateval}
 
--- sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
---   do if_ = sc env mif_
---      then_ = sc env mthen_
---      else_ = sc env melse_
+sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
+  do if_ <- sc env mif_
+     then_ <- sc env mthen_
+     else_ <- sc env melse_
+     return $ if_ ?. (then_,else_)
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
+
+(-.) :: Vexp -> Vexp -> Vexp
+a -. b = Binop { binop=Sub, left=a, right=b }
+
+(*.) :: Vexp -> Vexp -> Vexp
+a *. b = Binop { binop=Mul, left=a, right=b }
+
+(+.) :: Vexp -> Vexp -> Vexp
+a +. b = Binop { binop=Add, left=a, right=b }
+
+(?.) :: Vexp -> (Vexp,Vexp) -> Vexp
+cond ?. (a,b) = ((ones_ cond  -. negcond) *. a) +. (negcond *. b)
+  where negcond = (cond ==. const_ 0 a)
