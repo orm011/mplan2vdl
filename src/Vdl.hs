@@ -100,7 +100,7 @@ a *. b = Binary { op=Multiply, arg1=a, arg2=b }
 a /. b = Binary { op=Divide, arg1=a, arg2=b }
 
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
-cond ?. (a,b) = (const_ 1 a  -. negcond) *. a +. negcond *. b
+cond ?. (a,b) = ((const_ 1 a  -. negcond) *. a) +. (negcond *. b)
   where negcond = (cond ==. const_ 0 a)
 -- NOTE: check needed to make sure we
 -- only have 0 or 1 in the multiplication.
