@@ -10,6 +10,7 @@ import Mplan(BinaryOp(..))
 import Name(Name(..))
 import qualified Name as NameTable
 import Control.Monad(foldM)
+import Data.List (foldl')
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
@@ -37,7 +38,7 @@ may convert to differnt range after -}
 data Vexp  =
   Load Name
   | Range  { rmin :: Int64, rstep :: Int64, rref::Vexp } -- reference Vector
-  | Binop { bop :: BinaryOp, bleft :: Vexp, bright :: Vexp }
+  | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp}
   | IfThenElse { if_::Vexp, then_::Vexp, else_::Vexp }
@@ -57,6 +58,13 @@ ones_ = const_ 1
 
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
+
+(.==) :: Vexp -> Vexp -> Vexp
+a .== b = Binop { binop=Eq, left=a, right = b}
+
+(.||) :: Vexp -> Vexp -> Vexp
+a .|| b = Binop { binop=LogOr, left=a, right=b}
+
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
 vexpsFromMplan _1 _  =
@@ -159,7 +167,7 @@ solve' M.GroupBy { M.child,
        solveAgg env (M.Avg expr) =
          do sums <- solveAgg env (M.Sum expr)
             counts <- solveAgg env M.Count
-            return $ Binop { bop=Div, bleft=sums, bright=counts }
+            return $ Binop { binop=Div, left=sums, right=counts }
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
 solve' (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
@@ -246,13 +254,19 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MDouble -> sc env arg -- assume it was an integer originally...
     M.MDecimal _ dec ->
       do ch <- sc env arg -- multiply by 10^dec. hope there is no overflow.
-         return  Binop { bop=M.Mul, bleft = ch, bright = const_ (10 ^ dec) ch }
+         return  Binop { binop=M.Mul, left = ch, right = const_ (10 ^ dec) ch }
     othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
   do l <- sc env left
      r <- sc env right
-     return $ Binop { bop=binop, bleft=l, bright=r }
+     return $ Binop { binop=binop, left=l, right=r }
+
+sc env M.In { M.left, M.set } =
+  do sleft <- sc env left
+     sset <- mapM (sc env) set
+     let f:rest = map (.== sleft) sset
+     return $ foldl' (.||) f rest
 
 sc (Env lst _) (M.IntLiteral n) = return $ const_ n (fst $ head lst)
 
@@ -260,7 +274,7 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
   --a day count from 0000-01-01)
   do dateval <- sc env arg
-     return $ Binop { bop=Div, bleft=dateval, bright=const_ 365 dateval}
+     return $ Binop { binop=Div, left=dateval, right=const_ 365 dateval}
 
 -- sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
 --   do if_ = sc env mif_

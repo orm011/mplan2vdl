@@ -11,24 +11,23 @@ module Mplan( mplanFromParseTree
 import qualified Parser as P
 import Name(Name(..))
 import Data.Time.Calendar
-import Control.DeepSeq(NFData,($!!))
+import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Data.Int
-import Data.Monoid(mappend)
-import Debug.Trace
-import Control.Monad(foldM, mapM, void)
-import qualified Data.Map.Strict as Map
-import Data.List (foldl')
+--import Data.Monoid(mappend)
+--import Debug.Trace
+--import Control.Monad(foldM, mapM, void)
+--import qualified Data.Map.Strict as Map
 import Data.Time.Format
-import Data.Time.Calendar
-import Data.Time
+--import Data.Time.Calendar
+--import Data.Time
 import Dict(dictEncode)
 import Data.Data
 import Data.Generics.Uniplate.Data
 import Config
 import qualified Error as E
 
-type Map = Map.Map
+--type Map = Map.Map
 
 data MType =
   MTinyint
@@ -77,8 +76,8 @@ resolveCharLiteral ch = dictEncode ch
 resolveDateString :: String -> Int64
 resolveDateString datestr =
   fromIntegral $ diffDays day zero
-  where zero = (readTime defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
-        day = (readTime defaultTimeLocale "%Y-%m-%d" datestr) :: Day
+  where zero = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
+        day = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" datestr) :: Day
 
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic, Data)
 instance NFData OrderSpec
@@ -90,6 +89,7 @@ data BinaryOp =
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max  {- arith -}
   deriving (Eq, Show, Generic, Ord, Data)
 instance NFData BinaryOp
+
 
 resolveInfix :: String -> Either String BinaryOp
 resolveInfix str =
@@ -141,6 +141,7 @@ data ScalarExpr =
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
   | Cast { mtype :: MType, arg::ScalarExpr }
+  | In { left :: ScalarExpr, set :: [ScalarExpr]}
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
@@ -248,12 +249,13 @@ solve P.Leaf { P.source, P.columns  } =
       case getJoinIdx attrs of
         [fkcol] -> Right  (fkcol, Just rname) -- notice reversal
         [] -> Right (rname, Nothing)
-        s_ -> Left $ E.unexpected " multiple fkey indices" attrs
+        s_ -> Left $ E.unexpected " multiple fkey indices" s_
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs }
                  , P.alias=as@(Just _) } =
       case getJoinIdx attrs of
         [] -> Right (rname, as) --
         [fkcol] -> Right (fkcol, as)  -- here, we have both an alias and joinidx (eg q8 nation_fk1)
+        _ -> Left $ E.unexpected " multiple fkey indices" attrs
     split _ = Left "table outputs should only have reference expressions"
 
 
@@ -322,7 +324,7 @@ solve arg@P.Node { P.relop = "join"
              } =
   do table  <- solve l
      references <- solve r
-     let hasJoinIdx attrs  = filter (\f -> case f of { P.JoinIdx _ -> True; _ -> False; }) attrs  /= []
+     let hasJoinIdx attrlist = filter (\f -> case f of { P.JoinIdx _ -> True; _ -> False; }) attrlist  /= []
      check attrs hasJoinIdx $ "need a join index for a fk join at " ++ (take 100 $ show arg)
      return $ FKJoin { table, references, idxcol }
 
@@ -438,27 +440,24 @@ sc P.Interval {P.ifirst=P.Expr {P.expr=first }
               ,P.firstop
               ,P.imiddle=P.Expr {P.expr=middle }
               ,P.secondop
-              ,P.ilast=P.Expr {P.expr=last }
+              ,P.ilast=P.Expr {P.expr=lastel }
               } =
   do sfirst <- sc first
      smiddle <- sc middle
-     slast <- sc last
+     slast <- sc lastel
      fop <- resolveInfix firstop
      sop <- resolveInfix secondop
      let left = Binop { binop=fop, left=sfirst, right=smiddle }
      let right = Binop { binop=sop, left=smiddle, right=slast }
      return $ Binop { binop=LogAnd, left, right}
 
-sc arg@P.In { P.arg = P.Expr { P.expr, P.alias = _}
+
+sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
         , P.negated = False
         , P.set } =
-  do exp <- sc expr
-     solvedset <- mapM (sc . P.expr) set
-     let check x = Binop Eq exp x
-     let inOr l r = Binop LogOr (check l) (check r)
-     case solvedset of
-       [] -> Left $ E.unexpected "empty 'in' clause" arg
-       x:rest -> return $ foldl' inOr (check x) rest
+  do sleft <- sc expr
+     sset <- mapM (sc . P.expr) set
+     return $ In { left=sleft, set=sset }
 
 sc (P.Nested exprs) = conjunction exprs
 
@@ -479,7 +478,7 @@ readIntLiteral :: String -> Either String Int64
 readIntLiteral str =
   case reads str :: [(Int64, String)] of
     [(num, [])] -> Right num
-    ow -> Left $ E.unexpected "integer literal" str
+    _ -> Left $ E.unexpected "integer literal" str
 
 mplanFromParseTree :: P.Rel -> Config -> Either String RelExpr
 mplanFromParseTree _1 _ = solve _1
