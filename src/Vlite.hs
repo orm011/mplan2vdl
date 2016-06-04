@@ -90,9 +90,6 @@ keep around -}
 solve :: M.RelExpr -> Either String Env
 solve relexp = solve' relexp >>= makeEnv
 
---kMaxval :: Int
---kMaxval = 255
-
 solve' :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 
 {- Table is a Special case. It gets vexprs for all the output columns.
@@ -297,4 +294,4 @@ a +. b = Binop { binop=Add, left=a, right=b }
 
 (?.) :: Vexp -> (Vexp,Vexp) -> Vexp
 cond ?. (a,b) = ((ones_ cond  -. negcond) *. a) +. (negcond *. b)
-  where negcond = (cond ==. const_ 0 a)
+  where negcond = (cond ==. const_ 0 cond)
