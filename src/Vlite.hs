@@ -110,10 +110,10 @@ of the operator, so it only makes sense to use this in internal nodes
 whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
-solve :: M.RelExpr -> Either String Env
-solve relexp = solve' relexp >>= makeEnv
+solve :: Config -> M.RelExpr -> Either String Env
+solve config relexp = solve' config relexp >>= makeEnv
 
-solve' :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
+solve' :: Config -> M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 
 {- Table is a Special case. It gets vexprs for all the output columns.
 
@@ -125,7 +125,7 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve' M.Table { M.tablename=_, M.tablecolumns } =
+solve' _ M.Table { M.tablename=_, M.tablecolumns } =
   Right $ map deduceName tablecolumns
   where deduceName (orig, Nothing) = (Load orig, Just orig)
         deduceName (orig, Just x) = (Load orig, Just x)
@@ -149,8 +149,8 @@ as case 2 actually. (Vexpr sum(bar, baz), sum2)
 but could be the topmost result, so we must return it as well.
 as (vexpr .., Nothing)
 -}
-solve' M.Project { M.child, M.projectout, M.order = [] } =
-  do env <- solve child
+solve' config M.Project { M.child, M.projectout, M.order = [] } =
+  do env <- solve config child
      vexprs <- sequence $ map (fromScalar env) exprs
      return (zip vexprs finalnames)
   where maybeGetName (M.Ref orig) = Just orig
@@ -163,16 +163,16 @@ solve' M.Project { M.child, M.projectout, M.order = [] } =
         finalnames = map solveName $ zip originalnames maliases
 
 {- the easy group by case: static single group -}
-solve' M.GroupBy { M.child,
-                M.inputkeys = [],
-                M.outputkeys = [],
-                M.outputaggs } =
-  do env <- solve child
+solve' config M.GroupBy { M.child,
+                          M.inputkeys = [],
+                          M.outputkeys = [],
+                          M.outputaggs } =
+  do env <- solve config child
      let (aggs, aliases) = unzip outputaggs
      resolvedAggs <- sequence $ map (solveAgg env) aggs
      return $ zip resolvedAggs aliases
      where
-       solveAgg env@(Env ((v,_):_) _) (M.Sum expr) =
+       solveAgg env (M.Sum expr) =
          do fdata <- sc env expr
             return $ Fold { foldop = FSum
                           , fgroups = zeros_ v
@@ -189,7 +189,7 @@ solve' M.GroupBy { M.child,
             return $ Binop { binop=Div, left=sums, right=counts }
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
 
-solve' (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
+solve' _ (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
                                 \dependent grouping right now "
 
 {-direct, foreign key join of two tables.
@@ -203,12 +203,12 @@ can be anything, as the pointers are still valid.
 
 (eg, after a filter on the right child...)
 -}
-solve' M.FKJoin { M.table -- can be derived rel
+solve' config M.FKJoin { M.table -- can be derived rel
                , M.references = references@(M.Table _ _) -- only unfiltered rel.
                , M.idxcol
                } =
-  do Env leftcols leftenv  <- solve table
-     Env rightcols  _ <- solve references
+  do Env leftcols leftenv  <- solve config table
+     Env rightcols  _ <- solve config references
      let (rightvecs, ralias) = unzip rightcols
      (_, shpos) <- NameTable.lookup idxcol leftenv
      let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
@@ -216,14 +216,14 @@ solve' M.FKJoin { M.table -- can be derived rel
      return $ leftcols ++ gatheredcols -- names are preserved.
 
 
-solve' (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
+solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
 \ joins with a plain table allowed)"
 
 
-solve' M.Select { M.child -- can be derived rel
+solve' config M.Select { M.child -- can be derived rel
                , M.predicate
                } =
-  do childenv@(Env childcols _) <- solve child
+  do childenv@(Env childcols _) <- solve config child
      let (childvecs, chalias) = unzip childcols
      preds <- sc childenv predicate
      let idxs = Fold { foldop=FSel, fgroups=pos_ preds, fdata=preds }
@@ -233,7 +233,7 @@ solve' M.Select { M.child -- can be derived rel
      return $ gatheredcols -- same names
 
 
-solve' r_  = Left $ "unsupported M.rel:  " ++ groom r_
+solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
