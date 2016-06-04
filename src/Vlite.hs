@@ -58,16 +58,39 @@ ones_ = const_ 1
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
 
+groups_ :: Int64 -> Vexp -> Vexp
+groups_ groupsizelg v = (pos_ v) >>. (const_ groupsizelg v)
+
 (==.) :: Vexp -> Vexp -> Vexp
 a ==. b = Binop { binop=Eq, left=a, right = b}
+
+(>>.) :: Vexp -> Vexp -> Vexp
+a >>. b = Binop { binop=BitShift, left=a, right = b}
 
 (||.) :: Vexp -> Vexp -> Vexp
 a ||. b = Binop { binop=LogOr, left=a, right=b}
 
+(-.) :: Vexp -> Vexp -> Vexp
+a -. b = Binop { binop=Sub, left=a, right=b }
+
+(*.) :: Vexp -> Vexp -> Vexp
+a *. b = Binop { binop=Mul, left=a, right=b }
+
+(+.) :: Vexp -> Vexp -> Vexp
+a +. b = Binop { binop=Add, left=a, right=b }
+
+-- --integer division
+-- (/.) :: Vexp -> Vexp -> Vexp
+-- a /. b = Binop { binop=Div, left=a, right=b }
+
+(?.) :: Vexp -> (Vexp,Vexp) -> Vexp
+cond ?. (a,b) = ((ones_ cond  -. negcond) *. a) +. (negcond *. b)
+  where negcond = (cond ==. zeros_ cond)
+
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
-vexpsFromMplan _1 _  =
-  do Env a _ <- solve _1
+vexpsFromMplan r c  =
+  do Env a _ <- solve c r
      return a
 
 -- the table only includes list elements that have a name
@@ -226,8 +249,6 @@ eg [L1 as L1]. This means we cannot just use a map in those cases, since
 a search for L1 should potentially mean L1.L1.
 -}
 
-
-
 sc ::  Env -> M.ScalarExpr -> Either String Vexp
 sc (Env _ env) (M.Ref refname)  =
   case (NameTable.lookup refname env) of
@@ -281,17 +302,3 @@ sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
      return $ if_ ?. (then_,else_)
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
-
-
-(-.) :: Vexp -> Vexp -> Vexp
-a -. b = Binop { binop=Sub, left=a, right=b }
-
-(*.) :: Vexp -> Vexp -> Vexp
-a *. b = Binop { binop=Mul, left=a, right=b }
-
-(+.) :: Vexp -> Vexp -> Vexp
-a +. b = Binop { binop=Add, left=a, right=b }
-
-(?.) :: Vexp -> (Vexp,Vexp) -> Vexp
-cond ?. (a,b) = ((ones_ cond  -. negcond) *. a) +. (negcond *. b)
-  where negcond = (cond ==. const_ 0 cond)

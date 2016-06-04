@@ -87,7 +87,7 @@ data BinaryOp =
   Gt | Lt | Leq | Geq {- rel -}
   | Eq | Neq {- comp -}
   | LogAnd | LogOr {- logical -}
-  | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max  {- arith -}
+  | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max | BitShift  {- arith -}
   deriving (Eq, Show, Generic, Ord, Data)
 instance NFData BinaryOp
 

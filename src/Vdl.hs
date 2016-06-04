@@ -37,6 +37,7 @@ data Voodop =
   | LogicalOr
   | BitwiseAnd
   | BitwiseOr
+  | BitShift
   | Equals
   | Add
   | Subtract
@@ -77,6 +78,9 @@ a <.  b = Binary { op=Greater, arg1=b, arg2=a } --notice argument swap
 
 (||.) :: Voodoo -> Voodoo -> Voodoo
 a ||. b = Binary { op=LogicalOr, arg1=a, arg2=b }
+
+(>>.) :: Voodoo -> Voodoo -> Voodoo
+a >>. b = Binary { op=BitShift, arg1=a, arg2=b }
 
 (&&.) :: Voodoo -> Voodoo -> Voodoo
 a &&. b = Binary { op=LogicalAnd, arg1=a, arg2=b }
@@ -134,6 +138,7 @@ voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
        V.LogAnd -> Right $ (l &&. r)
        V.LogOr -> Right $ (l ||. r)
        V.Div -> Right $ (l /. r)
+       V.BitShift -> Right $  (l >>. r)
        _ -> Left $ "binop not implemented: " ++ show binop
 
 voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
