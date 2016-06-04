@@ -174,20 +174,23 @@ solve' config M.GroupBy { M.child,
      where
        solveAgg env (M.Sum expr) =
          do fdata <- sc env expr
-            return $ Fold { foldop = FSum
-                          , fgroups = zeros_ v
-                          , fdata }
+            return $ make2LevelFold FSum fdata
        solveAgg (Env ((v,_):_) _) M.Count =
-         -- no explicit context to use for vector length, so we use the first
-         -- in the list
-         return $ Fold { foldop = FSum
-                       , fgroups = zeros_ v
-                       , fdata = ones_ v }
+         return $ make2LevelFold FSum (ones_ v)
        solveAgg env (M.Avg expr) =
          do sums <- solveAgg env (M.Sum expr)
             counts <- solveAgg env M.Count
             return $ Binop { binop=Div, left=sums, right=counts }
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
+       make2LevelFold foldop fdata = -- adds one level of parallelism
+         let firstlevel =  Fold { foldop
+                                , fgroups = groups_ (grainsizelg config) fdata -- parallel
+                                , fdata }
+             secondlevel = Fold { foldop
+                                , fgroups = zeros_ firstlevel -- sequential
+                                , fdata = firstlevel }
+         in  secondlevel
+
 
 solve' _ (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
                                 \dependent grouping right now "
@@ -226,8 +229,8 @@ solve' config M.Select { M.child -- can be derived rel
   do childenv@(Env childcols _) <- solve config child
      let (childvecs, chalias) = unzip childcols
      preds <- sc childenv predicate
+     -- use 0,1,2... for fold select groups, fully parallel
      let idxs = Fold { foldop=FSel, fgroups=pos_ preds, fdata=preds }
-     -- use 0,1,2... for fold select groups
      let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
      let gatheredcols = zip (map gatherQual childvecs) chalias
      return $ gatheredcols -- same names
