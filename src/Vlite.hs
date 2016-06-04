@@ -6,21 +6,21 @@ module Vlite( vexpsFromMplan
 
 import Config
 import qualified Mplan as M
-import Mplan(BinaryOp(..), UnaryOp)
+import Mplan(BinaryOp(..))
 import Name(Name(..))
 import qualified Name as NameTable
 import Control.Monad(foldM)
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
-import Control.DeepSeq(NFData,($!!))
+import Control.DeepSeq(NFData)
 import Data.Int
-import Debug.Trace
+--import Debug.Trace
 import Text.Groom
-import qualified Data.Map.Strict as Map
-import Data.String.Utils(join)
+--import qualified Data.Map.Strict as Map
+--import Data.String.Utils(join)
 
-type Map = Map.Map
-type VexpTable = Map Vexp Vexp  --used to dedup Vexps
+--type Map = Map.Map
+--type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 
 type NameTable = NameTable.NameTable
 
@@ -48,11 +48,15 @@ instance NFData Vexp
 {- some convenience vectors -}
 const_ :: Int64 -> Vexp -> Vexp
 const_ k v = Range { rmin = k, rstep = 0, rref = v }
-pos_ v = Range { rmin = 0, rstep = 1, rref = v }
-ones_ = const_ 1
-zeros_ = const_ 0
 
-range_ n = Range {rmin = 0, rstep = 1 }
+pos_ :: Vexp -> Vexp
+pos_ v = Range { rmin = 0, rstep = 1, rref = v }
+
+ones_ :: Vexp -> Vexp
+ones_ = const_ 1
+
+zeros_ :: Vexp -> Vexp
+zeros_ = const_ 0
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
 vexpsFromMplan _1 _  =
@@ -66,7 +70,7 @@ makeEnv :: [(Vexp, Maybe Name)] -> Either String Env
 makeEnv lst =
   do tbl <- makeTable lst
      return $ Env lst tbl
-  where makeTable lst = foldM maybeadd NameTable.empty lst
+  where makeTable pairs = foldM maybeadd NameTable.empty pairs
         maybeadd env (_, Nothing) = Right env
         maybeadd env (vexp, Just newalias) = NameTable.insert newalias vexp env
 
@@ -79,8 +83,8 @@ keep around -}
 solve :: M.RelExpr -> Either String Env
 solve relexp = solve' relexp >>= makeEnv
 
-kMaxval :: Int
-kMaxval = 255
+--kMaxval :: Int
+--kMaxval = 255
 
 solve' :: M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
 
@@ -94,7 +98,7 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve' M.Table { M.tablename, M.tablecolumns } =
+solve' M.Table { M.tablename=_, M.tablecolumns } =
   Right $ map deduceName tablecolumns
   where deduceName (orig, Nothing) = (Load orig, Just orig)
         deduceName (orig, Just x) = (Load orig, Just x)
@@ -136,25 +140,24 @@ solve' M.GroupBy { M.child,
                 M.inputkeys = [],
                 M.outputkeys = [],
                 M.outputaggs } =
-  do env@(Env childvecs _) <- solve child
-     let (firstvec,_) =  head childvecs -- nonempty.
+  do env <- solve child
      let (aggs, aliases) = unzip outputaggs
      resolvedAggs <- sequence $ map (solveAgg env) aggs
      return $ zip resolvedAggs aliases
      where
-       solveAgg env@(Env ((v,_):_) _) (M.Sum exp) =
-         do fdata <- sc env exp
+       solveAgg env@(Env ((v,_):_) _) (M.Sum expr) =
+         do fdata <- sc env expr
             return $ Fold { foldop = FSum
                           , fgroups = zeros_ v
                           , fdata }
-       solveAgg env@(Env ((v,_):_) _) M.Count =
+       solveAgg (Env ((v,_):_) _) M.Count =
          -- no explicit context to use for vector length, so we use the first
          -- in the list
          return $ Fold { foldop = FSum
                        , fgroups = zeros_ v
                        , fdata = ones_ v }
-       solveAgg env@(Env ((v,_):_) _) (M.Avg exp) =
-         do sums <- solveAgg env (M.Sum exp)
+       solveAgg env (M.Avg expr) =
+         do sums <- solveAgg env (M.Sum expr)
             counts <- solveAgg env M.Count
             return $ Binop { bop=Div, bleft=sums, bright=counts }
        solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
