@@ -15,6 +15,9 @@ import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
 import Data.Int
+import qualified Error as E
+import Error(check)
+
 --import Debug.Trace
 import Text.Groom
 --import qualified Data.Map.Strict as Map
@@ -52,8 +55,8 @@ instance NFData Vexp
 const_ :: Int64 -> Vexp -> Vexp
 const_ k v = Range { rmin = k, rstep = 0, rref = v }
 
-pos_ :: Vexp -> Vexp
-pos_ v = Range { rmin = 0, rstep = 1, rref = v }
+-- pos_ :: Vexp -> Vexp
+-- pos_ v = Range { rmin = 0, rstep = 1, rref = v }
 
 ones_ :: Vexp -> Vexp
 ones_ = const_ 1
@@ -61,14 +64,14 @@ ones_ = const_ 1
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
 
-groups_ :: Int64 -> Vexp -> Vexp
-groups_ groupsizelg v = (pos_ v) >>. (const_ groupsizelg v)
+-- groups_ :: Int64 -> Vexp -> Vexp
+-- groups_ groupsizelg v = (pos_ v) >>. (const_ groupsizelg v)
 
 (==.) :: Vexp -> Vexp -> Vexp
 a ==. b = Binop { binop=Eq, left=a, right = b}
 
-(>>.) :: Vexp -> Vexp -> Vexp
-a >>. b = Binop { binop=BitShift, left=a, right = b}
+-- (>>.) :: Vexp -> Vexp -> Vexp
+-- a >>. b = Binop { binop=BitShift, left=a, right = b}
 
 (||.) :: Vexp -> Vexp -> Vexp
 a ||. b = Binop { binop=LogOr, left=a, right=b}
@@ -267,12 +270,10 @@ sc (Env _ env) (M.Ref refname)  =
     Right (_, v) -> Right v
     Left s -> Left s
 
-
--- TODO: strictly speaking, I need to know the orignal type in order
--- to know What kind of computation is actually involved. Right now,
--- the original type is always assumed to be an integer...
--- Also, voodoo does not have support to express wider /narrower types.
--- For now, make casting data into a noop
+-- serious TODO: strictly speaking, I need to know the orignal type in order
+-- to correctly produce code here.
+-- We need the input type bc, for example Decimal(10,2) -> Decimal(10,3) = *10
+-- but Decimal(10,1) -> Decimal(10,3) = * 100. Right now, that input type is not explicitly given.
 sc env (M.Cast { M.mtype, M.arg }) =
   case mtype of
     M.MTinyint -> sc env arg
@@ -281,37 +282,54 @@ sc env (M.Cast { M.mtype, M.arg }) =
     M.MSmallint -> sc env arg
     M.MChar -> sc env arg -- assuming the input has already been converted
     M.MDouble -> sc env arg -- assume it was an integer originally...
-    M.MDecimal _ dec ->
-      do ch <- sc env arg -- multiply by 10^dec. hope there is no overflow.
-         return  Binop { binop=M.Mul, left = ch, right = const_ (10 ^ dec) ch }
+    M.MDecimal _ dec -> --we are assuming inputs are integers, but should not.
+      do ( ch, ColInfo {bounds=(l,u), count} ) <- sc env arg -- multiply by 10^dec. hope there is no overflow.
+         let factor = (10 ^ dec)
+         return  ( Binop { binop=M.Mul, left = ch, right = const_  factor ch }
+                 , ColInfo {bounds=(factor * l, factor * u ), count} )
     othertype -> Left $ "unsupported type cast: " ++ groom othertype
 
+
 sc env (M.Binop { M.binop, M.left, M.right }) =
-  do l <- sc env left
-     r <- sc env right
-     return $ Binop { binop=binop, left=l, right=r }
+  do (l, ColInfo {bounds=(l1, u1), count=cl}) <- sc env left
+     (r, ColInfo {bounds=(l2, u2), count=cr}) <- sc env right
+     bounds <- (case binop of
+                   M.Gt -> Right (0,1)
+                   M.Lt -> Right (0,1)
+                   M.Eq -> Right (0,1)
+                   M.Add -> Right (l1 + l2, u1 + u2)
+                   ow_ -> Left $ E.todo "bounds for other operators" ow_
+               )
+     return $ ( Binop { binop, left=l, right=r }
+              , ColInfo {bounds, count=(min cl cr)} )
 
 sc env M.In { M.left, M.set } =
-  do sleft <- sc env left
+  do (sleft, ColInfo {count})  <- sc env left
      sset <- mapM (sc env) set
-     (f,rest) <- case map (==. sleft) sset of
+     (f,rest) <- case map (==. sleft) (map fst sset) of
                       [] -> Left "empty list"
                       a:b -> Right (a,b)
-     return $ foldl' (||.) f rest
+     return $ ( foldl' (||.) f rest
+              , ColInfo {bounds=(0,1), count}) -- its boolean at the end
 
-sc (Env lst _) (M.IntLiteral n) = return $ const_ n (fst $ head lst)
+sc (Env ((vref, _, ColInfo {count}) : _ ) _) (M.IntLiteral n)
+  = return $ (const_ n vref, ColInfo {bounds=(n,n), count})
 
 sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
   --a day count from 0000-01-01)
-  do dateval <- sc env arg
-     return $ Binop { binop=Div, left=dateval, right=const_ 365 dateval}
+  do (dateval, ColInfo {bounds=(l,u), count}) <- sc env arg
+     return $ ( Binop { binop=Div, left=dateval, right=const_ 365 dateval}
+              , ColInfo {bounds=(l `div` 365, u `div` 365), count} )
 
+
+-- note: for max and min, the actual possible bounds are more restrictive.
+-- for now, I don't care.
 sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
-  do if_ <- sc env mif_
-     then_ <- sc env mthen_
-     else_ <- sc env melse_
-     return $ if_ ?. (then_,else_)
+  do (if_,_) <- sc env mif_
+     (then_, ColInfo {bounds=(tl,tu), count}) <- sc env mthen_
+     (else_, ColInfo {bounds=(el,eu)}) <- sc env melse_
+     return $ (if_ ?.(then_,else_), ColInfo {bounds=(min tl el, max tu eu), count})
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
@@ -319,31 +337,33 @@ solveAgg :: Config -> Env -> Maybe Name -> M.GroupAgg -> Either String (Vexp, Co
 
 -- average case dealt with by rewriting
 solveAgg config env mkey (M.Avg expr) =
-  do sums <- solveAgg config env mkey (M.Sum expr)
-     counts <- solveAgg config env mkey M.Count
-     return $ Binop { binop=Div, left=sums, right=counts }
+  do (sums, ColInfo {bounds=(suml,sumu), count=countsums}) <- solveAgg config env mkey (M.Sum expr)
+     (counts, ColInfo {bounds=(cl,_), count=countc}) <- solveAgg config env mkey M.Count
+     check (countsums,countc) (\(a,b) -> a == b) "counts should match"
+     check cl (== 1) "minimum count is always 1"
+     return $ ( Binop { binop=Div, left=sums, right=counts }
+              , ColInfo {bounds=(suml,sumu), count=countc } ) -- bc counts can be 1
 
 -- non avg. aggregates
-solveAgg config env mkey agg =
-  let Env ( (refv,_,_) : _ ) _ = env --get a ref vector for ranges
-  in do fgroups <- (case mkey of -- maybe monad
-                       Nothing -> Just $ zeros_ refv
-                       Just key -> makeGroups key)
-        (fdata, foldop) <- (case agg of
-                               M.Sum expr ->
-                                 do r <- sc env expr
-                                    return $ (r, FSum)
-                               M.Count -> Right $ (ones_ refv, FSum)
-                               _ -> Left $ "unsupported agg")
-        return $ Fold {foldop, fgroups, fdata}
-  where makeGroups keyname =
-          do (keyvec,info) <- NameTable.lookup keyname env
-             let pivots = makeRange (lower info) (upper info)
-             return $ Partition { pivots, pdata=keyvec }
-        makeRange rmin max =
-          RangeC { rmin
-                 , rcount = ( max - rmin  + 1 )
-                 , rstep = 1 }
+solveAgg _ env mkey agg =
+  do (fgroups, groupcount) <- (case mkey of -- maybe monad
+                                  Nothing -> Right $ (zeros_ refv, 1)
+                                  Just key -> makeGroups key)
+     (fdata, foldop, bounds) <- groupData agg
+     return $ (Fold {foldop, fgroups, fdata}, ColInfo { bounds, count=groupcount })
+  where Env lst nt = env
+        (refv,_,_) = head lst -- assured non empty
+        makeGroups keyname =
+          do (_, (keyvec, ColInfo {bounds=(rmin,u)})) <- NameTable.lookup keyname nt
+             let rcount = u - rmin + 1 -- bounds number of output groups
+             let pivots = RangeC { rmin , rcount, rstep = 1 }
+             return $ (Partition { pivots, pdata=keyvec }, rcount)
+        groupData (M.Sum expr) =
+          do (r, ColInfo (lower,upper) cnt)  <- sc env expr
+             return $ (r, FSum, (cnt*lower, cnt*upper))
+        groupData M.Count =
+          Right $ (ones_ refv, FSum, (1,1))
+        groupData ow_ =  Left $ E.todo "aggregate" ow_
 
 -- make2LevelFold :: Config -> FoldOp -> Vexp -> (Vexp, ColInfo)
 -- make2LevelFold config foldop fdata = -- adds one level of parallelism
@@ -356,3 +376,11 @@ solveAgg config env mkey agg =
 --              , fgroups = zeros_ firstlevel -- sequential
 --              , fdata = firstlevel }
 --   in  secondlevel
+-- solutions: every Vexp has attached counts and bounds (put it in the type) (only how to repr it. right now: table)
+-- may want to print these things in the vlite repr to track/debug them => table gets in the way of that.
+-- solutions: transformation that takes a vexp and derives its attributes
+         -- advantages: deals gracefully with intermediates added by explicitly (eg ranges, binops)
+         -- disadvantages? :  what if we know of special cases at the binary layer that are harder to match
+         -- at the vlite layer?
+-- make the easy-to-write binary cases also track sizes. This allows one to make literals that track their
+-- inputs properties

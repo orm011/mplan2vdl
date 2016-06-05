@@ -26,6 +26,7 @@ import Data.Data
 import Data.Generics.Uniplate.Data
 import Config
 import qualified Error as E
+import Error(check)
 import Data.List(foldl')
 
 --type Map = Map.Map
@@ -216,10 +217,6 @@ data RelExpr =
               }
   deriving (Eq,Show, Generic, Data)
 instance NFData RelExpr
-
--- thsis  way to insert extra consistency checks
-check :: (Show a) => a -> (a -> Bool) -> String -> Either String ()
-check val cond msg = if cond val then Right () else Left $ E.unexpected msg val
 
 
 {-helper function uesd in multiple operators that introduce output
