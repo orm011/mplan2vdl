@@ -203,8 +203,8 @@ data RelExpr =
               , predicate :: ScalarExpr
               }
   | GroupBy   { child :: RelExpr
-              , inputkeys :: [Name]
-              , outputkeys :: [(Name, Maybe Name)]
+              , inputkeys :: [Name] --could it be expr?
+              , outputkeys :: [(Name, Maybe Name)] -- should be exprs?
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
   | FKJoin    { table :: RelExpr

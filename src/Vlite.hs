@@ -38,9 +38,12 @@ may convert to differnt range after -}
 data Vexp  =
   Load Name
   | Range  { rmin :: Int64, rstep :: Int64, rref::Vexp } -- reference Vector
+  | RangeC { rmin :: Int64, rstep :: Int64, rcount::Int64 }
+    -- ranges with fixed sizes
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp}
+  | Partition { pivots::Vexp, pdata::Vexp }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
 
@@ -91,18 +94,22 @@ cond ?. (a,b) = ((ones_ cond  -. negcond) *. a) +. (negcond *. b)
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [(Vexp, Maybe Name)]
 vexpsFromMplan r c  =
   do Env a _ <- solve c r
-     return a
+     return $ map pickfs a
+     where pickfs (_1,_2,_) = (_1,_2)
 
 -- the table only includes list elements that have a name
-data Env = Env [(Vexp, Maybe Name)] (NameTable Vexp)
+-- we also include metadata about the column, such as an
+-- upper bound value in it.
+data Env = Env [(Vexp, Maybe Name, ColInfo)] (NameTable (Vexp, ColInfo))
 
-makeEnv :: [(Vexp, Maybe Name)] -> Either String Env
+makeEnv :: [(Vexp, Maybe Name, ColInfo)] -> Either String Env
 makeEnv lst =
   do tbl <- makeTable lst
      return $ Env lst tbl
   where makeTable pairs = foldM maybeadd NameTable.empty pairs
-        maybeadd env (_, Nothing) = Right env
-        maybeadd env (vexp, Just newalias) = NameTable.insert newalias vexp env
+        maybeadd env (_, Nothing, _) = Right env
+        maybeadd env (vexp, Just newalias, sz) =
+          NameTable.insert newalias (vexp,sz) env
 
 {- helper function that makes a lookup table from the output of a previous
 operator. the lookup table loses information about the anonymous outputs
@@ -113,7 +120,7 @@ keep around -}
 solve :: Config -> M.RelExpr -> Either String Env
 solve config relexp = solve' config relexp >>= makeEnv
 
-solve' :: Config -> M.RelExpr -> Either String [ (Vexp, Maybe Name) ]
+solve' :: Config -> M.RelExpr -> Either String [ (Vexp, Maybe Name, ColInfo) ]
 
 {- Table is a Special case. It gets vexprs for all the output columns.
 
@@ -125,10 +132,19 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve' _ M.Table { M.tablename=_, M.tablecolumns } =
-  Right $ map deduceName tablecolumns
-  where deduceName (orig, Nothing) = (Load orig, Just orig)
-        deduceName (orig, Just x) = (Load orig, Just x)
+solve' config M.Table { M.tablename
+                      , M.tablecolumns } =
+  let r = do col <- tablecolumns -- list monad
+             let colnam = fst col
+             let qnam = makeqname tablename colnam
+             let alias = Just $ getname col
+             return $ do (_,info) <- getinfo qnam  -- either mnd
+                         return $ (Load colnam, alias, info)
+  in sequence r
+  where getname (orig, Nothing) = orig
+        getname (_, Just x) = x
+        makeqname (Name tab) (Name col) = Name (tab ++ col)
+        getinfo n = NameTable.lookup n (colinfo config)
 
 {- Project: not dealing with ordered queries right now
 note. project affects the name scope in the following ways
@@ -150,50 +166,44 @@ but could be the topmost result, so we must return it as well.
 as (vexpr .., Nothing)
 -}
 solve' config M.Project { M.child, M.projectout, M.order = [] } =
-  do env <- solve config child
-     vexprs <- sequence $ map (fromScalar env) exprs
-     return (zip vexprs finalnames)
+  do env <- solve config child -- either monad
+     let r = (do (expr, malias)  <- projectout -- list monad
+                 let originalname = maybeGetName expr
+                 let outputname = solveName (originalname, malias)
+                 return $ do (vexpr,info) <- fromScalar env expr --either monad
+                             return (vexpr, outputname, info))
+     sequence r
   where maybeGetName (M.Ref orig) = Just orig
         maybeGetName _ = Nothing
         solveName (_, Just alias) = Just alias {-alias always wins-}
         solveName (Just some, Nothing) = Just some
         solveName _ = Nothing
-        (exprs, maliases) = unzip projectout
-        originalnames = map maybeGetName exprs
-        finalnames = map solveName $ zip originalnames maliases
 
 {- the easy group by case: static single group -}
 solve' config M.GroupBy { M.child,
-                          M.inputkeys = [],
-                          M.outputkeys = [],
+                          M.inputkeys=[],
+                          M.outputkeys=[],
                           M.outputaggs } =
-  do env <- solve config child
-     let (aggs, aliases) = unzip outputaggs
-     resolvedAggs <- sequence $ map (solveAgg env) aggs
-     return $ zip resolvedAggs aliases
-     where
-       solveAgg env (M.Sum expr) =
-         do fdata <- sc env expr
-            return $ make2LevelFold FSum fdata
-       solveAgg (Env ((v,_):_) _) M.Count =
-         return $ make2LevelFold FSum (ones_ v)
-       solveAgg env (M.Avg expr) =
-         do sums <- solveAgg env (M.Sum expr)
-            counts <- solveAgg env M.Count
-            return $ Binop { binop=Div, left=sums, right=counts }
-       solveAgg _ s_ = Left $ "unsupported aggregate: " ++ groom s_
-       make2LevelFold foldop fdata = -- adds one level of parallelism
-         let firstlevel =  Fold { foldop
-                                , fgroups = groups_ (grainsizelg config) fdata -- parallel
-                                , fdata }
-             secondlevel = Fold { foldop
-                                , fgroups = zeros_ firstlevel -- sequential
-                                , fdata = firstlevel }
-         in  secondlevel
+  do env  <- solve config child --either monad
+     sequence $ (do (agg, alias) <- outputaggs -- list monad
+                    return ( do (sagg, agginfo)  <- solveAgg config env Nothing agg
+                                -- either monad
+                                return (sagg, alias, agginfo)))
 
+{-group by one column-}
+solve' config M.GroupBy { M.child,
+                          M.inputkeys=[keyname], -- single input key for now.
+                          M.outputkeys=[], -- deal with output keys later
+                          M.outputaggs } =
+  do  env  <- solve config child --either monad
+      sequence $ (do (agg, alias) <- outputaggs -- list monad
+                     return ( do (sagg, agginfo)  <- solveAgg config env (Just keyname) agg
+                                 -- either monad
+                                 return (sagg, alias, agginfo)))
 
-solve' _ (M.GroupBy _ _ _ _)   = Left $ "only able to compile aggregates with no data\
-                                \dependent grouping right now "
+solve' _ (M.GroupBy _ _ _ _) =
+  Left $ "only able to compile aggregates with no data\
+         \dependent grouping right now "
 
 {-direct, foreign key join of two tables.
 for now, this join assumes but does not check
@@ -206,41 +216,41 @@ can be anything, as the pointers are still valid.
 
 (eg, after a filter on the right child...)
 -}
-solve' config M.FKJoin { M.table -- can be derived rel
-               , M.references = references@(M.Table _ _) -- only unfiltered rel.
-               , M.idxcol
-               } =
-  do Env leftcols leftenv  <- solve config table
-     Env rightcols  _ <- solve config references
-     let (rightvecs, ralias) = unzip rightcols
-     (_, shpos) <- NameTable.lookup idxcol leftenv
-     let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
-     let gatheredcols = zip (map joinCol rightvecs) ralias
-     return $ leftcols ++ gatheredcols -- names are preserved.
+-- solve' config M.FKJoin { M.table -- can be derived rel
+--                , M.references = references@(M.Table _ _) -- only unfiltered rel.
+--                , M.idxcol
+--                } =
+--   do Env leftcols leftenv  <- solve config table
+--      Env rightcols  _ <- solve config references
+--      let (rightvecs, ralias) = unzip rightcols
+--      (_, shpos) <- NameTable.lookup idxcol leftenv
+--      let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
+--      let gatheredcols = zip (map joinCol rightvecs) ralias
+--      return $ leftcols ++ gatheredcols -- names are preserved.
 
 
-solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
-\ joins with a plain table allowed)"
+-- solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
+-- \ joins with a plain table allowed)"
 
 
-solve' config M.Select { M.child -- can be derived rel
-               , M.predicate
-               } =
-  do childenv@(Env childcols _) <- solve config child
-     let (childvecs, chalias) = unzip childcols
-     preds <- sc childenv predicate
-     -- use 0,1,2... for fold select groups, fully parallel
-     let idxs = Fold { foldop=FSel, fgroups=pos_ preds, fdata=preds }
-     let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
-     let gatheredcols = zip (map gatherQual childvecs) chalias
-     return $ gatheredcols -- same names
+-- solve' config M.Select { M.child -- can be derived rel
+--                , M.predicate
+--                } =
+--   do childenv@(Env childcols _) <- solve config child
+--      let (childvecs, chalias) = unzip childcols
+--      preds <- sc childenv predicate
+--      -- use 0,1,2... for fold select groups, fully parallel
+--      let idxs = Fold { foldop=FSel, fgroups=pos_ preds, fdata=preds }
+--      let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
+--      let gatheredcols = zip (map gatherQual childvecs) chalias
+--      return $ gatheredcols -- same names
 
 
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
-fromScalar ::  Env -> M.ScalarExpr  -> Either String Vexp
+fromScalar ::  Env -> M.ScalarExpr  -> Either String (Vexp, ColInfo)
 fromScalar = sc
 
 {- notes about tmp naming in Monet:
@@ -251,8 +261,7 @@ fromScalar = sc
 eg [L1 as L1]. This means we cannot just use a map in those cases, since
 a search for L1 should potentially mean L1.L1.
 -}
-
-sc ::  Env -> M.ScalarExpr -> Either String Vexp
+sc ::  Env -> M.ScalarExpr -> Either String (Vexp,ColInfo)
 sc (Env _ env) (M.Ref refname)  =
   case (NameTable.lookup refname env) of
     Right (_, v) -> Right v
@@ -305,3 +314,45 @@ sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
      return $ if_ ?. (then_,else_)
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
+
+solveAgg :: Config -> Env -> Maybe Name -> M.GroupAgg -> Either String (Vexp, ColInfo)
+
+-- average case dealt with by rewriting
+solveAgg config env mkey (M.Avg expr) =
+  do sums <- solveAgg config env mkey (M.Sum expr)
+     counts <- solveAgg config env mkey M.Count
+     return $ Binop { binop=Div, left=sums, right=counts }
+
+-- non avg. aggregates
+solveAgg config env mkey agg =
+  let Env ( (refv,_,_) : _ ) _ = env --get a ref vector for ranges
+  in do fgroups <- (case mkey of -- maybe monad
+                       Nothing -> Just $ zeros_ refv
+                       Just key -> makeGroups key)
+        (fdata, foldop) <- (case agg of
+                               M.Sum expr ->
+                                 do r <- sc env expr
+                                    return $ (r, FSum)
+                               M.Count -> Right $ (ones_ refv, FSum)
+                               _ -> Left $ "unsupported agg")
+        return $ Fold {foldop, fgroups, fdata}
+  where makeGroups keyname =
+          do (keyvec,info) <- NameTable.lookup keyname env
+             let pivots = makeRange (lower info) (upper info)
+             return $ Partition { pivots, pdata=keyvec }
+        makeRange rmin max =
+          RangeC { rmin
+                 , rcount = ( max - rmin  + 1 )
+                 , rstep = 1 }
+
+-- make2LevelFold :: Config -> FoldOp -> Vexp -> (Vexp, ColInfo)
+-- make2LevelFold config foldop fdata = -- adds one level of parallelism
+--   let firstlevel =
+--         Fold { foldop
+--              , fgroups = groups_ (grainsizelg config) fdata -- parallel
+--              , fdata }
+--       secondlevel =
+--         Fold { foldop
+--              , fgroups = zeros_ firstlevel -- sequential
+--              , fdata = firstlevel }
+--   in  secondlevel
