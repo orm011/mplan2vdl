@@ -135,17 +135,23 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve' config M.Table { M.tablename=_
+solve' config M.Table { M.tablename
                       , M.tablecolumns } =
-  let r = do col <- tablecolumns -- list monad
-             let colnam = fst col
+  let r = do col@(colnam, _) <- tablecolumns -- list monad
              let alias = Just $ getname col
-             return $ do (_,info) <- getinfo colnam  -- either mnd
-                         return $ (Load colnam, alias, info)
-  in sequence r
-  where getname (orig, Nothing) = orig
-        getname (_, Just x) = x
-        getinfo n = NameTable.lookup n (colinfo config)
+             case colnam of
+               Name [_, "%TID%"] -> [] -- deal with %TID% below
+               _ -> return $ (do (_,info) <- getinfo colnam  -- either mnd
+                                 return $ (Load colnam, alias, info))
+          where getname (orig, Nothing) = orig
+                getname (_, Just x) = x
+                getinfo n = NameTable.lookup n (colinfo config)
+  in do nonTid@( (refv,_,ColInfo {count} ) : _ ) <- sequence r
+        let Name tabstr = tablename
+        let tidcol  = ( pos_ refv
+                      , Just $ Name (tabstr ++ ["%TID%"])
+                      , ColInfo {bounds=(0,count-1), count})
+        return $ tidcol : nonTid
 
 {- Project: not dealing with ordered queries right now
 note. project affects the name scope in the following ways
