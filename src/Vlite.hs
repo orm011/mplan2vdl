@@ -55,8 +55,8 @@ instance NFData Vexp
 const_ :: Int64 -> Vexp -> Vexp
 const_ k v = Range { rmin = k, rstep = 0, rref = v }
 
--- pos_ :: Vexp -> Vexp
--- pos_ v = Range { rmin = 0, rstep = 1, rref = v }
+pos_ :: Vexp -> Vexp
+pos_ v = Range { rmin = 0, rstep = 1, rref = v }
 
 ones_ :: Vexp -> Vexp
 ones_ = const_ 1
@@ -236,18 +236,16 @@ can be anything, as the pointers are still valid.
 -- \ joins with a plain table allowed)"
 
 
--- solve' config M.Select { M.child -- can be derived rel
---                , M.predicate
---                } =
---   do childenv@(Env childcols _) <- solve config child
---      let (childvecs, chalias) = unzip childcols
---      preds <- sc childenv predicate
---      -- use 0,1,2... for fold select groups, fully parallel
---      let idxs = Fold { foldop=FSel, fgroups=pos_ preds, fdata=preds }
---      let gatherQual col = Shuffle {shop=Gather, shsource=col, shpos=idxs}
---      let gatheredcols = zip (map gatherQual childvecs) chalias
---      return $ gatheredcols -- same names
-
+solve' config M.Select { M.child -- can be derived rel
+                       , M.predicate
+                       } =
+  do childenv@(Env childcols _) <- solve config child -- either monad
+     (spred, _)  <- sc childenv predicate
+     return (do (childvec, chalias, ColInfo {bounds=(l,u), count}) <- childcols -- list monad
+                let idx = Fold { foldop=FSel, fgroups=pos_ spred, fdata=spred } -- fully parallel select.
+                let gathered =  Shuffle {shop=Gather, shsource=childvec, shpos=idx }
+                let ginfo = ColInfo { bounds=(l,u), count} -- in this case the count is the same as before.
+                return (gathered, chalias, ginfo))
 
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
