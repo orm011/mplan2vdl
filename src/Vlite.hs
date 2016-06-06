@@ -42,14 +42,14 @@ data Vexp  =
   Load Name
   | Range  { rmin :: Int64, rstep :: Int64, rref::Vexp } -- reference Vector
   | RangeC { rmin :: Int64, rstep :: Int64, rcount::Int64 }
-    -- ranges with fixed sizes
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
-  | Shuffle { shop :: ShOp,  shsource :: Vexp, shpos :: Vexp }
-  | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp}
+  | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
+  | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots::Vexp, pdata::Vexp }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
 
+-- ranges with fixed sizes
 
 {- some convenience vectors -}
 const_ :: Int64 -> Vexp -> Vexp
@@ -217,22 +217,21 @@ can be anything, as the pointers are still valid.
 
 (eg, after a filter on the right child...)
 -}
--- solve' config M.FKJoin { M.table -- can be derived rel
---                , M.references = references@(M.Table _ _) -- only unfiltered rel.
---                , M.idxcol
---                } =
---   do Env leftcols leftenv  <- solve config table
---      Env rightcols  _ <- solve config references
---      let (rightvecs, ralias) = unzip rightcols
---      (_, shpos) <- NameTable.lookup idxcol leftenv
---      let joinCol shsource  = Shuffle {shop=Gather, shsource, shpos}
---      let gatheredcols = zip (map joinCol rightvecs) ralias
---      return $ leftcols ++ gatheredcols -- names are preserved.
+solve' config M.FKJoin { M.table -- can be derived rel
+               , M.references = references@(M.Table _ _) -- only unfiltered rel.
+               , M.idxcol
+               } =
+  do Env leftcols leftenv  <- solve config table
+     Env rightcols  _ <- solve config references
+     (_, (fkcol, ColInfo { count=leftcount } )) <- NameTable.lookup idxcol leftenv
+     let sright = (do (dimcolumn, ralias, ColInfo {bounds=rightbounds} ) <- rightcols -- list monad
+                      let joinedrcol  = Shuffle {shop=Gather, shsource=dimcolumn, shpos=fkcol}
+                      let colinfo = ColInfo { bounds=rightbounds, count=leftcount } -- bounds inherited from right, count from left.
+                      return (joinedrcol, ralias, colinfo))
+     return $ leftcols ++ sright
 
-
--- solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
--- \ joins with a plain table allowed)"
-
+solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
+\ joins with a plain table allowed)"
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
