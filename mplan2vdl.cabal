@@ -41,6 +41,8 @@ library
                      , text
                      , uniplate
                      , cmdargs
+                     , cassava
+                     , vector
   hs-source-dirs:      src
   default-language:    Haskell2010
   default-extensions:  NamedFieldPuns DeriveGeneric DeriveDataTypeable

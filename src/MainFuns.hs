@@ -5,7 +5,7 @@ import qualified System.Exit
 import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
 --import Text.Groom (groom)
-
+import Control.Monad(foldM)
 import Data.List.Utils (startswith)
 import Data.String.Utils (lstrip)
 
@@ -18,16 +18,29 @@ import qualified Mplan as M -- monet relational plan
 import qualified Vlite as Vl -- voodoo like language
 import qualified Vdl -- for pretty printing ./Driver readable code
 import Data.Bits
---import Data.Int
+import Data.Csv
+import Data.Int
+import qualified Data.Vector as V
+import Data.Vector()
+import Name as NameTable
+import qualified Data.ByteString.Lazy as BL
+
+type BoundsRec = (String, String, Int64, Int64, Int64)
 
 data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , grainsize :: Int
+                            , boundsfile :: String
                             } deriving (Show, Data, Typeable)
+
+addEntry :: NameTable.NameTable ColInfo -> BoundsRec -> Either String (NameTable.NameTable ColInfo)
+addEntry nametab (tab,col,colmin,colmax,colcount) =
+  NameTable.insert (Name [tab,col]) ColInfo {bounds=(colmin, colmax), count=colcount} nametab
 
 cmdTemplate :: Mplan2Vdl
 cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for foldSum/foldMax/etc (default 8192)" &= name "g"
+  , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -39,18 +52,28 @@ main = do
     then (hPutStrLn stderr "usage: need an input filename (see --help)")
          >> System.Exit.exitFailure
     else return  ()
+  if boundsfile cmdargs == []
+    then (hPutStrLn stderr "usage: need a bounds csv file (see --help)")
+         >> System.Exit.exitFailure
+    else return  ()
   let mgrainsize = grainsize cmdargs
   if (mgrainsize  < 0) || (popCount mgrainsize  /= 1)
     then (hPutStrLn stderr $ "usage: grainsize must be a power of 2 " ++  (show mgrainsize ) ++  (show . popCount) mgrainsize)
           >> System.Exit.exitFailure
     else return ()
   contents <- readFile $ mplanfile cmdargs
-  let config = Config { grainsizelg = fromInteger $ toInteger $ countTrailingZeros $ grainsize cmdargs  }
   let lins = lines contents
   let iscomment ln = (startswith "#" stripped) || ( startswith "%" stripped)
         where stripped = lstrip ln
   let cleanPlan = concat $ filter (not . iscomment) lins
-  case compile cleanPlan config of
+  boundsf <- BL.readFile $ boundsfile cmdargs
+  let mboundslist =( decode NoHeader boundsf) :: (Either String (V.Vector BoundsRec))
+  let res = (do boundslist <- mboundslist
+                colinfo <- foldM addEntry NameTable.empty boundslist
+                let config = Config { grainsizelg = fromInteger $ toInteger $ countTrailingZeros $ grainsize cmdargs
+                         , colinfo }
+                compile cleanPlan config)
+  case res of
     Left errorMessage -> fatal errorMessage
     Right result -> putStrLn $ result
 
