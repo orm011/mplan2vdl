@@ -135,18 +135,16 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve' config M.Table { M.tablename
+solve' config M.Table { M.tablename=_
                       , M.tablecolumns } =
   let r = do col <- tablecolumns -- list monad
              let colnam = fst col
-             let qnam = makeqname tablename colnam
              let alias = Just $ getname col
-             return $ do (_,info) <- getinfo qnam  -- either mnd
+             return $ do (_,info) <- getinfo colnam  -- either mnd
                          return $ (Load colnam, alias, info)
   in sequence r
   where getname (orig, Nothing) = orig
         getname (_, Just x) = x
-        makeqname (Name tab) (Name col) = Name (tab ++ col)
         getinfo n = NameTable.lookup n (colinfo config)
 
 {- Project: not dealing with ordered queries right now
