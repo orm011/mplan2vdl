@@ -338,6 +338,13 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
      return $ ( Binop { binop=Div, left=dateval, right=const_ 365 dateval}
               , ColInfo {bounds=(l `div` 365, u `div` 365), count} )
 
+--example use of isnull. In all the contexts of TPCH queries i saw, the isnull is called on
+--a column or derived column that is statically known to not be null, so we just remove that.
+{- sys.ifthenelse(sys.isnull(sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])), boolean "false", sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])) -}
+sc env (M.IfThenElse { M.if_=M.Unary { M.unop=M.IsNull
+                                     , M.arg=oper1 } , M.then_=M.IntLiteral 0, M.else_=oper2 } )=
+  do check (oper1,oper2) (\(a,b) -> a == b) "different use of isnull than expected"
+     sc env oper1 --just return the guarded operator.
 
 -- note: for max and min, the actual possible bounds are more restrictive.
 -- for now, I don't care.
