@@ -119,6 +119,16 @@ makeEnv lst =
         maybeadd env (vexp, Just newalias, sz) =
           NameTable.insert newalias (vexp,sz) env
 
+makeEnvWeak :: [(Vexp, Maybe Name, ColInfo)] -> Env
+makeEnvWeak lst =
+  let tbl = makeTable lst
+  in Env lst tbl
+  where makeTable pairs = foldl' maybeadd NameTable.empty pairs
+        maybeadd env (_, Nothing, _) = env
+        maybeadd env (vexp, Just newalias, sz) =
+          NameTable.insertWeak newalias (vexp,sz) env
+
+
 {- helper function that makes a lookup table from the output of a previous
 operator. the lookup table loses information about the anonymous outputs
 of the operator, so it only makes sense to use this in internal nodes
@@ -174,6 +184,8 @@ project (...) [ foo, bar as bar2, sum(bar, baz) as sumbaz, sum(bar, bar) ]
 For the consumer to be able to see all relevant columns, we need
 to solve the cases like this:
 
+Note: a name is within scope starting from its position in the output list.
+
 1) despite not having an 'as' keyword, foo should produce
 (Vexprfoo, Just foo)
 2) for bar, the alias is explicit:
@@ -185,11 +197,27 @@ but could be the topmost result, so we must return it as well.
 as (vexpr .., Nothing)
 -}
 solve' config M.Project { M.child, M.projectout, M.order = [] } =
-  do env <- solve config child -- either monad
-     let r = (do arg@(expr, _)  <- projectout -- list monad
-                 return $ do (vexpr,info) <- fromScalar env expr --either monad
-                             return (vexpr, outputName arg , info))
-     sequence r
+  do (Env list0 _) <- solve config child -- either monad -- used for reading
+     (_ , solved) <- foldM foldFun (list0,[]) projectout
+     return $ solved
+     where addEntry (list0, acclist) tup = (list0, tup : acclist) -- adds output to acclist
+           foldFun lsts@(list0, acclist) arg@(expr, _) =
+             do asenv <- return $ makeEnvWeak $ list0 ++ acclist-- use both lists for name resolution
+                 -- allow collisions b/c they do happen .
+                (vexpr,info) <- fromScalar asenv expr --either monad
+                return $ addEntry lsts (vexpr, outputName arg, info)
+           -- solveForward nt (M.Ref col, malias) = do (_, (x,y) ) <- NameTable.lookup col nt
+           --                                          return (case malias of
+           --                                                     Nothing -> (x, Just col, y)
+           --                                                     Just alias -> (x, Just alias, y))
+           -- solveForward _ _ = Left $ "this input is not a forward"
+
+
+-- problem:
+-- n2.n_name as all_nations.nation defined then directly uesd in a subsequent expression. not found.
+-- L2 as L2.L2 used to redefined L2.L2 from a sub-output (name clash on L2.L2) then not used
+-- in the  same project list, but using naive a
+
 
 {- the easy group by case: static single group -}
 solve' config M.GroupBy { M.child,

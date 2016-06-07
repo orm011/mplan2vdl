@@ -2,6 +2,7 @@ module Name (Name(..)
             ,NameTable {-only export the ADT -}
             ,empty
             ,insert
+            ,insertWeak
             ,lookup) where
 
 import Data.String.Utils(join)
@@ -79,3 +80,9 @@ insert n@(Name lst) val (NameTable nt) =
   case Map.lookup reversed nt of
     Just  _ -> Left $ printf "Scope %s already has %s" sc $ show n
     Nothing -> Right $ NameTable $ Map.insert reversed val nt
+
+-- does not check for collisions.
+insertWeak :: Name -> v -> NameTable v -> NameTable v
+insertWeak (Name lst) val (NameTable nt) =
+  let reversed = reverse lst
+      in NameTable $ Map.insert reversed val nt
