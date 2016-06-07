@@ -148,7 +148,7 @@ data ScalarExpr =
 instance NFData ScalarExpr
 
 
-data GroupAgg = Sum ScalarExpr | Avg ScalarExpr | Count
+data GroupAgg = GSum ScalarExpr | GAvg ScalarExpr | GMax ScalarExpr | GCount
   deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
@@ -178,15 +178,15 @@ ghelper P.Expr
   , P.alias }
   = do inner <- sc singlearg
        case fname of
-         Name ["sum"] -> return ([], [(Sum inner, alias)])
-         Name ["avg"] -> return ([], [(Avg inner, alias)])
+         Name ["sum"] -> return ([], [(GSum inner, alias)])
+         Name ["avg"] -> return ([], [(GAvg inner, alias)])
          _ -> Left $ E.unexpected  "unary aggregate" fname
 
 ghelper  P.Expr
   { P.expr = P.Call { P.fname=Name ["count"]
                     , P.args=[] }
   , P.alias }
-  = Right ([], [(Count, alias)] )
+  = Right ([], [(GCount, alias)] )
 
 
 ghelper s_ = Left $ E.unexpected "group_by output expression" s_

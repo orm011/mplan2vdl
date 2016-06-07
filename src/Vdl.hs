@@ -25,6 +25,7 @@ data Voodoo =
   Load Name
   | Project { outname::Name , inname::Name, vec :: Voodoo } -- full rename only. used right after load
   | Range { rmin::Int64, rstep::Int64, rvec :: Voodoo }
+  | RangeC {rmin::Int64, rstep::Int64, rcount::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodoo
@@ -50,6 +51,8 @@ data Voodop =
   | FoldMin
   | FoldCount
   | Gather
+  | Scatter
+  | Partition
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodop
 
@@ -59,6 +62,7 @@ instance NFData Voodop
 size :: Voodoo -> (Int, Int)
 size (Load _) = (1,1)
 size (Range _ _ _) = (1,1)
+size (RangeC _ _ _) = (1,1)
 size (Project _ _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
 size (Binary _ ch1 ch2) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
 
@@ -121,6 +125,10 @@ voodooFromVexp (V.Range {V.rmin, V.rstep, V.rref}) =
   do v <- voodooFromVexp rref
      return $ Range {rmin, rstep, rvec=v}
 
+voodooFromVexp (V.RangeC {V.rmin, V.rstep, V.rcount}) =
+  return $ RangeC {rmin, rstep, rcount }
+
+
 voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
   do l <- voodooFromVexp left
      r <- voodooFromVexp right
@@ -146,6 +154,7 @@ voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
      positions <- voodooFromVexp shpos
      case shop of
        V.Gather -> Right $ Binary { op=Gather, arg1=input, arg2=positions }
+       V.Scatter -> Right $ Binary { op=Scatter, arg1=input, arg2=positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
 voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
@@ -157,6 +166,11 @@ voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
        V.FSel -> return $ Binary { op=FoldSelect, arg1, arg2 }
        s_ -> Left $ E.unexpected "fold operator" s_
 
+voodooFromVexp (V.Partition {V.pdata, V.pivots}) =
+  do arg1 <- voodooFromVexp pdata
+     arg2 <- voodooFromVexp pivots
+     return $ Binary {op=Partition, arg1, arg2 }
+
 voodooFromVexp s_ = Left $ "implement me: " ++ show s_
 
 {- the difference now is that
@@ -166,6 +180,7 @@ data Vref  =
   VLoad Name
   | VProject { voutname::Name , vinname::Name, vvec :: Int } -- full rename only.
   | VRange  { vrmin :: Int64, vrstep :: Int64, vrvec :: Int }
+  | VRangeC  { vrmin :: Int64, vrstep :: Int64, vrcount :: Int64 }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
   deriving (Eq,Show,Generic)
 instance NFData Vref
@@ -207,9 +222,14 @@ vrefFromVoodoo :: State -> Voodoo -> Either String (State, Vref)
 
 vrefFromVoodoo state (Load n) = return $ (state, VLoad n)
 
+vrefFromVoodoo state (RangeC  { rmin , rstep, rcount })=
+  return $ (state, VRangeC {vrmin=rmin, vrstep=rstep, vrcount=rcount})
+
 vrefFromVoodoo state (Range  { rmin , rstep, rvec  }) =
   do (state', n') <- memVrefFromVoodoo state rvec
      return $ (state', VRange { vrmin=rmin, vrstep=rstep, vrvec=n' })
+
+
 
 vrefFromVoodoo state (Project {outname, inname, vec}) =
   do (state', n') <- memVrefFromVoodoo state vec
@@ -238,9 +258,13 @@ toList (VRange { vrmin, vrstep, vrvec }) =
   since backend only materializes what's needed -}
   ["RangeV", "val", show vrmin, "Id " ++ show vrvec, show vrstep]
 
+toList (VRangeC { vrmin, vrstep, vrcount }) =
+  ["RangeC", "val", show vrmin, show vrcount, show vrstep]
+
 toList (VBinary { vop, varg1, varg2}) =
   case vop of
     Gather -> [svop, id1, id2, "val"]
+    Scatter -> [svop, id1, id2, "val"]
     _ ->      [svop, "val", id1, "val", id2, "val" ]
   where svop = show vop
         id1 = "Id " ++ show varg1

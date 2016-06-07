@@ -100,6 +100,11 @@ vexpsFromMplan r c  =
      return $ map pickfs a
      where pickfs (_1,_2,_) = (_1,_2)
 
+outputName :: (M.ScalarExpr, Maybe Name) -> Maybe Name
+outputName (_, Just alias) = Just alias {-alias always wins-}
+outputName ((M.Ref orig), Nothing) = Just orig {-anon still has name if ref-}
+outputName _ = Nothing
+
 -- the table only includes list elements that have a name
 -- we also include metadata about the column, such as an
 -- upper bound value in it.
@@ -181,17 +186,10 @@ as (vexpr .., Nothing)
 -}
 solve' config M.Project { M.child, M.projectout, M.order = [] } =
   do env <- solve config child -- either monad
-     let r = (do (expr, malias)  <- projectout -- list monad
-                 let originalname = maybeGetName expr
-                 let outputname = solveName (originalname, malias)
+     let r = (do arg@(expr, _)  <- projectout -- list monad
                  return $ do (vexpr,info) <- fromScalar env expr --either monad
-                             return (vexpr, outputname, info))
+                             return (vexpr, outputName arg , info))
      sequence r
-  where maybeGetName (M.Ref orig) = Just orig
-        maybeGetName _ = Nothing
-        solveName (_, Just alias) = Just alias {-alias always wins-}
-        solveName (Just some, Nothing) = Just some
-        solveName _ = Nothing
 
 {- the easy group by case: static single group -}
 solve' config M.GroupBy { M.child,
@@ -207,12 +205,16 @@ solve' config M.GroupBy { M.child,
 {-group by one column-}
 solve' config M.GroupBy { M.child,
                           M.inputkeys=[keyname], -- single input key for now.
-                          M.outputkeys=[], -- deal with output keys later
+                          M.outputkeys=[(keyname2,malias)], -- same output key as input.
                           M.outputaggs } =
   do  env  <- solve config child --either monad
-      sequence $ (do (agg, alias) <- outputaggs -- list monad
+      check (keyname, keyname2) (\(a,b) -> a == b) "outputkey /== inputkey"
+      let fakeout = M.GMax (M.Ref keyname) -- all keys in the group are equal
+      let skey  = (fakeout, outputName (M.Ref keyname, malias))
+      let alloutputs = skey : outputaggs
+      sequence $ (do (agg, alias) <- alloutputs -- list monad
                      return ( do (sagg, agginfo)  <- solveAgg config env (Just keyname) agg
-                                 -- either monad
+                                   -- either monad
                                  return (sagg, alias, agginfo)))
 
 solve' _ (M.GroupBy _ _ _ _) =
@@ -350,32 +352,38 @@ sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 solveAgg :: Config -> Env -> Maybe Name -> M.GroupAgg -> Either String (Vexp, ColInfo)
 
 -- average case dealt with by rewriting
-solveAgg config env mkey (M.Avg expr) =
-  do (sums, ColInfo {bounds=(suml,sumu), count=countsums}) <- solveAgg config env mkey (M.Sum expr)
-     (counts, ColInfo {bounds=(cl,_), count=countc}) <- solveAgg config env mkey M.Count
+solveAgg config env mkey (M.GAvg expr) =
+  do (sums, ColInfo {bounds=(suml,sumu), count=countsums}) <- solveAgg config env mkey (M.GSum expr)
+     (counts, ColInfo {bounds=(cl,_), count=countc}) <- solveAgg config env mkey M.GCount
      check (countsums,countc) (\(a,b) -> a == b) "counts should match"
      check cl (== 1) "minimum count is always 1"
      return $ ( Binop { binop=Div, left=sums, right=counts }
               , ColInfo {bounds=(suml,sumu), count=countc } ) -- bc counts can be 1
 
 -- non avg. aggregates
+-- TODO: trival groups don't need a partition/scatter (catch that case)
 solveAgg _ env mkey agg =
-  do (fgroups, groupcount) <- (case mkey of -- maybe monad
-                                  Nothing -> Right $ (zeros_ refv, 1)
-                                  Just key -> makeGroups key)
-     (fdata, foldop, bounds) <- groupData agg
+  do (keys, scattermask, groupcount) <- (case mkey of -- maybe monad
+                                               Nothing -> Right $ (zeros_ refv, pos_ refv, 1) -- identity scatter
+                                               Just key -> scatterMask key)
+     (sdata, foldop, bounds) <- groupData agg
+     let fdata = Shuffle { shop=Scatter, shpos = scattermask, shsource=sdata }
+     let fgroups = Shuffle { shop=Scatter, shpos = scattermask, shsource=keys }
      return $ (Fold {foldop, fgroups, fdata}, ColInfo { bounds, count=groupcount })
   where Env lst nt = env
         (refv,_,_) = head lst -- assured non empty
-        makeGroups keyname =
-          do (_, (keyvec, ColInfo {bounds=(rmin,u)})) <- NameTable.lookup keyname nt
+        scatterMask groupkey  =
+          do (_, (keyvec, ColInfo {bounds=(rmin,u)})) <- NameTable.lookup groupkey nt
              let rcount = u - rmin + 1 -- bounds number of output groups
              let pivots = RangeC { rmin , rcount, rstep = 1 }
-             return $ (Partition { pivots, pdata=keyvec }, rcount)
-        groupData (M.Sum expr) =
+             return $ (keyvec, Partition { pivots, pdata=keyvec }, rcount)
+        groupData (M.GSum expr) =
           do (r, ColInfo (lower,upper) cnt)  <- sc env expr
              return $ (r, FSum, (cnt*lower, cnt*upper))
-        groupData M.Count =
+        groupData (M.GMax expr) =
+          do (r, ColInfo bounds _) <- sc env expr
+             return $ (r, FMax, bounds) -- bounds are preserved
+        groupData M.GCount =
           Right $ (ones_ refv, FSum, (1,1))
         groupData ow_ =  Left $ E.todo "aggregate" ow_
 
