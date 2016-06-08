@@ -335,13 +335,21 @@ sc env (M.Binop { M.binop, M.left, M.right }) =
                    M.Gt -> Right (0,1)
                    M.Lt -> Right (0,1)
                    M.Eq -> Right (0,1)
-                   M.Add -> Right (l1 + l2, u1 + u2)
+                   M.Neq -> Right (0,1)
+                   M.Geq -> Right (0,1)
                    M.Leq -> Right (0,1)
                    M.LogAnd -> Right (0,1)
+                   M.LogOr -> Right (0,1)
+                   M.Add -> Right (l1 + l2, u1 + u2)
                    M.Sub -> Right (l1 - u2, u1 - l2) -- notice swap
                    M.Mul -> let allpairs = sequence [[l1,u1],[l2,u2]] -- cross product
                                 prods = map (foldl (*) 1) allpairs
                             in Right (minimum prods, maximum prods) -- TODO double check reasoning here.
+                   M.Div -> let allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
+                                divs = map (\(x,y) -> x `div` y) allpairs
+                            in Right (minimum divs, maximum divs) -- TODO double check reasoning here.
+                   M.Min -> Right (min l1 l2, min u1 u2) -- this is true, right?
+                   M.Max -> Right (max l1 l2, max u1 u2)
                    ow_ -> Left $ E.todo "bounds for other operators" ow_
                )
      return $ ( Binop { binop, left=l, right=r }

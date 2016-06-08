@@ -117,7 +117,9 @@ resolveBinopOpcode nm =
     Name ["sql_max"] -> Right Max
     Name ["="] -> Right Eq
     Name ["or"] -> Right LogOr
+    Name ["and"] -> Right LogAnd
     Name [">"] -> Right Gt
+    Name ["<>"] -> Right Neq
     _ -> Left $ E.unexpected "binary function" nm
 
 
