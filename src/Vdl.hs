@@ -4,7 +4,7 @@ import Control.Monad(foldM)
 import Name(Name(..))
 import Data.Int
 import Debug.Trace
-import Text.Groom
+--import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join)
 import Control.DeepSeq(NFData)
@@ -27,11 +27,15 @@ data Voodoo =
   | Range { rmin::Int64, rstep::Int64, rvec :: Voodoo }
   | RangeC {rmin::Int64, rstep::Int64, rcount::Int64 }
   | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
+  | Scatter { scattersource::Voodoo, scatterfold::Voodoo, scatterpos::Voodoo }
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodoo
 
 const_ :: Int64 -> Voodoo -> Voodoo
 const_ k v  = Range { rmin=k, rstep=0, rvec=v }
+
+pos_ :: Voodoo -> Voodoo
+pos_ v  = Range { rmin=0, rstep=1, rvec=v }
 
 data Voodop =
   LogicalAnd
@@ -51,7 +55,6 @@ data Voodop =
   | FoldMin
   | FoldCount
   | Gather
-  | Scatter
   | Partition
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodop
@@ -61,6 +64,7 @@ instance NFData Voodop
 
 size :: Voodoo -> (Int, Int)
 size (Load _) = (1,1)
+size (Scatter ch1 ch2 ch3) = let (a,b) = (size ch1) .^. (size ch2) .^. (size ch3) in (a + 1, b + 1)
 size (Range _ _ _) = (1,1)
 size (RangeC _ _ _) = (1,1)
 size (Project _ _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
@@ -150,11 +154,12 @@ voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
        _ -> Left $ "binop not implemented: " ++ show binop
 
 voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
-  do input <- voodooFromVexp shsource
+  do source <- voodooFromVexp shsource
      positions <- voodooFromVexp shpos
      case shop of
-       V.Gather -> Right $ Binary { op=Gather, arg1=input, arg2=positions }
-       V.Scatter -> Right $ Binary { op=Scatter, arg1=input, arg2=positions }
+       V.Gather -> Right $ Binary { op=Gather, arg1=source, arg2=positions }
+       V.Scatter -> let scatterfold = pos_ source
+                        in Right $ Scatter { scattersource=source, scatterfold, scatterpos=positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
 voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
@@ -182,6 +187,7 @@ data Vref  =
   | VRange  { vrmin :: Int64, vrstep :: Int64, vrvec :: Int }
   | VRangeC  { vrmin :: Int64, vrstep :: Int64, vrcount :: Int64 }
   | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
+  | VScatter { vscatterpos :: Int, vscatterfold::Int, vscattersource ::Int }
   deriving (Eq,Show,Generic)
 instance NFData Vref
 
@@ -229,7 +235,11 @@ vrefFromVoodoo state (Range  { rmin , rstep, rvec  }) =
   do (state', n') <- memVrefFromVoodoo state rvec
      return $ (state', VRange { vrmin=rmin, vrstep=rstep, vrvec=n' })
 
-
+vrefFromVoodoo state (Scatter {scattersource, scatterfold, scatterpos }) =
+  do (state', n') <- memVrefFromVoodoo state scattersource
+     (state'', n'') <- memVrefFromVoodoo state' scatterfold
+     (state''', n''') <- memVrefFromVoodoo state'' scatterpos
+     return $ (state''', VScatter {vscattersource=n', vscatterfold=n'', vscatterpos=n'''})
 
 vrefFromVoodoo state (Project {outname, inname, vec}) =
   do (state', n') <- memVrefFromVoodoo state vec
@@ -241,7 +251,6 @@ vrefFromVoodoo state (Binary { op , arg1 , arg2 }) =
      (state'', n2) <- memVrefFromVoodoo state' arg2
      return $ (state'', VBinary {vop=op, varg1=n1, varg2=n2})
 
-vrefFromVoodoo _ s_ = Left $ "you need to implement: " ++ groom s_
 
 {- now a list of strings -}
 toList :: Vref -> [String]
@@ -264,11 +273,16 @@ toList (VRangeC { vrmin, vrstep, vrcount }) =
 toList (VBinary { vop, varg1, varg2}) =
   case vop of
     Gather -> [svop, id1, id2, "val"]
-    Scatter -> [svop, id1, id2, "val"]
     _ ->      [svop, "val", id1, "val", id2, "val" ]
   where svop = show vop
         id1 = "Id " ++ show varg1
         id2 = "Id " ++ show varg2
+
+toList (VScatter { vscattersource, vscatterfold, vscatterpos } ) =
+  ["Scatter", id1, id2, "val", id3, "val"]
+  where id1 = "Id " ++ show vscattersource
+        id2 = "Id " ++ show vscatterfold
+        id3 = "Id " ++ show vscatterpos
 
 toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 
