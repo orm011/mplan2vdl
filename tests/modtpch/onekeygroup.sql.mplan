@@ -1,0 +1,10 @@
+#plan select n_regionkey, sum(n_nationkey) from nation group by n_regionkey;
+% .plan # table_name
+% rel # name
+% clob # type
+% 140 # length
+project (
+| group by (
+| | table(sys.nation) [ nation.n_nationkey NOT NULL HASHCOL , nation.n_regionkey NOT NULL ] COUNT 
+| ) [ nation.n_regionkey NOT NULL ] [ nation.n_regionkey NOT NULL, sys.sum no nil (nation.n_nationkey NOT NULL HASHCOL ) NOT NULL as L1.L1 ]
+) [ nation.n_regionkey NOT NULL, L1 NOT NULL as L1.L1 ]
