@@ -114,6 +114,9 @@ a /. b = Binary { op=Divide, arg1=a, arg2=b }
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
 cond ?. (a,b) = ((const_ 1 a  -. negcond) *. a) +. (negcond *. b)
   where negcond = (cond ==. const_ 0 a)
+
+(!=.) :: Voodoo -> Voodoo -> Voodoo
+a !=. b = (const_ 1 a) -. (a ==. b)
 -- NOTE: check needed to make sure we
 -- only have 0 or 1 in the multiplication.
 
@@ -151,6 +154,7 @@ voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
        V.LogOr -> Right $ (l ||. r)
        V.Div -> Right $ (l /. r)
        V.BitShift -> Right $  (l >>. r)
+       V.Neq -> Right $ (l !=. r)
        _ -> Left $ "binop not implemented: " ++ show binop
 
 voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
