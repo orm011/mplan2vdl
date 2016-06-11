@@ -347,6 +347,14 @@ solve P.Node { P.relop } = Left $ E.unexpected "relational operator not implemen
 sc :: P.ScalarExpr -> Either String ScalarExpr
 sc P.Ref { P.rname  } = Right $ Ref rname
 
+
+-- TODO: doublecheck this is correct
+-- (see query 17 for an example plan using it)
+sc P.Call { P.fname=Name ["identity"]
+          , P.args = [ P.Expr { P.expr } ]
+          } = -- rewrite into just inner expression
+  sc expr
+
 {- for now, we are ignoring the aliases within calls -}
 sc P.Call { P.fname, P.args = [ P.Expr { P.expr = singlearg, P.alias = _ } ] } =
   do sub <- sc singlearg
