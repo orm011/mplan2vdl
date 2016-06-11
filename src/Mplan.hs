@@ -349,8 +349,7 @@ solve P.Node { P.relop = "top N"
      child <- solve ch
      return $ TopN { child , n }
 
-solve s_ = Left $ E.unexpected " case not implemented:  " s_
-
+solve P.Node { P.relop } = Left $ E.unexpected "relational operator not implemented" relop
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
 sc :: P.ScalarExpr -> Either String ScalarExpr
@@ -461,7 +460,10 @@ sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
 
 sc (P.Nested exprs) = conjunction exprs
 
-sc s_ = Left $ E.unexpected "scalar" s_
+sc P.Filter { P.oper } =
+   Left $ E.unexpected "operator" oper
+
+sc s_ = Left $ E.unexpected "scalar operator" s_
 
 {- converts a list into ANDs -}
 conjunction :: [P.Expr] -> Either String ScalarExpr

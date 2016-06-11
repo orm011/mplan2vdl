@@ -245,9 +245,15 @@ solve' config M.GroupBy { M.child,
                                    -- either monad
                                  return (sagg, alias, agginfo)))
 
+
+solve' _ arg@M.GroupBy { M.child=_,
+                          M.inputkeys=[_], -- single input key for now.
+                          M.outputkeys=_, --output columns
+                          M.outputaggs=_ } =
+  Left $ E.unexpected "only able to compile aggregates one outputkey" arg
+
 solve' _ (M.GroupBy _ _ _ _) =
-  Left $ "only able to compile aggregates with no data\
-         \dependent grouping right now "
+  Left $ "only able to compile aggregates with at most one group by column"
 
 {-direct, foreign key join of two tables.
 for now, this join assumes but does not check
