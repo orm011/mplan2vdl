@@ -225,7 +225,7 @@ solve' config M.GroupBy { M.child,
                           M.outputaggs } =
   do env  <- solve config child --either monad
      sequence $ (do (agg, alias) <- outputaggs -- list monad
-                    return ( do (sagg, agginfo)  <- solveAgg config env Nothing agg
+                    return ( do (sagg, agginfo)  <- solveAgg config env [] agg
                                 -- either monad
                                 return (sagg, alias, agginfo)))
 
@@ -235,10 +235,9 @@ solve' config M.GroupBy { M.child,
                           M.outputaggs } =
   do  env  <- solve config child --either monad
       sequence $ (do (agg, alias) <- outputaggs -- list monad
-                     return ( do (sagg, agginfo)  <- solveAgg config env (Just keyname) agg
+                     return ( do (sagg, agginfo)  <- solveAgg config env [keyname] agg
                                    -- either monad
                                  return (sagg, alias, agginfo)))
-
 
 solve' _ arg@M.GroupBy { M.child=_,
                           M.inputkeys=[_], -- single input key for now.
@@ -391,7 +390,7 @@ sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
 
 sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
-solveAgg :: Config -> Env -> Maybe Name -> M.GroupAgg -> Either String (Vexp, ColInfo)
+solveAgg :: Config -> Env -> [Name] -> M.GroupAgg -> Either String (Vexp, ColInfo)
 
 -- average case dealt with by rewriting
 solveAgg config env mkey (M.GAvg expr) =
@@ -412,8 +411,9 @@ solveAgg config env mkey (M.GDominated nm) =
 -- TODO: trival groups don't need a partition/scatter (catch that case)
 solveAgg _ env mkey agg =
   do (keys, scattermask, groupcount) <- (case mkey of -- maybe monad
-                                               Nothing -> Right $ (zeros_ refv, pos_ refv, 1) -- identity scatter
-                                               Just key -> scatterMask key)
+                                               [] -> Right $ (zeros_ refv, pos_ refv, 1) -- identity scatter
+                                               [key] -> scatterMask key
+                                               _ -> Left "not supported")
      (sdata, foldop, bounds) <- groupData agg
      let fdata = Shuffle { shop=Scatter, shpos = scattermask, shsource=sdata }
      let fgroups = Shuffle { shop=Scatter, shpos = scattermask, shsource=keys }
