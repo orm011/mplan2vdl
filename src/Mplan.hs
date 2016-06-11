@@ -149,27 +149,27 @@ data ScalarExpr =
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
-
-data GroupAgg = GSum ScalarExpr | GAvg ScalarExpr | GMax ScalarExpr | GCount
+data GroupAgg = GDominated Name |  GSum ScalarExpr | GAvg ScalarExpr | GMax ScalarExpr | GCount
   deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
-solveGroupOutputs :: [P.Expr] -> Either String ([(Name, Maybe Name)], [(GroupAgg, Maybe Name)])
+solveGroupOutput :: P.Expr -> Either String (GroupAgg, Maybe Name)
 
-solveGroupOutputs exprs =
-  do sifted <- sequence $ map ghelper exprs
-     return $ foldl' mappend ([],[]) sifted
-
-{- sifts out key lists to the first meber,
- and aggregates to the second  -}
-ghelper  :: P.Expr -> Either String ([(Name, Maybe Name)], [(GroupAgg, Maybe Name)])
-
-ghelper P.Expr
+solveGroupOutput P.Expr
   { P.expr = P.Ref {P.rname} {- output key -}
   , P.alias }
-  = Right ([(rname, alias)], [])
+  = let outname = case alias of
+          Nothing -> Just rname
+          Just _ -> alias
+    in Right $ (GDominated rname, outname)
 
-ghelper P.Expr
+solveGroupOutput P.Expr
+  { P.expr = P.Call { P.fname=Name ["count"]
+                    , P.args=[] }
+  , P.alias }
+  = Right $ (GCount, alias)
+
+solveGroupOutput P.Expr
   { P.expr = P.Call { P.fname
                     , P.args=[ P.Expr
                                { P.expr=singlearg,
@@ -180,18 +180,11 @@ ghelper P.Expr
   , P.alias }
   = do inner <- sc singlearg
        case fname of
-         Name ["sum"] -> return ([], [(GSum inner, alias)])
-         Name ["avg"] -> return ([], [(GAvg inner, alias)])
+         Name ["sum"] -> Right $ (GSum inner, alias)
+         Name ["avg"] -> Right $ (GAvg inner, alias)
          _ -> Left $ E.unexpected  "unary aggregate" fname
 
-ghelper  P.Expr
-  { P.expr = P.Call { P.fname=Name ["count"]
-                    , P.args=[] }
-  , P.alias }
-  = Right ([], [(GCount, alias)] )
-
-
-ghelper s_ = Left $ E.unexpected "group_by output expression" s_
+solveGroupOutput  s_ = Left $ E.unexpected "group_by output expression" s_
 
 
 data RelExpr =
@@ -206,8 +199,7 @@ data RelExpr =
               , predicate :: ScalarExpr
               }
   | GroupBy   { child :: RelExpr
-              , inputkeys :: [Name] --could it be expr?
-              , outputkeys :: [(Name, Maybe Name)] -- should be exprs?
+              , inputkeys :: [Name]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
   | FKJoin    { table :: RelExpr
@@ -289,8 +281,8 @@ solve P.Node { P.relop = "group by"
              } =
   do child <- solve ch
      inputkeys <- sequence $ map extractKey igroupkeys
-     (outputkeys, outputaggs) <- solveGroupOutputs igroupvalues
-     return $ GroupBy {child, inputkeys, outputkeys, outputaggs}
+     outputaggs  <- mapM solveGroupOutput igroupvalues
+     return $ GroupBy {child, inputkeys, outputaggs}
        where extractKey P.Expr { P.expr = P.Ref { P.rname }
                                , P.alias = Nothing } = Right rname
              extractKey e_ =

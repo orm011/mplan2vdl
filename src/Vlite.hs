@@ -222,7 +222,6 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
 {- the easy group by case: static single group -}
 solve' config M.GroupBy { M.child,
                           M.inputkeys=[],
-                          M.outputkeys=[],
                           M.outputaggs } =
   do env  <- solve config child --either monad
      sequence $ (do (agg, alias) <- outputaggs -- list monad
@@ -233,14 +232,9 @@ solve' config M.GroupBy { M.child,
 {-group by one column-}
 solve' config M.GroupBy { M.child,
                           M.inputkeys=[keyname], -- single input key for now.
-                          M.outputkeys=[(keyname2,malias)], -- same output key as input.
                           M.outputaggs } =
   do  env  <- solve config child --either monad
-      check (keyname, keyname2) (\(a,b) -> a == b) "outputkey /== inputkey"
-      let fakeout = M.GMax (M.Ref keyname) -- all keys in the group are equal
-      let skey  = (fakeout, outputName (M.Ref keyname, malias))
-      let alloutputs = skey : outputaggs
-      sequence $ (do (agg, alias) <- alloutputs -- list monad
+      sequence $ (do (agg, alias) <- outputaggs -- list monad
                      return ( do (sagg, agginfo)  <- solveAgg config env (Just keyname) agg
                                    -- either monad
                                  return (sagg, alias, agginfo)))
@@ -248,11 +242,10 @@ solve' config M.GroupBy { M.child,
 
 solve' _ arg@M.GroupBy { M.child=_,
                           M.inputkeys=[_], -- single input key for now.
-                          M.outputkeys=_, --output columns
                           M.outputaggs=_ } =
   Left $ E.unexpected "only able to compile aggregates one outputkey" arg
 
-solve' _ (M.GroupBy _ _ _ _) =
+solve' _ (M.GroupBy _ _ _) =
   Left $ "only able to compile aggregates with at most one group by column"
 
 {-direct, foreign key join of two tables.
@@ -408,6 +401,12 @@ solveAgg config env mkey (M.GAvg expr) =
      check cl (== 1) "minimum count is always 1"
      return $ ( Binop { binop=Div, left=sums, right=counts }
               , ColInfo {bounds=(suml,sumu), count=countc } ) -- bc counts can be 1
+
+
+-- all keys in a column dominated by groups are equal to their max
+-- so deal with this as if it were a max
+solveAgg config env mkey (M.GDominated nm) =
+  solveAgg config env mkey (M.GMax (M.Ref nm))
 
 -- non avg. aggregates
 -- TODO: trival groups don't need a partition/scatter (catch that case)
