@@ -52,12 +52,12 @@ cmdTemplate = Mplan2Vdl
 main :: IO ()
 main = do
   cmdargs <- cmdArgs cmdTemplate
-  let action= if dot cmdargs then
-                emitdot else compile
   if mplanfile cmdargs == []
     then (hPutStrLn stderr "usage: need an input filename (see --help)")
          >> System.Exit.exitFailure
     else return  ()
+  let action= if dot cmdargs then
+                (emitdot $ mplanfile cmdargs) else compile
   if boundsfile cmdargs == []
     then (hPutStrLn stderr "usage: need a bounds csv file (see --help)")
          >> System.Exit.exitFailure
@@ -89,12 +89,12 @@ fatal message = do
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
 
-emitdot :: String -> Config -> Either String String
-emitdot planstring config =
+emitdot :: String -> String -> Config -> Either String String
+emitdot qname planstring config =
   do parseTree <- case TP.fromString planstring config of
        Left err -> Left $ "(at Parse stage)" ++ err
        other -> other
-     return $ Dot.toDotString "query" parseTree
+     return $ Dot.toDotString qname parseTree
 
 compile :: String -> Config -> Either String String
 compile planstring config =

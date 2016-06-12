@@ -39,8 +39,8 @@ fromTRelToDot :: TRel -> Dot
 fromTRelToDot r = snd $ toDot 0 r
 
 fromDotToDotString :: String -> Dot -> String
-fromDotToDotString _ (Dot labels edges) =
-  let prologue = [printf "digraph foo {"]
+fromDotToDotString gname (Dot labels edges) =
+  let prologue = [printf "digraph \"%s\" {" gname ]
       epilogue = ["}"]
       printnodelabel (n, labelname, _) =
         printf "%d [ label = \"[%d] %s\" ]" n n labelname
