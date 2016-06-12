@@ -5,8 +5,8 @@ import Name ()
 import Data.List(foldl')
 import Text.Printf (printf)
 import Data.String.Utils(join,replace)
-import Data.List.NonEmpty
-import Prelude hiding (map,last)
+import Data.List.NonEmpty 
+import Prelude hiding (map,last,reverse)
 import qualified Prelude as P
 
 --import Debug.Trace
@@ -29,7 +29,7 @@ toDot n (TNode { relop, children, arg_lists }) =
         in ans
       initial = (n+1, [], (n,relop,firststr):|[], [])
       (n', childids, acclabels, accedges) = foldl' merge initial children
-      chedges = P.map (\ch -> (n,ch)) childids
+      chedges = P.map (\ch -> (n,ch)) (P.reverse childids) -- the fold has reversed them
   in (n', Dot acclabels (chedges ++ accedges))
 
 
@@ -40,17 +40,20 @@ fromTRelToDot r = snd $ toDot 0 r
 
 fromDotToDotString :: String -> Dot -> String
 fromDotToDotString _ (Dot labels edges) =
-  let before = printf "digraph foo {"
-      after = "}"
-      printlabel (n,labelname,attrstr) =
+  let prologue = [printf "digraph foo {"]
+      epilogue = ["}"]
+      printnodelabel (n, labelname, _) =
+        printf "%d [ label = \"[%d] %s\" ]" n n labelname
+      printnodemeta (n, _, attrstr) =
         let attrnode = (show n) ++ "00000" -- hack to avoid node node collision
-            stmts = [ printf "%d [ label = \"%s\" ]" n labelname
-                    , printf "%s [ label=\"%s\" shape = \"box\" color=\"blue\" ]" attrnode (replace "\"" "" attrstr)
-                    , printf "%d -> %s [style=\"dotted\" color=\"blue\"]" n attrnode
-                    ]
-        in join "\n" stmts
+        in ( printf "%s [ label=\"%s\" shape = \"box\" color=\"blue\" ]" attrnode (replace "\"" "" attrstr)
+           , printf "%d -> %s [style=\"dotted\" color=\"blue\"]" n attrnode
+           )
       printedge (a,b) = printf "%d -> %d" a b
-      alllines = [before] ++ (P.map printlabel (toList labels)) ++ (P.map printedge edges) ++ [after]
+      operlabels = P.map printnodelabel (P.reverse $ toList labels)
+      (metalabels,metaedges) = P.unzip (P.map printnodemeta $ toList labels)
+      operedges = (P.map printedge edges)
+      alllines = foldl' (++) [] [prologue, metalabels, operlabels, metaedges, operedges, epilogue]
   in  join "\n" alllines
 
 toDotString :: String -> TRel -> String
