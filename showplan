@@ -1,2 +1,2 @@
 #! /bin/bash
-./mplan2vdl --dot -b ./tests/bounds_file.csv $1  | dot -Tpdf > $(basename $1).pdf
+(./mplan2vdl --dot -b ./tests/bounds_file.csv $1  | dot -Tpdf > /tmp/$(basename $1).pdf)  && evince /tmp/$(basename $1).pdf
