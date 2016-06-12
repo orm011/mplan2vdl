@@ -32,7 +32,7 @@ type BoundsRec = (String, String, Int64, Int64, Int64)
 data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , grainsize :: Int
                             , boundsfile :: String
-                            , justdot :: Bool
+                            , dot :: Bool
                             } deriving (Show, Data, Typeable)
 
 addEntry :: NameTable.NameTable ColInfo -> BoundsRec -> Either String (NameTable.NameTable ColInfo)
@@ -44,7 +44,7 @@ cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for foldSum/foldMax/etc (default 8192)" &= name "g"
   , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
-  , justdot = False &= typ "BOOL" &= help "emit dot for parsed plan" &= name "d"
+  , dot = False &= typ "BOOL" &= help "instead of running compiler, emit dot for monet plan" &= name "d"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -52,8 +52,8 @@ cmdTemplate = Mplan2Vdl
 main :: IO ()
 main = do
   cmdargs <- cmdArgs cmdTemplate
-  let action= if justdot cmdargs then
-                dot else compile
+  let action= if dot cmdargs then
+                emitdot else compile
   if mplanfile cmdargs == []
     then (hPutStrLn stderr "usage: need an input filename (see --help)")
          >> System.Exit.exitFailure
@@ -89,8 +89,8 @@ fatal message = do
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
 
-dot :: String -> Config -> Either String String
-dot planstring config =
+emitdot :: String -> Config -> Either String String
+emitdot planstring config =
   do parseTree <- case TP.fromString planstring config of
        Left err -> Left $ "(at Parse stage)" ++ err
        other -> other
