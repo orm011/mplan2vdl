@@ -33,6 +33,8 @@ import Name(Name(..))
   ')'        { ScannedToken _ _ RParen }
   ','        { ScannedToken _ _ Comma }
   '.'        { ScannedToken _ _ Dot }
+  NOTNULL    { ScannedToken _ _ ( Word "NOT NULL") }
+  HASHCOL    { ScannedToken _ _ ( Word "HASHCOL") }
   literal    { ScannedToken _ _ ( ValueLiteral $$) }
   number     { ScannedToken _ _ ( NumberLiteral $$) }
   COUNT      { ScannedToken _ _ ( Word "COUNT") }
@@ -76,16 +78,17 @@ TBracketListNE
 
 TExt
 : { [] :: String }
-| TExtAtom TExt { ($1 ++ $2) :: String }
+| TExtAtom TExt { ($1 ++ " " ++ $2) :: String }
+| QualifiedName TExt { (show $1 ++ " " ++ $2) }
 
-TExtAtom -- just reassemble the tokens
-: literal { show $1 }
+TExtAtom -- just reassemble the tokens. dots belong in names
+: literal { $1 }
 | number { show $1 }
-| ',' { show $1 }
-| '.' { show $1 }
-| '(' { show $1 }
-| ')' { show $1 }
-| identifier { show $1 }
+| ',' { show $ extractRawToken $1 }
+| '(' { show $ extractRawToken $1 }
+| ')' { show $ extractRawToken $1 }
+| NOTNULL { "" }
+| HASHCOL { "" }
 | TNested { $1 }
 
 TNested -- i think i need to deal with this case separately
