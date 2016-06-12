@@ -61,7 +61,7 @@ data Token =
            deriving (Eq)
 
 instance Show Token where
-  show (Word s) = "Word " ++ s ++ ""
+  show (Word s) = s
   show (ValueLiteral s) = "ValueLiteral " ++ s
   show (NumberLiteral n) = "NumberLiteral " ++ (show n)
   show LCurly = "{"

@@ -19,6 +19,7 @@ library
   ghc-options:         -Wall -Werror -O0 -fprof-auto-calls -rtsopts=all -auto-all -fprof-auto -fwarn-incomplete-patterns -fno-warn-overlapping-patterns -fwarn-missing-fields -fwarn-incomplete-uni-patterns -fwarn-incomplete-record-updates
   exposed-modules:     MainFuns
                      , Parser
+                     , TreeParser
                      , Scanner
                      , Mplan
                      , Name

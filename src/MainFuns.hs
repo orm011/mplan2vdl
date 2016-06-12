@@ -14,6 +14,7 @@ import Config
 
 --compiler stages
 import qualified Parser as P -- raw parse tree.
+import qualified TreeParser as TP -- for dot
 import qualified Mplan as M -- monet relational plan
 import qualified Vlite as Vl -- voodoo like language
 import qualified Vdl -- for pretty printing ./Driver readable code
@@ -90,7 +91,7 @@ fatal message = do
 
 dot :: String -> Config -> Either String String
 dot planstring config =
-  do parseTree <- case P.fromString planstring config of
+  do parseTree <- case TP.fromString planstring config of
        Left err -> Left $ "(at Parse stage)" ++ err
        other -> other
      return $ Dot.toDotString "query" parseTree

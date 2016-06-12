@@ -1,6 +1,6 @@
 module Dot (toDotString) where
 
-import Parser
+import TreeParser
 import Name ()
 import Data.List(foldl')
 import Text.Printf (printf)
@@ -15,8 +15,8 @@ data Dot = Dot (NonEmpty (Int, String)) [(Int,Int)]
 cat :: NonEmpty a -> NonEmpty a -> NonEmpty a
 cat a b = foldr (<|) b a -- b is the accumulate
 
-toDot :: Int -> Rel -> (Int, Dot)
-toDot n (Node { relop, children }) =
+toDot :: Int -> TRel -> (Int, Dot)
+toDot n (TNode { relop, children }) =
   let merge (m, directChildrenIds, labels1, edges1) child =
         let (m', (Dot labels2 edges2)) = toDot m child
             (l,_) = last labels2 -- the direct child is the last element
@@ -28,10 +28,10 @@ toDot n (Node { relop, children }) =
   in (n', Dot acclabels (chedges ++ accedges))
 
 
-toDot n (Leaf name  _) = (n+1, Dot ((n,show name) :| []) [])
+toDot n (TLeaf name  _) = (n+1, Dot ((n,show name) :| []) [])
 
-fromRelToDot :: Rel -> Dot
-fromRelToDot r = snd $ toDot 0 r
+fromTRelToDot :: TRel -> Dot
+fromTRelToDot r = snd $ toDot 0 r
 
 fromDotToDotString :: String -> Dot -> String
 fromDotToDotString _ (Dot labels edges) =
@@ -42,9 +42,9 @@ fromDotToDotString _ (Dot labels edges) =
       alllines = [before] ++ (P.map printlabel (toList labels)) ++ (P.map printedge edges) ++ [after]
   in  join "\n" alllines
 
-toDotString :: String -> Rel -> String
+toDotString :: String -> TRel -> String
 toDotString name rel =
-  let dot = fromRelToDot rel
+  let dot = fromTRelToDot rel
   in fromDotToDotString name dot
 
 -- issues using nonempty: concat. map,fold collision. <| vs :|.
