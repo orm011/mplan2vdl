@@ -19,3 +19,7 @@ cabal.config
 *.info
 mplan2vdl
 runtests
+*.ps
+*.dot
+*.err
+*.out
