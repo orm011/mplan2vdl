@@ -62,8 +62,8 @@ data Token =
 
 instance Show Token where
   show (Word s) = s
-  show (ValueLiteral s) = "ValueLiteral " ++ s
-  show (NumberLiteral n) = "NumberLiteral " ++ (show n)
+  show (ValueLiteral s) = s
+  show (NumberLiteral n) = show n
   show LCurly = "{"
   show RCurly = "}"
   show LBrack = "["
