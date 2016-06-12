@@ -25,6 +25,7 @@ library
                      , Vlite
                      , Vdl
                      , Config
+                     , Dot
   other-modules:       Dict
                        Error
   build-depends:       base >= 4.7 && <5
