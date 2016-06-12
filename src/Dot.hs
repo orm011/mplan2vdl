@@ -33,7 +33,7 @@ toDot n (TNode { relop, children, arg_lists }) =
   in (n', Dot acclabels (chedges ++ accedges))
 
 
-toDot n (TLeaf name  attr) = (n+1, Dot ((n,show name,attr) :| []) [])
+toDot n (TLeaf name  attr) = (n+1, Dot ((n,"table " ++ show name,attr) :| []) [])
 
 fromTRelToDot :: TRel -> Dot
 fromTRelToDot r = snd $ toDot 0 r
@@ -45,8 +45,8 @@ fromDotToDotString _ (Dot labels edges) =
       printlabel (n,labelname,attrstr) =
         let attrnode = (show n) ++ "00000" -- hack to avoid node node collision
             stmts = [ printf "%d [ label = \"%s\" ]" n labelname
-                    , printf "%s [ label=\"%s\" shape = \"box\" ]" attrnode (replace "\"" "" attrstr)
-                    , printf "%d -> %s" n attrnode
+                    , printf "%s [ label=\"%s\" shape = \"box\" color=\"blue\" ]" attrnode (replace "\"" "" attrstr)
+                    , printf "%d -> %s [style=\"dotted\" color=\"blue\"]" n attrnode
                     ]
         in join "\n" stmts
       printedge (a,b) = printf "%d -> %d" a b
