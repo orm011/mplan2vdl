@@ -17,7 +17,7 @@ import Control.DeepSeq(NFData)
 import Data.Int
 import qualified Error as E
 import Error(check)
-
+import Data.Bits
 --import Debug.Trace
 import Text.Groom
 --import qualified Data.Map.Strict as Map
@@ -70,11 +70,17 @@ zeros_ = const_ 0
 (==.) :: Vexp -> Vexp -> Vexp
 a ==. b = Binop { binop=Eq, left=a, right = b}
 
--- (>>.) :: Vexp -> Vexp -> Vexp
--- a >>. b = Binop { binop=BitShift, left=a, right = b}
+(>>.) :: Vexp -> Vexp -> Vexp
+a >>. b = Binop { binop=BitShift, left=a, right = b}
+
+(<<.) :: Vexp -> Vexp -> Vexp -- BitShift uses sign to encode direction
+a <<. b = a >>. (zeros_ b -. b)
 
 (||.) :: Vexp -> Vexp -> Vexp
 a ||. b = Binop { binop=LogOr, left=a, right=b}
+
+(|.) :: Vexp -> Vexp -> Vexp
+a |. b = Binop { binop=BitOr, left=a, right=b}
 
 (-.) :: Vexp -> Vexp -> Vexp
 a -. b = Binop { binop=Sub, left=a, right=b }
@@ -219,33 +225,14 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
 -- in the  same project list, but using naive a
 
 
-{- the easy group by case: static single group -}
 solve' config M.GroupBy { M.child,
-                          M.inputkeys=[],
+                          M.inputkeys,
                           M.outputaggs } =
   do env  <- solve config child --either monad
      sequence $ (do (agg, alias) <- outputaggs -- list monad
-                    return ( do (sagg, agginfo)  <- solveAgg config env [] agg
+                    return ( do (sagg, agginfo)  <- solveAgg config env inputkeys agg
                                 -- either monad
                                 return (sagg, alias, agginfo)))
-
-{-group by one column-}
-solve' config M.GroupBy { M.child,
-                          M.inputkeys=[keyname], -- single input key for now.
-                          M.outputaggs } =
-  do  env  <- solve config child --either monad
-      sequence $ (do (agg, alias) <- outputaggs -- list monad
-                     return ( do (sagg, agginfo)  <- solveAgg config env [keyname] agg
-                                   -- either monad
-                                 return (sagg, alias, agginfo)))
-
-solve' _ arg@M.GroupBy { M.child=_,
-                          M.inputkeys=[_], -- single input key for now.
-                          M.outputaggs=_ } =
-  Left $ E.unexpected "only able to compile aggregates one outputkey" arg
-
-solve' _ (M.GroupBy _ _ _) =
-  Left $ "only able to compile aggregates with at most one group by column"
 
 {-direct, foreign key join of two tables.
 for now, this join assumes but does not check
@@ -392,48 +379,91 @@ sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
 
 solveAgg :: Config -> Env -> [Name] -> M.GroupAgg -> Either String (Vexp, ColInfo)
 
--- average case dealt with by rewriting
+solveAgg _ (Env [] _) _ _  = Left $"empty input for group by"
+
+-- average case dealt with by rewriting tp sum, count and finally using division.
 solveAgg config env mkey (M.GAvg expr) =
-  do (sums, ColInfo {bounds=(suml,sumu), count=countsums}) <- solveAgg config env mkey (M.GSum expr)
+  do (sums, ColInfo {bounds=(suml,sumu), count=countsums}) <- solveAgg config env mkey (M.GFold M.FSum expr)
      (counts, ColInfo {bounds=(cl,_), count=countc}) <- solveAgg config env mkey M.GCount
      check (countsums,countc) (\(a,b) -> a == b) "counts should match"
-     check cl (== 1) "minimum count is always 1"
+     check cl (== 1) $ "minimum count is always 1 but here it is " ++ show cl
      return $ ( Binop { binop=Div, left=sums, right=counts }
               , ColInfo {bounds=(suml,sumu), count=countc } ) -- bc counts can be 1
-
 
 -- all keys in a column dominated by groups are equal to their max
 -- so deal with this as if it were a max
 solveAgg config env mkey (M.GDominated nm) =
-  solveAgg config env mkey (M.GMax (M.Ref nm))
+  solveAgg config env mkey (M.GFold M.FMax (M.Ref nm))
 
--- non avg. aggregates
--- TODO: trival groups don't need a partition/scatter (catch that case)
-solveAgg _ env mkey agg =
-  do (keys, scattermask, groupcount) <- (case mkey of -- maybe monad
-                                               [] -> Right $ (zeros_ refv, pos_ refv, 1) -- identity scatter
-                                               [key] -> scatterMask key
-                                               _ -> Left "not supported")
-     (sdata, foldop, bounds) <- groupData agg
-     let fdata = Shuffle { shop=Scatter, shpos = scattermask, shsource=sdata }
-     let fgroups = Shuffle { shop=Scatter, shpos = scattermask, shsource=keys }
-     return $ (Fold {foldop, fgroups, fdata}, ColInfo { bounds, count=groupcount })
-  where Env lst nt = env
-        (refv,_,_) = head lst -- assured non empty
-        scatterMask groupkey  =
-          do (_, (keyvec, ColInfo {bounds=(rmin,u)})) <- NameTable.lookup groupkey nt
-             let rcount = u - rmin + 1 -- bounds number of output groups
-             let pivots = RangeC { rmin , rcount, rstep = 1 }
-             return $ (keyvec, Partition { pivots, pdata=keyvec }, rcount)
-        groupData (M.GSum expr) =
-          do (r, ColInfo (lower,upper) cnt)  <- sc env expr
-             return $ (r, FSum, (cnt*lower, cnt*upper))
-        groupData (M.GMax expr) =
-          do (r, ColInfo bounds _) <- sc env expr
-             return $ (r, FMax, bounds) -- bounds are preserved
-        groupData M.GCount =
-          Right $ (ones_ refv, FSum, (1,1))
-        groupData ow_ =  Left $ E.todo "aggregate" ow_
+-- count is rewritten to summing a one for every row
+solveAgg config env mkey (M.GCount) =
+  let rewrite = (M.GFold M.FSum (M.IntLiteral 1))
+  in solveAgg config env mkey rewrite
+
+solveAgg _ env@(Env ((refv,_,refvInfo):_) nt) keynames (M.GFold op expr) =
+  let mkeyvecs = do keyname <- keynames -- list
+                    return $ (do (_, rvec) <- NameTable.lookup keyname nt -- either
+                                 return $ rvec)
+  in do keys <- sequence $ mkeyvecs -- either
+        kinfo@(gkey, ColInfo {bounds=(gmin, _) }) <- makeCompositeKey (refv,refvInfo) keys
+        check gmin (== 0) "for a group key expecting gmin to be 0"
+        let scattermask = getScatterMask kinfo
+        let sortedGroups = Shuffle {shop=Scatter, shpos=scattermask, shsource=gkey}
+        let sortedEnv  = shuffleAll env scattermask
+        solveSortedAgg sortedEnv sortedGroups op expr
+
+
+solveSortedAgg :: Env -> Vexp -> M.FoldOp -> M.ScalarExpr -> Either String (Vexp,ColInfo)
+solveSortedAgg sortedEnv sortedGroups op expr =
+  do (sortedData, ColInfo (lower,upper) cnt) <- sc sortedEnv expr
+     let (foldop,clout) = case op of
+           M.FSum -> (FSum, ColInfo (lower, cnt*upper) cnt)
+           -- one group may consist of only the max, whereas another group may consist of all elts being upper (if lower == upper and there is one group)
+           M.FMax -> (FMax, ColInfo (lower, upper) cnt)
+     let vout = Fold { foldop, fgroups=sortedGroups, fdata=sortedData }
+     return (vout, clout)
+
+getScatterMask :: (Vexp, ColInfo) -> Vexp
+getScatterMask (col, ColInfo {bounds=(colmin, colmax)}) =
+  let pivots = RangeC { rmin=colmin , rcount=colmax+1, rstep = 1 }
+  in Partition { pivots, pdata=col }
+
+
+shuffleAll :: Env -> Vexp -> Env
+shuffleAll (Env lst _) scattermask =
+  let shlst = (do (vec, malias, colinfo) <- lst -- list monad
+                 --min and max are the same. count may be different, unless it is a permuation.
+                  return $ (Shuffle { shop=Scatter, shpos = scattermask, shsource=vec }, malias, colinfo))
+  in makeEnvWeak shlst
+
+
+bitsize :: (Int64, Int64) -> Int64
+bitsize (minv,maxv) = let r = (maxv - minv)
+                          asint =  (finiteBitSize r) - (countLeadingZeros r)
+                          in fromInteger $ toInteger asint
+
+normalize :: (Vexp, ColInfo) -> (Vexp, Int64)
+normalize (expr, ColInfo { bounds=bounds@(minval,_) }) = (expr -. (const_ minval expr), bitsize bounds )
+
+-- Makes a single Vexp out of zero, one or several input vectors.
+-- Zero vectors retorns a single group key. one vector returns the vector itself.
+-- It makes new keys (left to right) by concatenating them bitwise.
+-- and Error is returned if there would be information loss.
+makeCompositeKey :: (Vexp,ColInfo) -> [(Vexp, ColInfo)] -> Either String (Vexp, ColInfo)
+makeCompositeKey ( contextV, ColInfo {count=contextcount} ) inputs =
+  let normalizedInputs = map normalize inputs in
+      do let initV = (zeros_ contextV, 0)
+         (outKey,outbitsize) <- foldM composeKeys initV normalizedInputs
+         let maxout = (1 `shiftL` (fromInteger $ toInteger outbitsize)) - 1 --bitsize 0 => max = 0 bitsize 1 => max = 1
+         return $ (outKey, ColInfo { bounds=(0, maxout), count=contextcount}) --the count is the count of entries
+
+composeKeys :: (Vexp,Int64) -> (Vexp,Int64) -> Either String (Vexp,Int64)
+composeKeys (oldkey,oldbits) (deltakey,deltabits) =
+  let newbits = oldbits + deltabits
+  in do check newbits (<= 32) "cannot compose keys to something larger than 32 bits"
+        let shiftold = oldkey <<. (const_  deltabits oldkey)
+        let newkey = shiftold |. deltakey
+        return $ (newkey, newbits)
 
 -- make2LevelFold :: Config -> FoldOp -> Vexp -> (Vexp, ColInfo)
 -- make2LevelFold config foldop fdata = -- adds one level of parallelism

@@ -6,6 +6,7 @@ module Mplan( mplanFromParseTree
             , RelExpr(..)
             , ScalarExpr(..)
             , GroupAgg(..)
+            , FoldOp(..)
             , MType(..)) where
 
 import qualified Parser as P
@@ -149,8 +150,10 @@ data ScalarExpr =
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
-data GroupAgg = GDominated Name |  GSum ScalarExpr | GAvg ScalarExpr | GMax ScalarExpr | GCount
-  deriving (Eq,Show,Generic,Data)
+data FoldOp = FSum | FMax deriving (Eq,Show,Generic,Data)
+instance NFData FoldOp
+
+data GroupAgg = GDominated Name |  GAvg ScalarExpr | GCount | GFold FoldOp ScalarExpr deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
 solveGroupOutput :: P.Expr -> Either String (GroupAgg, Maybe Name)
@@ -180,7 +183,7 @@ solveGroupOutput P.Expr
   , P.alias }
   = do inner <- sc singlearg
        case fname of
-         Name ["sum"] -> Right $ (GSum inner, alias)
+         Name ["sum"] -> Right $ (GFold FSum inner, alias)
          Name ["avg"] -> Right $ (GAvg inner, alias)
          _ -> Left $ E.unexpected  "unary aggregate" fname
 
