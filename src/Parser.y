@@ -5,7 +5,6 @@ module Parser ( parse
               , Rel(..)
               , ScalarExpr(..)
               , Expr(..)
-              , TypeSpec(..)
               , Attr(..)
               ) where
 
@@ -19,7 +18,7 @@ import Debug.Trace
 import Data.String.Utils(join)
 import Config
 
-import Name(Name(..))
+import Name(Name(..),TypeSpec(..))
 }
 
 --------------------------------- Directives ----------------------------------
@@ -211,12 +210,6 @@ InExpr
 
 ----------------------------------- Haskell -----------------------------------
 {
-
-{- eg decimal(15,2) , or smallint  -}
-data TypeSpec = TypeSpec { tname :: String
-                         , tparams :: [Int] } deriving (Eq,Show,Generic)
-
-instance NFData TypeSpec
 
 {- for now, parse but drop the column attributes.
 maybe will take a look again later.

@@ -10,7 +10,7 @@ module Mplan( mplanFromParseTree
             , MType(..)) where
 
 import qualified Parser as P
-import Name(Name(..))
+import Name(Name(..),TypeSpec(..))
 import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
@@ -56,8 +56,8 @@ isJoinIdx _ = []
 getJoinIdx :: [P.Attr] -> [Name]
 getJoinIdx attrs = foldl' (++) [] (map isJoinIdx attrs)
 
-resolveTypeSpec :: P.TypeSpec -> Either String MType
-resolveTypeSpec P.TypeSpec { P.tname, P.tparams } = f tname tparams
+resolveTypeSpec :: TypeSpec -> Either String MType
+resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
   where f "int" [] = Right MInt
         f "tinyint" [] = Right MTinyint
         f "smallint" [] = Right MSmallint
@@ -334,7 +334,7 @@ solve P.Node { P.relop = "top N"
                                  -- this kind of "wrd" literal only shows up in the topN oper.
                                  -- so, so far no need to deal with it elsewhere
                                  P.expr = P.Literal
-                                 {P.tspec = P.TypeSpec "wrd" [],
+                                 {P.tspec = TypeSpec "wrd" [],
                                   P.stringRep },
                               P.alias = Nothing
                                  }

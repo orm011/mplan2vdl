@@ -1,0 +1,98 @@
+-- msqldump describe database Mon Jun 13 00:45:45 2016
+-- MonetDB v11.19.7 (Oct2014-SP1), 'mapi:monetdb://arachnophobia:50000/tpch001'
+SET SCHEMA "sys";
+CREATE TABLE "sys"."region" (
+	"r_regionkey" INTEGER       NOT NULL,
+	"r_name"      CHAR(25)      NOT NULL,
+	"r_comment"   VARCHAR(152),
+	CONSTRAINT "region_r_regionkey_pkey" PRIMARY KEY ("r_regionkey")
+);
+CREATE TABLE "sys"."nation" (
+	"n_nationkey" INTEGER       NOT NULL,
+	"n_name"      CHAR(25)      NOT NULL,
+	"n_regionkey" INTEGER       NOT NULL,
+	"n_comment"   VARCHAR(152),
+	CONSTRAINT "nation_n_nationkey_pkey" PRIMARY KEY ("n_nationkey"),
+	CONSTRAINT "nation_fk1" FOREIGN KEY ("n_regionkey") REFERENCES "sys"."region" ("r_regionkey")
+);
+CREATE TABLE "sys"."part" (
+	"p_partkey"     INTEGER       NOT NULL,
+	"p_name"        VARCHAR(55)   NOT NULL,
+	"p_mfgr"        CHAR(25)      NOT NULL,
+	"p_brand"       CHAR(10)      NOT NULL,
+	"p_type"        VARCHAR(25)   NOT NULL,
+	"p_size"        INTEGER       NOT NULL,
+	"p_container"   CHAR(10)      NOT NULL,
+	"p_retailprice" DECIMAL(15,2) NOT NULL,
+	"p_comment"     VARCHAR(23)   NOT NULL,
+	CONSTRAINT "part_p_partkey_pkey" PRIMARY KEY ("p_partkey")
+);
+CREATE TABLE "sys"."supplier" (
+	"s_suppkey"   INTEGER       NOT NULL,
+	"s_name"      CHAR(25)      NOT NULL,
+	"s_address"   VARCHAR(40)   NOT NULL,
+	"s_nationkey" INTEGER       NOT NULL,
+	"s_phone"     CHAR(15)      NOT NULL,
+	"s_acctbal"   DECIMAL(15,2) NOT NULL,
+	"s_comment"   VARCHAR(101)  NOT NULL,
+	CONSTRAINT "supplier_s_suppkey_pkey" PRIMARY KEY ("s_suppkey"),
+	CONSTRAINT "supplier_fk1" FOREIGN KEY ("s_nationkey") REFERENCES "sys"."nation" ("n_nationkey")
+);
+CREATE TABLE "sys"."partsupp" (
+	"ps_partkey"    INTEGER       NOT NULL,
+	"ps_suppkey"    INTEGER       NOT NULL,
+	"ps_availqty"   INTEGER       NOT NULL,
+	"ps_supplycost" DECIMAL(15,2) NOT NULL,
+	"ps_comment"    VARCHAR(199)  NOT NULL,
+	CONSTRAINT "partsupp_ps_partkey_ps_suppkey_pkey" PRIMARY KEY ("ps_partkey", "ps_suppkey"),
+	CONSTRAINT "partsupp_fk1" FOREIGN KEY ("ps_suppkey") REFERENCES "sys"."supplier" ("s_suppkey"),
+	CONSTRAINT "partsupp_fk2" FOREIGN KEY ("ps_partkey") REFERENCES "sys"."part" ("p_partkey")
+);
+CREATE TABLE "sys"."customer" (
+	"c_custkey"    INTEGER       NOT NULL,
+	"c_name"       VARCHAR(25)   NOT NULL,
+	"c_address"    VARCHAR(40)   NOT NULL,
+	"c_nationkey"  INTEGER       NOT NULL,
+	"c_phone"      CHAR(15)      NOT NULL,
+	"c_acctbal"    DECIMAL(15,2) NOT NULL,
+	"c_mktsegment" CHAR(10)      NOT NULL,
+	"c_comment"    VARCHAR(117)  NOT NULL,
+	CONSTRAINT "customer_c_custkey_pkey" PRIMARY KEY ("c_custkey"),
+	CONSTRAINT "customer_fk1" FOREIGN KEY ("c_nationkey") REFERENCES "sys"."nation" ("n_nationkey")
+);
+CREATE TABLE "sys"."orders" (
+	"o_orderkey"      INTEGER       NOT NULL,
+	"o_custkey"       INTEGER       NOT NULL,
+	"o_orderstatus"   CHAR(1)       NOT NULL,
+	"o_totalprice"    DECIMAL(15,2) NOT NULL,
+	"o_orderdate"     DATE          NOT NULL,
+	"o_orderpriority" CHAR(15)      NOT NULL,
+	"o_clerk"         CHAR(15)      NOT NULL,
+	"o_shippriority"  INTEGER       NOT NULL,
+	"o_comment"       VARCHAR(79)   NOT NULL,
+	CONSTRAINT "orders_o_orderkey_pkey" PRIMARY KEY ("o_orderkey"),
+	CONSTRAINT "orders_fk1" FOREIGN KEY ("o_custkey") REFERENCES "sys"."customer" ("c_custkey")
+);
+CREATE TABLE "sys"."lineitem" (
+	"l_orderkey"      INTEGER       NOT NULL,
+	"l_partkey"       INTEGER       NOT NULL,
+	"l_suppkey"       INTEGER       NOT NULL,
+	"l_linenumber"    INTEGER       NOT NULL,
+	"l_quantity"      DECIMAL(15,2) NOT NULL,
+	"l_extendedprice" DECIMAL(15,2) NOT NULL,
+	"l_discount"      DECIMAL(15,2) NOT NULL,
+	"l_tax"           DECIMAL(15,2) NOT NULL,
+	"l_returnflag"    CHAR(1)       NOT NULL,
+	"l_linestatus"    CHAR(1)       NOT NULL,
+	"l_shipdate"      DATE          NOT NULL,
+	"l_commitdate"    DATE          NOT NULL,
+	"l_receiptdate"   DATE          NOT NULL,
+	"l_shipinstruct"  CHAR(25)      NOT NULL,
+	"l_shipmode"      CHAR(10)      NOT NULL,
+	"l_comment"       VARCHAR(44)   NOT NULL,
+	CONSTRAINT "lineitem_l_orderkey_l_linenumber_pkey" PRIMARY KEY ("l_orderkey", "l_linenumber"),
+	CONSTRAINT "lineitem_fk1" FOREIGN KEY ("l_orderkey") REFERENCES "sys"."orders" ("o_orderkey"),
+	CONSTRAINT "lineitem_fk2" FOREIGN KEY ("l_partkey", "l_suppkey") REFERENCES "sys"."partsupp" ("ps_partkey", "ps_suppkey"),
+	CONSTRAINT "lineitem_fk3" FOREIGN KEY ("l_partkey") REFERENCES "sys"."part" ("p_partkey"),
+	CONSTRAINT "lineitem_fk4" FOREIGN KEY ("l_suppkey") REFERENCES "sys"."supplier" ("s_suppkey")
+);

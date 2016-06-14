@@ -1,5 +1,6 @@
 module Name (Name(..)
             ,NameTable {-only export the ADT -}
+            ,TypeSpec(..)
             ,empty
             ,insert
             ,insertWeak
@@ -12,6 +13,14 @@ import Text.Printf
 import Prelude hiding (lookup)
 import Control.DeepSeq(NFData)
 import Data.Data
+
+
+{- eg decimal(15,2) , or smallint  -}
+data TypeSpec = TypeSpec { tname :: String
+                         , tparams :: [Int] } deriving (Eq,Show,Generic)
+
+instance NFData TypeSpec
+
 
 {- the current implementation
 works correctly under three key assumptions about the input:

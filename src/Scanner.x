@@ -28,10 +28,14 @@ tokens :-
   \)  { \posn _ -> scannedToken posn RParen }
   \,   { \posn _ -> scannedToken posn Comma }
   \.   { \posn _ -> scannedToken posn Dot }
+  \;   { \posn _ -> scannedToken posn Semi }
   \"$withinquotes* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
   $num+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
+  "PRIMARY KEY" { \posn _ -> scannedToken posn (Word "PRIMARY KEY") }
+  "FOREIGN KEY" {  \posn _ -> scannedToken posn (Word "FOREIGN KEY") }
+  "CREATE TABLE" { \posn _ -> scannedToken  posn ( Word "CREATE TABLE") }
   "!=" { \posn _ -> scannedToken posn (Word "!=") } -- must do this before !
   $name+ { \posn s -> scannedToken posn ( Word s ) }
 
@@ -58,6 +62,7 @@ data Token =
            | RParen
            | Dot
            | Comma
+           | Semi
            deriving (Eq)
 
 instance Show Token where
@@ -71,6 +76,7 @@ instance Show Token where
   show LParen = "("
   show RParen = ")"
   show Dot = "."
+  show Semi = ";"
   show Comma = ","
 
 

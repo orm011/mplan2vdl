@@ -27,6 +27,7 @@ library
                      , Vdl
                      , Config
                      , Dot
+                     , SchemaParser
   other-modules:       Dict
                        Error
   build-depends:       base >= 4.7 && <5
