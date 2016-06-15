@@ -64,8 +64,6 @@ ones_ = const_ 1
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
 
--- groups_ :: Int64 -> Vexp -> Vexp
--- groups_ groupsizelg v = (pos_ v) >>. (const_ groupsizelg v)
 
 (==.) :: Vexp -> Vexp -> Vexp
 a ==. b = Binop { binop=Eq, left=a, right = b}
@@ -400,27 +398,28 @@ solveAgg config env mkey (M.GCount) =
   let rewrite = (M.GFold M.FSum (M.IntLiteral 1))
   in solveAgg config env mkey rewrite
 
-solveAgg _ env@(Env ((refv,_,refvInfo):_) nt) keynames (M.GFold op expr) =
+solveAgg config env@(Env ((refv,_,refvInfo):_) nt) keynames (M.GFold op expr) =
   let mkeyvecs = do keyname <- keynames -- list
                     return $ (do (_, rvec) <- NameTable.lookup keyname nt -- either
                                  return $ rvec)
   in do keys <- sequence $ mkeyvecs -- either
-        kinfo@(gkey, ColInfo {bounds=(gmin, _) }) <- makeCompositeKey (refv,refvInfo) keys
+        kinfo@(gkey, info@ColInfo {bounds=(gmin, _) }) <- makeCompositeKey (refv,refvInfo) keys
         check gmin (== 0) "for a group key expecting gmin to be 0"
         let scattermask = getScatterMask kinfo
         let sortedGroups = Shuffle {shop=Scatter, shpos=scattermask, shsource=gkey}
+        let sortedGroupInfo = info -- this shuffle is a permuatation, so changes nothing.
         let sortedEnv  = shuffleAll env scattermask
-        solveSortedAgg sortedEnv sortedGroups op expr
+        solveSortedAgg config sortedEnv (sortedGroups,sortedGroupInfo) op expr
 
 
-solveSortedAgg :: Env -> Vexp -> M.FoldOp -> M.ScalarExpr -> Either String (Vexp,ColInfo)
-solveSortedAgg sortedEnv sortedGroups op expr =
+solveSortedAgg :: Config -> Env -> (Vexp,ColInfo) -> M.FoldOp -> M.ScalarExpr -> Either String (Vexp,ColInfo)
+solveSortedAgg config sortedEnv sortedGroups op expr =
   do (sortedData, ColInfo (lower,upper) cnt) <- sc sortedEnv expr
      let (foldop,clout) = case op of
            M.FSum -> (FSum, ColInfo (lower, cnt*upper) cnt)
            -- one group may consist of only the max, whereas another group may consist of all elts being upper (if lower == upper and there is one group)
            M.FMax -> (FMax, ColInfo (lower, upper) cnt)
-     let vout = Fold { foldop, fgroups=sortedGroups, fdata=sortedData }
+     vout <- make2LevelFold config foldop sortedGroups sortedData
      return (vout, clout)
 
 getScatterMask :: (Vexp, ColInfo) -> Vexp
@@ -465,17 +464,21 @@ composeKeys (oldkey,oldbits) (deltakey,deltabits) =
         let newkey = shiftold |. deltakey
         return $ (newkey, newbits)
 
--- make2LevelFold :: Config -> FoldOp -> Vexp -> (Vexp, ColInfo)
--- make2LevelFold config foldop fdata = -- adds one level of parallelism
---   let firstlevel =
---         Fold { foldop
---              , fgroups = groups_ (grainsizelg config) fdata -- parallel
---              , fdata }
---       secondlevel =
---         Fold { foldop
---              , fgroups = zeros_ firstlevel -- sequential
---              , fdata = firstlevel }
---   in  secondlevel
+
+groups_ :: Int64 -> (Vexp,ColInfo) -> (Vexp,ColInfo)
+groups_ groupsizelg (v,ColInfo {count})
+  = let gv = (pos_ v) >>. (const_ groupsizelg v)
+    in (gv, ColInfo {bounds=(0, count `shiftR` (fromInteger $ toInteger groupsizelg)), count})
+
+make2LevelFold :: Config -> FoldOp -> (Vexp,ColInfo) -> Vexp -> Either String Vexp
+make2LevelFold config foldop groupinfo fdata =
+  do let level1par = groups_ (grainsizelg config) groupinfo
+     (level1groups, _) <- (makeCompositeKey groupinfo [groupinfo, level1par]) -- meant to be parallel
+     let level1results  = Fold { foldop, fgroups = level1groups, fdata }
+     (level2groups, _) <- makeCompositeKey groupinfo [groupinfo]  -- meant to be sequential
+     let level2results  = Fold { foldop, fgroups = level2groups, fdata = level1results }
+     return level2results
+
 -- solutions: every Vexp has attached counts and bounds (put it in the type) (only how to repr it. right now: table)
 -- may want to print these things in the vlite repr to track/debug them => table gets in the way of that.
 -- solutions: transformation that takes a vexp and derives its attributes
