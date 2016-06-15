@@ -131,7 +131,7 @@ voodooFromVexp (V.Load n) =
      return $ Project { outname=Name ["val"]
                       , inname
                       , vec = Load n }
-voodooFromVexp (V.Range {V.rmin, V.rstep, V.rref}) =
+voodooFromVexp (V.RangeV {V.rmin, V.rstep, V.rref}) =
   do v <- voodooFromVexp rref
      return $ Range {rmin, rstep, rvec=v}
 

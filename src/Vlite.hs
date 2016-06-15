@@ -36,11 +36,9 @@ data FoldOp = FSum | FMax | FMin | FSel
   deriving (Eq, Show, Generic, Ord)
 instance NFData FoldOp
 
-{- Range has no need for count arg at this point.
-may convert to differnt range after -}
 data Vexp  =
   Load Name
-  | Range  { rmin :: Int64, rstep :: Int64, rref::Vexp } -- reference Vector
+  | RangeV { rmin :: Int64, rstep :: Int64, rref::Vexp }
   | RangeC { rmin :: Int64, rstep :: Int64, rcount::Int64 }
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
@@ -49,14 +47,12 @@ data Vexp  =
   deriving (Eq,Show,Generic,Ord)
 instance NFData Vexp
 
--- ranges with fixed sizes
-
 {- some convenience vectors -}
 const_ :: Int64 -> Vexp -> Vexp
-const_ k v = Range { rmin = k, rstep = 0, rref = v }
+const_ k v = RangeV{ rmin = k, rstep = 0, rref = v }
 
 pos_ :: Vexp -> Vexp
-pos_ v = Range { rmin = 0, rstep = 1, rref = v }
+pos_ v = RangeV{ rmin = 0, rstep = 1, rref = v }
 
 ones_ :: Vexp -> Vexp
 ones_ = const_ 1
