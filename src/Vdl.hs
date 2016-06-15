@@ -13,7 +13,7 @@ import qualified Data.Map.Strict as Map
 import Data.List (foldl')
 import Config
 import Prelude hiding (log)
-import qualified Error as E
+--import qualified Error as E
 type Map = Map.Map
 
 {-
@@ -21,21 +21,27 @@ Aims to cover the subset of VoodooStdLib we need for Monet plans.
 Nothing in this type should be non-existant in Voodoo.
 its function is to be easy to convert to text format.
 -}
-data Voodoo =
+data Vd a =
   Load Name
-  | Project { outname::Name , inname::Name, vec :: Voodoo } -- full rename only. used right after load
-  | Range { rmin::Int64, rstep::Int64, rvec :: Voodoo }
+  | Project { outname::Name , inname::Name, vec :: a } -- full rename only. used right after load
+  | RangeV { rmin::Int64, rstep::Int64, rvec :: a }
   | RangeC {rmin::Int64, rstep::Int64, rcount::Int64 }
-  | Binary { op::Voodop, arg1::Voodoo, arg2::Voodoo  }
-  | Scatter { scattersource::Voodoo, scatterfold::Voodoo, scatterpos::Voodoo }
+  | Binary { op::Voodop, arg1::a, arg2::a  }
+  | Scatter { scattersource::a, scatterfold::a, scatterpos::a }
   deriving (Eq,Show,Generic,Ord)
-instance NFData Voodoo
+instance (NFData a) => NFData (Vd a)
+
+
+
+newtype V = V (Vd V) deriving(Eq,Show,Ord,Generic)-- used so that it can recurse for the tree view
+type Voodoo = Vd V
+type Vref = Vd Int -- used for ref version that can be printed as a series of expressions
 
 const_ :: Int64 -> Voodoo -> Voodoo
-const_ k v  = Range { rmin=k, rstep=0, rvec=v }
+const_ k v  = RangeV { rmin=k, rstep=0, rvec=V v }
 
 pos_ :: Voodoo -> Voodoo
-pos_ v  = Range { rmin=0, rstep=1, rvec=v }
+pos_ v  = RangeV { rmin=0, rstep=1, rvec=V v }
 
 data Voodop =
   LogicalAnd
@@ -64,11 +70,11 @@ instance NFData Voodop
 
 size :: Voodoo -> (Int, Int)
 size (Load _) = (1,1)
-size (Scatter ch1 ch2 ch3) = let (a,b) = (size ch1) .^. (size ch2) .^. (size ch3) in (a + 1, b + 1)
-size (Range _ _ _) = (1,1)
+size (Scatter (V ch1) (V ch2) (V ch3)) = let (a,b) = (size ch1) .^. (size ch2) .^. (size ch3) in (a + 1, b + 1)
+size (RangeV _ _ _) = (1,1)
 size (RangeC _ _ _) = (1,1)
-size (Project _ _ ch) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
-size (Binary _ ch1 ch2) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
+size (Project _ _ (V ch)) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
+size (Binary _ (V ch1) (V ch2)) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
 
 dagSize :: [Voodoo] -> (Int,Int)
 dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(length outputs))
@@ -76,22 +82,22 @@ dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(l
 -- convenience expression library to translate more complex
 -- all have type Voodoo -> Voodoo -> Voodoo
 (>.) :: Voodoo -> Voodoo -> Voodoo
-a >.  b = Binary { op=Greater, arg1=a, arg2=b }
+a >.  b = Binary { op=Greater, arg1=V a, arg2=V b }
 
 (==.) :: Voodoo -> Voodoo -> Voodoo
-a ==. b = Binary { op=Equals, arg1=a, arg2=b }
+a ==. b = Binary { op=Equals, arg1=V a, arg2=V b }
 
 (<.) :: Voodoo -> Voodoo -> Voodoo
-a <.  b = Binary { op=Greater, arg1=b, arg2=a } --notice argument swap
+a <.  b = Binary { op=Greater, arg1=V b, arg2=V a } --notice argument swap
 
 (||.) :: Voodoo -> Voodoo -> Voodoo
-a ||. b = Binary { op=LogicalOr, arg1=a, arg2=b }
+a ||. b = Binary { op=LogicalOr, arg1=V a, arg2=V b }
 
 (>>.) :: Voodoo -> Voodoo -> Voodoo
-a >>. b = Binary { op=BitShift, arg1=a, arg2=b }
+a >>. b = Binary { op=BitShift, arg1=V a, arg2=V b }
 
 (&&.) :: Voodoo -> Voodoo -> Voodoo
-a &&. b = Binary { op=LogicalAnd, arg1=a, arg2=b }
+a &&. b = Binary { op=LogicalAnd, arg1=V a, arg2=V b }
 
 (<=.) :: Voodoo -> Voodoo -> Voodoo
 a <=. b = (a <. b) ||. (a ==. b)
@@ -100,19 +106,19 @@ a <=. b = (a <. b) ||. (a ==. b)
 a >=. b = (a >. b) ||. (a ==. b)
 
 (+.) :: Voodoo -> Voodoo -> Voodoo
-a +. b = Binary { op=Add, arg1=a, arg2=b }
+a +. b = Binary { op=Add, arg1=V a, arg2=V b }
 
 (-.) :: Voodoo -> Voodoo -> Voodoo
-a -. b = Binary { op=Subtract, arg1=a, arg2=b }
+a -. b = Binary { op=Subtract, arg1=V a, arg2=V b }
 
 (*.) :: Voodoo -> Voodoo -> Voodoo
-a *. b = Binary { op=Multiply, arg1=a, arg2=b }
+a *. b = Binary { op=Multiply, arg1=V a, arg2=V b }
 
 (/.) :: Voodoo -> Voodoo -> Voodoo
-a /. b = Binary { op=Divide, arg1=a, arg2=b }
+a /. b = Binary { op=Divide, arg1=V a, arg2=V b }
 
 (|.) :: Voodoo -> Voodoo -> Voodoo
-a |. b = Binary { op=BitwiseOr, arg1=a, arg2=b }
+a |. b = Binary { op=BitwiseOr, arg1=V a, arg2=V b }
 
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
 cond ?. (a,b) = ((const_ 1 a  -. negcond) *. a) +. (negcond *. b)
@@ -128,12 +134,12 @@ voodooFromVexp (V.Load n) =
   do inname <- (case n of
                    Name (_:s:rest) -> Right $ Name $ s:rest
                    _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
-     return $ Project { outname=Name ["val"]
-                      , inname
-                      , vec = Load n }
+     return $    Project { outname=Name ["val"]
+                          , inname
+                          , vec = V $ Load n }
 voodooFromVexp (V.RangeV {V.rmin, V.rstep, V.rref}) =
   do v <- voodooFromVexp rref
-     return $ Range {rmin, rstep, rvec=v}
+     return $ RangeV {rmin, rstep, rvec=V v}
 
 voodooFromVexp (V.RangeC {V.rmin, V.rstep, V.rcount}) =
   return $ RangeC {rmin, rstep, rcount }
@@ -165,39 +171,27 @@ voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
   do source <- voodooFromVexp shsource
      positions <- voodooFromVexp shpos
      case shop of
-       V.Gather -> Right $ Binary { op=Gather, arg1=source, arg2=positions }
-       V.Scatter -> let scatterfold = pos_ source
-                        in Right $ Scatter { scattersource=source, scatterfold, scatterpos=positions }
+       V.Gather -> Right $ Binary { op=Gather, arg1=V source, arg2=V positions }
+       V.Scatter -> let scatterfold = V $ pos_ source
+                        in Right $ Scatter { scattersource=V source, scatterfold, scatterpos=V positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
 voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
   do arg1 <- voodooFromVexp fgroups
      arg2 <- voodooFromVexp fdata
-     case foldop of
-       V.FSum -> return $ Binary { op=FoldSum, arg1, arg2 }
-       V.FMax -> return $ Binary { op=FoldMax, arg1, arg2 }
-       V.FSel -> return $ Binary { op=FoldSelect, arg1, arg2 }
-       s_ -> Left $ E.unexpected "fold operator" s_
+     let op = case foldop of
+               V.FSum -> FoldSum
+               V.FMax -> FoldMax
+               V.FMin -> FoldMin
+               V.FSel -> FoldSelect
+     return $ Binary { op, arg1=V arg1, arg2=V arg2 }
 
 voodooFromVexp (V.Partition {V.pdata, V.pivots}) =
   do arg1 <- voodooFromVexp pdata
      arg2 <- voodooFromVexp pivots
-     return $ Binary {op=Partition, arg1, arg2 }
+     return $ Binary {op=Partition, arg1=V arg1, arg2=V arg2 }
 
 voodooFromVexp s_ = Left $ "implement me: " ++ show s_
-
-{- the difference now is that
-all pointers to other expressions now are explicit,
-needed for serialization -}
-data Vref  =
-  VLoad Name
-  | VProject { voutname::Name , vinname::Name, vvec :: Int } -- full rename only.
-  | VRange  { vrmin :: Int64, vrstep :: Int64, vrvec :: Int }
-  | VRangeC  { vrmin :: Int64, vrstep :: Int64, vrcount :: Int64 }
-  | VBinary { vop :: Voodop, varg1 :: Int, varg2 :: Int }
-  | VScatter { vscatterpos :: Int, vscatterfold::Int, vscattersource ::Int }
-  deriving (Eq,Show,Generic)
-instance NFData Vref
 
 voodoosFromVexps :: [(V.Vexp, Maybe Name)] -> Either String [Voodoo]
 
@@ -205,7 +199,7 @@ voodoosFromVexps vexps = mapM (voodooFromVexp  . fst) vexps
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =
-  do let log0 = [(0, VLoad $ Name ["dummy"])]
+  do let log0 = [(0, Load $ Name ["dummy"])]
      let state0 = ((Map.empty, log0), undefined)
      ((_, finalLog),_) <- foldM process state0 vecs
      let post = tail $ reverse $ finalLog -- remove dummy, reverse
@@ -234,63 +228,64 @@ memVrefFromVoodoo state@(tab, log) vd =
 
 vrefFromVoodoo :: State -> Voodoo -> Either String (State, Vref)
 
-vrefFromVoodoo state (Load n) = return $ (state, VLoad n)
+vrefFromVoodoo state (Load n) = return $ (state, Load n)
 
-vrefFromVoodoo state (RangeC  { rmin , rstep, rcount })=
-  return $ (state, VRangeC {vrmin=rmin, vrstep=rstep, vrcount=rcount})
+vrefFromVoodoo state (RangeC {rmin,rstep,rcount} ) =
+  return $ (state, RangeC {rmin,rstep,rcount})
 
-vrefFromVoodoo state (Range  { rmin , rstep, rvec  }) =
+vrefFromVoodoo state (RangeV  {rmin,rstep,rvec=V rvec}) =
   do (state', n') <- memVrefFromVoodoo state rvec
-     return $ (state', VRange { vrmin=rmin, vrstep=rstep, vrvec=n' })
+     return $ (state', RangeV { rmin,rstep, rvec= n' })
 
-vrefFromVoodoo state (Scatter {scattersource, scatterfold, scatterpos }) =
+vrefFromVoodoo state (Scatter {scattersource=V scattersource
+                              , scatterfold= V scatterfold
+                              , scatterpos=V scatterpos }) =
   do (state', n') <- memVrefFromVoodoo state scattersource
      (state'', n'') <- memVrefFromVoodoo state' scatterfold
      (state''', n''') <- memVrefFromVoodoo state'' scatterpos
-     return $ (state''', VScatter {vscattersource=n', vscatterfold=n'', vscatterpos=n'''})
+     return $ (state''', Scatter {scattersource= n', scatterfold= n'', scatterpos= n'''})
 
-vrefFromVoodoo state (Project {outname, inname, vec}) =
+vrefFromVoodoo state (Project {outname, inname, vec=V vec}) =
   do (state', n') <- memVrefFromVoodoo state vec
-     return $ (state', VProject { voutname=outname, vinname=inname, vvec=n' })
+     return $ (state', Project { outname, inname, vec=n' })
 
 
-vrefFromVoodoo state (Binary { op , arg1 , arg2 }) =
+vrefFromVoodoo state (Binary { op, arg1=V arg1 , arg2=V arg2 }) =
   do (state', n1) <- memVrefFromVoodoo state arg1
      (state'', n2) <- memVrefFromVoodoo state' arg2
-     return $ (state'', VBinary {vop=op, varg1=n1, varg2=n2})
-
+     return $ (state'', Binary { op, arg1=n1, arg2=n2})
 
 {- now a list of strings -}
 toList :: Vref -> [String]
 
 -- for printing: remove sys (really, we want the prefix only_
-toList (VLoad (Name lst)) = ["Load", show cleanname]
+toList (Load (Name lst)) = ["Load", show cleanname]
   where cleanname = Name (if head lst == "sys" then tail lst else lst)
 
-toList (VProject {voutname, vinname, vvec}) =
-  ["Project",show voutname, "Id " ++ show vvec, show vinname ]
+toList (Project {outname, inname, vec}) =
+  ["Project",show outname, "Id " ++ show vec, show inname ]
 
-toList (VRange { vrmin, vrstep, vrvec }) =
+toList (RangeV { rmin, rstep, rvec }) =
   {- for printing: hardcoded length 2 billion right now,
   since backend only materializes what's needed -}
-  ["RangeV", "val", show vrmin, "Id " ++ show vrvec, show vrstep]
+  ["RangeV", "val", show rmin, "Id " ++ show rvec, show rstep]
 
-toList (VRangeC { vrmin, vrstep, vrcount }) =
-  ["RangeC", "val", show vrmin, show vrcount, show vrstep]
+toList (RangeC { rmin, rstep, rcount }) =
+  ["RangeC", "val", show rmin, show rcount, show rstep]
 
-toList (VBinary { vop, varg1, varg2}) =
-  case vop of
-    Gather -> [svop, id1, id2, "val"]
-    _ ->      [svop, "val", id1, "val", id2, "val" ]
-  where svop = show vop
-        id1 = "Id " ++ show varg1
-        id2 = "Id " ++ show varg2
+toList (Binary { op, arg1, arg2}) =
+  case op of
+    Gather -> [sop, id1, id2, "val"]
+    _ ->      [sop, "val", id1, "val", id2, "val" ]
+  where sop = show op
+        id1 = "Id " ++ show arg1
+        id2 = "Id " ++ show arg2
 
-toList (VScatter { vscattersource, vscatterfold, vscatterpos } ) =
+toList (Scatter { scattersource, scatterfold, scatterpos } ) =
   ["Scatter", id1, id2, "val", id3, "val"]
-  where id1 = "Id " ++ show vscattersource
-        id2 = "Id " ++ show vscatterfold
-        id3 = "Id " ++ show vscatterpos
+  where id1 = "Id " ++ show scattersource
+        id2 = "Id " ++ show scatterfold
+        id3 = "Id " ++ show scatterpos
 
 toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 
