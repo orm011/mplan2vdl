@@ -76,6 +76,9 @@ a ||. b = Binop { binop=LogOr, left=a, right=b}
 (|.) :: Vexp -> Vexp -> Vexp
 a |. b = Binop { binop=BitOr, left=a, right=b}
 
+(&.) :: Vexp -> Vexp -> Vexp
+a &. b = Binop { binop=BitAnd, left=a, right=b}
+
 (-.) :: Vexp -> Vexp -> Vexp
 a -. b = Binop { binop=Sub, left=a, right=b }
 
@@ -451,7 +454,7 @@ makeCompositeKey ( contextV, ColInfo {count=contextcount} ) inputs =
          (outKey,outbitsize) <- foldM composeKeys initV normalizedInputs
          --bitsize 0 => max = 0 bitsize 1 => max = 1
          let maxout = (1 `shiftL` (fromInteger $ toInteger outbitsize)) - 1
-         let hintedOutKey = outKey |. const_ maxout outKey --used as a hint to Voodoo (to infer size)
+         let hintedOutKey = outKey &. const_ maxout outKey --used as a hint to Voodoo (to infer size)
          return $ (hintedOutKey, ColInfo { bounds=(0, maxout), count=contextcount}) --the count is the count of entries
 
 composeKeys :: (Vexp,Int64) -> (Vexp,Int64) -> Either String (Vexp,Int64)
