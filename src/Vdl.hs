@@ -10,7 +10,7 @@ import Data.String.Utils(join)
 import Control.DeepSeq(NFData)
 import qualified Vlite as V
 import qualified Data.Map.Strict as Map
-import Data.List (foldl')
+--import Data.List (foldl')
 import Config
 import Prelude hiding (log)
 --import qualified Error as E
@@ -31,17 +31,15 @@ data Vd a =
   deriving (Eq,Show,Generic,Ord)
 instance (NFData a) => NFData (Vd a)
 
-
-
-newtype V = V (Vd V) deriving(Eq,Show,Ord,Generic)-- used so that it can recurse for the tree view
-type Voodoo = Vd V
+data W = W (Vd W) deriving (Eq,Show,Ord,Generic)-- used so that it can recurse for the tree view
+type Voodoo = Vd W
 type Vref = Vd Int -- used for ref version that can be printed as a series of expressions
 
 const_ :: Int64 -> Voodoo -> Voodoo
-const_ k v  = RangeV { rmin=k, rstep=0, rvec=V v }
+const_ k v  = RangeV { rmin=k, rstep=0, rvec=W v }
 
 pos_ :: Voodoo -> Voodoo
-pos_ v  = RangeV { rmin=0, rstep=1, rvec=V v }
+pos_ v  = RangeV { rmin=0, rstep=1, rvec=W v }
 
 data Voodop =
   LogicalAnd
@@ -65,39 +63,39 @@ data Voodop =
   deriving (Eq,Show,Generic,Ord)
 instance NFData Voodop
 
-(.^.) :: (Int,Int) -> (Int,Int) -> (Int,Int)
-(a,b) .^. (a',b') = (max a a', b + b')
+-- (.^.) :: (Int,Int) -> (Int,Int) -> (Int,Int)
+-- (a,b) .^. (a',b') = (max a a', b + b')
 
-size :: Voodoo -> (Int, Int)
-size (Load _) = (1,1)
-size (Scatter (V ch1) (V ch2) (V ch3)) = let (a,b) = (size ch1) .^. (size ch2) .^. (size ch3) in (a + 1, b + 1)
-size (RangeV _ _ _) = (1,1)
-size (RangeC _ _ _) = (1,1)
-size (Project _ _ (V ch)) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
-size (Binary _ (V ch1) (V ch2)) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
+-- size :: Voodoo -> (Int, Int)
+-- size (Load _) = (1,1)
+-- size (Scatter (W ch1) (V ch2) (V ch3)) = let (a,b) = (size ch1) .^. (size ch2) .^. (size ch3) in (a + 1, b + 1)
+-- size (RangeV _ _ _) = (1,1)
+-- size (RangeC _ _ _) = (1,1)
+-- size (Project _ _ (V ch)) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
+-- size (Binary _ (V ch1) (V ch2)) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
 
-dagSize :: [Voodoo] -> (Int,Int)
-dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(length outputs))
+-- dagSize :: [Voodoo] -> (Int,Int)
+-- dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(length outputs))
 
 -- convenience expression library to translate more complex
 -- all have type Voodoo -> Voodoo -> Voodoo
 (>.) :: Voodoo -> Voodoo -> Voodoo
-a >.  b = Binary { op=Greater, arg1=V a, arg2=V b }
+a >.  b = Binary { op=Greater, arg1=W a, arg2=W b }
 
 (==.) :: Voodoo -> Voodoo -> Voodoo
-a ==. b = Binary { op=Equals, arg1=V a, arg2=V b }
+a ==. b = Binary { op=Equals, arg1=W a, arg2=W b }
 
 (<.) :: Voodoo -> Voodoo -> Voodoo
-a <.  b = Binary { op=Greater, arg1=V b, arg2=V a } --notice argument swap
+a <.  b = Binary { op=Greater, arg1=W b, arg2=W a } --notice argument swap
 
 (||.) :: Voodoo -> Voodoo -> Voodoo
-a ||. b = Binary { op=LogicalOr, arg1=V a, arg2=V b }
+a ||. b = Binary { op=LogicalOr, arg1=W a, arg2=W b }
 
 (>>.) :: Voodoo -> Voodoo -> Voodoo
-a >>. b = Binary { op=BitShift, arg1=V a, arg2=V b }
+a >>. b = Binary { op=BitShift, arg1=W a, arg2=W b }
 
 (&&.) :: Voodoo -> Voodoo -> Voodoo
-a &&. b = Binary { op=LogicalAnd, arg1=V a, arg2=V b }
+a &&. b = Binary { op=LogicalAnd, arg1=W a, arg2=W b }
 
 (<=.) :: Voodoo -> Voodoo -> Voodoo
 a <=. b = (a <. b) ||. (a ==. b)
@@ -106,22 +104,22 @@ a <=. b = (a <. b) ||. (a ==. b)
 a >=. b = (a >. b) ||. (a ==. b)
 
 (+.) :: Voodoo -> Voodoo -> Voodoo
-a +. b = Binary { op=Add, arg1=V a, arg2=V b }
+a +. b = Binary { op=Add, arg1=W a, arg2=W b }
 
 (-.) :: Voodoo -> Voodoo -> Voodoo
-a -. b = Binary { op=Subtract, arg1=V a, arg2=V b }
+a -. b = Binary { op=Subtract, arg1=W a, arg2=W b }
 
 (*.) :: Voodoo -> Voodoo -> Voodoo
-a *. b = Binary { op=Multiply, arg1=V a, arg2=V b }
+a *. b = Binary { op=Multiply, arg1=W a, arg2=W b }
 
 (/.) :: Voodoo -> Voodoo -> Voodoo
-a /. b = Binary { op=Divide, arg1=V a, arg2=V b }
+a /. b = Binary { op=Divide, arg1=W a, arg2=W b }
 
 (|.) :: Voodoo -> Voodoo -> Voodoo
-a |. b = Binary { op=BitwiseOr, arg1=V a, arg2=V b }
+a |. b = Binary { op=BitwiseOr, arg1=W a, arg2=W b }
 
 (&.) :: Voodoo -> Voodoo -> Voodoo
-a &. b = Binary { op=BitwiseAnd, arg1=V a, arg2=V b }
+a &. b = Binary { op=BitwiseAnd, arg1=W a, arg2=W b }
 
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
 cond ?. (a,b) = ((const_ 1 a  -. negcond) *. a) +. (negcond *. b)
@@ -133,22 +131,26 @@ a !=. b = (const_ 1 a) -. (a ==. b)
 -- only have 0 or 1 in the multiplication.
 
 voodooFromVexp :: V.Vexp -> Either String Voodoo
-voodooFromVexp (V.Load n) =
+voodooFromVexp (V.Vexp vx _ _) = voodooFromVx vx
+
+voodooFromVx :: V.Vx -> Either String Voodoo
+
+voodooFromVx (V.Load n) =
   do inname <- (case n of
                    Name (_:s:rest) -> Right $ Name $ s:rest
                    _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
      return $    Project { outname=Name ["val"]
                           , inname
-                          , vec = V $ Load n }
-voodooFromVexp (V.RangeV {V.rmin, V.rstep, V.rref}) =
+                          , vec = W $ Load n }
+voodooFromVx (V.RangeV {V.rmin, V.rstep, V.rref}) =
   do v <- voodooFromVexp rref
-     return $ RangeV {rmin, rstep, rvec=V v}
+     return $ RangeV {rmin, rstep, rvec=W v}
 
-voodooFromVexp (V.RangeC {V.rmin, V.rstep, V.rcount}) =
+voodooFromVx (V.RangeC {V.rmin, V.rstep, V.rcount}) =
   return $ RangeC {rmin, rstep, rcount }
 
 
-voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
+voodooFromVx (V.Binop { V.binop, V.left, V.right}) =
   do l <- voodooFromVexp left
      r <- voodooFromVexp right
      case binop of
@@ -171,16 +173,16 @@ voodooFromVexp (V.Binop { V.binop, V.left, V.right}) =
        V.BitAnd -> Right $ (l &. r)
        _ -> Left $ "binop not implemented: " ++ show binop
 
-voodooFromVexp  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
+voodooFromVx  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
   do source <- voodooFromVexp shsource
      positions <- voodooFromVexp shpos
      case shop of
-       V.Gather -> Right $ Binary { op=Gather, arg1=V source, arg2=V positions }
-       V.Scatter -> let scatterfold = V $ pos_ source
-                        in Right $ Scatter { scattersource=V source, scatterfold, scatterpos=V positions }
+       V.Gather -> Right $ Binary { op=Gather, arg1=W source, arg2=W positions }
+       V.Scatter -> let scatterfold = W $ pos_ source
+                        in Right $ Scatter { scattersource=W source, scatterfold, scatterpos=W positions }
        _ -> Left $ "shop not implemented" ++ show shop
 
-voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
+voodooFromVx (V.Fold { V.foldop, V.fgroups, V.fdata}) =
   do arg1 <- voodooFromVexp fgroups
      arg2 <- voodooFromVexp fdata
      let op = case foldop of
@@ -188,18 +190,18 @@ voodooFromVexp (V.Fold { V.foldop, V.fgroups, V.fdata}) =
                V.FMax -> FoldMax
                V.FMin -> FoldMin
                V.FSel -> FoldSelect
-     return $ Binary { op, arg1=V arg1, arg2=V arg2 }
+     return $ Binary { op, arg1=W arg1, arg2=W arg2 }
 
-voodooFromVexp (V.Partition {V.pdata, V.pivots}) =
+voodooFromVx (V.Partition {V.pdata, V.pivots}) =
   do arg1 <- voodooFromVexp pdata
      arg2 <- voodooFromVexp pivots
-     return $ Binary {op=Partition, arg1=V arg1, arg2=V arg2 }
+     return $ Binary {op=Partition, arg1=W arg1, arg2=W arg2 }
 
-voodooFromVexp s_ = Left $ "implement me: " ++ show s_
+voodooFromVx s_ = Left $ "implement me: " ++ show s_
 
-voodoosFromVexps :: [(V.Vexp, Maybe Name)] -> Either String [Voodoo]
+voodoosFromVexps :: [V.Vexp] -> Either String [Voodoo]
 
-voodoosFromVexps vexps = mapM (voodooFromVexp  . fst) vexps
+voodoosFromVexps vexps = mapM voodooFromVexp vexps
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =
@@ -209,7 +211,7 @@ vrefsFromVoodoos vecs =
      let post = tail $ reverse $ finalLog -- remove dummy, reverse
      --let tr = "\n--Vref output:\n" ++ groom post
      --return $ trace tr post
-     return $ trace (let s = dagSize  vecs in "vecs (depth,count): " ++ (show s) ++ "\npost len: " ++ (show $ length post)) post
+     return $ trace (show $ length post) post
        where process (state, _) v  = memVrefFromVoodoo state v
 
 type LookupTable = Map Voodoo Int
@@ -237,24 +239,24 @@ vrefFromVoodoo state (Load n) = return $ (state, Load n)
 vrefFromVoodoo state (RangeC {rmin,rstep,rcount} ) =
   return $ (state, RangeC {rmin,rstep,rcount})
 
-vrefFromVoodoo state (RangeV  {rmin,rstep,rvec=V rvec}) =
+vrefFromVoodoo state (RangeV  {rmin,rstep,rvec=W rvec}) =
   do (state', n') <- memVrefFromVoodoo state rvec
      return $ (state', RangeV { rmin,rstep, rvec= n' })
 
-vrefFromVoodoo state (Scatter {scattersource=V scattersource
-                              , scatterfold= V scatterfold
-                              , scatterpos=V scatterpos }) =
+vrefFromVoodoo state (Scatter {scattersource=W scattersource
+                              , scatterfold=W scatterfold
+                              , scatterpos=W scatterpos }) =
   do (state', n') <- memVrefFromVoodoo state scattersource
      (state'', n'') <- memVrefFromVoodoo state' scatterfold
      (state''', n''') <- memVrefFromVoodoo state'' scatterpos
      return $ (state''', Scatter {scattersource= n', scatterfold= n'', scatterpos= n'''})
 
-vrefFromVoodoo state (Project {outname, inname, vec=V vec}) =
+vrefFromVoodoo state (Project {outname, inname, vec=W vec}) =
   do (state', n') <- memVrefFromVoodoo state vec
      return $ (state', Project { outname, inname, vec=n' })
 
 
-vrefFromVoodoo state (Binary { op, arg1=V arg1 , arg2=V arg2 }) =
+vrefFromVoodoo state (Binary { op, arg1=W arg1 , arg2=W arg2 }) =
   do (state', n1) <- memVrefFromVoodoo state arg1
      (state'', n2) <- memVrefFromVoodoo state' arg2
      return $ (state'', Binary { op, arg1=n1, arg2=n2})
@@ -308,7 +310,7 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: [(V.Vexp, Maybe Name)] -> Config -> Either String Vdl
+vdlFromVexps :: [V.Vexp] -> Config -> Either String Vdl
 vdlFromVexps vexps _ =
   do voodoos <- voodoosFromVexps vexps
      vrefs <- vrefsFromVoodoos voodoos
