@@ -381,10 +381,13 @@ solve' config M.FKJoin { M.table -- can be derived rel
                } =
   do Env leftcols leftenv  <- solve config table
      Env rightcols  _ <- solve config references
-     (_, fkcol) <- NameTable.lookup idxcol leftenv
-     let sright = (do dimcol@(Vexp _ _ ralias) <- rightcols -- list monad
-                      let (Vexp vx info _) = gather dimcol fkcol
-                      return (Vexp vx info ralias))
+     (_, gatheridx) <- NameTable.lookup idxcol leftenv
+     sright <- sequence $
+       (do dimcol@(Vexp _ _ ralias) <- rightcols -- list monad
+           return $ do (Vexp vx info _) <- complete $ Shuffle { shop=Gather
+                                                              , shsource=dimcol
+                                                              , shpos=gatheridx}
+                       return (Vexp vx info ralias))
      return $ leftcols ++ sright
 
 solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
@@ -397,10 +400,13 @@ solve' config M.Select { M.child -- can be derived rel
      fdata  <- sc childenv predicate
      fgroups <- pos_ fdata
      idx <- complete $ Fold {foldop=FSel, fgroups, fdata}
-     return (do dat@(Vexp _ _ alias)  <- childcols -- list monad
-                let (Vexp vx info _) = gather dat idx
-                return (Vexp vx info alias)
-            )
+     sequence (do unfiltered@(Vexp _ _ alias)  <- childcols -- list monad
+                  return $ do (Vexp vx info _) <- complete $
+                                Shuffle { shop=Gather
+                                        , shsource=unfiltered
+                                        , shpos=idx }
+                              return (Vexp vx info alias)
+              )
 
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
