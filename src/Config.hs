@@ -1,5 +1,6 @@
 module Config ( Config(..)
               , ColInfo(..)
+              , checkColInfo
               , makeConfig
               , BoundsRec
               ) where
@@ -11,7 +12,7 @@ import qualified Data.Vector as V
 import Control.Monad(foldM)
 import Control.DeepSeq(NFData)
 import GHC.Generics
-
+import Control.Exception.Base
 
 -- we use integer in the rec so that strings get
 -- parsed to Integer.
@@ -35,9 +36,14 @@ data ColInfo = ColInfo
 
 instance NFData ColInfo
 
+checkColInfo :: ColInfo -> ColInfo
+checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
+
+
 addEntry :: NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
 addEntry nametab (tab,col,colmin,colmax,colcount) =
-  NameTable.insert (Name [tab,col]) ColInfo { bounds=(colmin, colmax), count=colcount } nametab
+  let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount }
+  in NameTable.insert (Name [tab,col]) colinfo nametab
 
 makeConfig :: Integer -> V.Vector BoundsRec -> [Table] -> Either String Config
 makeConfig grainsizelg boundslist tables =

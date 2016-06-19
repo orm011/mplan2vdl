@@ -124,9 +124,6 @@ complete vx =
   do colinfo <- inferMetadata vx
      return (Vexp vx (checkColInfo colinfo) Nothing)
 
-checkColInfo :: ColInfo -> ColInfo
-checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
-
 inferMetadata :: Vx -> Either String ColInfo
 
 inferMetadata RangeV {rmin=rstart,rstep,rref=(Vexp _ (ColInfo {count}) _)}
