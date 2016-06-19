@@ -376,15 +376,21 @@ solve' config M.FKJoin { M.table -- can be derived rel
                , M.idxcol
                } =
   do Env leftcols leftenv  <- solve config table
-     Env rightcols  _ <- solve config references
-     (_, gatheridx) <- NameTable.lookup idxcol leftenv
-     sright <- sequence $
-       (do dimcol@(Vexp _ _ ralias) <- rightcols -- list monad
+     Env rightcols  rightenv <- solve config references
+     let lookleft = NameTable.lookup idxcol leftenv
+     let lookright = NameTable.lookup idxcol rightenv
+     (factcols, gatheridx, dimcols) <- case (lookleft, lookright) of
+       (Left _, Left _) -> Left "column not found on either side"
+       (Right (_,idx), Left _) -> Right (leftcols, idx, rightcols)
+       (Left _, Right (_, idx)) -> Right (rightcols, idx, leftcols)
+       (Right _, Right _) -> Left "ambiguous join key lookup: both sides have a match"
+     joined_dimcols  <- sequence $
+       (do dimcol@(Vexp _ _ ralias) <- dimcols -- list monad
            return $ do (Vexp vx info _) <- complete $ Shuffle { shop=Gather
                                                               , shsource=dimcol
                                                               , shpos=gatheridx}
                        return (Vexp vx info ralias))
-     return $ leftcols ++ sright
+     return $ factcols ++ joined_dimcols
 
 solve' _ (M.FKJoin _ _ _) = Left $ "unsupported fkjoin (only fk-like\
 \ joins with a plain table allowed)"
