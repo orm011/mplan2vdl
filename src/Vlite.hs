@@ -404,8 +404,10 @@ solve' config M.Select { M.child -- can be derived rel
      fdata  <- sc childenv predicate
      fgroups <- pos_ fdata
      idx <- complete $ Fold {foldop=FSel, fgroups, fdata}
-     return (do dat  <- childcols -- list monad
-                return $ gather dat idx)
+     return (do dat@(Vexp _ _ alias)  <- childcols -- list monad
+                let (Vexp vx info _) = gather dat idx
+                return (Vexp vx info alias)
+            )
 
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
