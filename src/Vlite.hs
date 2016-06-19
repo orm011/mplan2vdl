@@ -119,18 +119,13 @@ cond ?. (a,b) =   do ones <- ones_ cond
                      right <- negcond *. b
                      left +. right
 
-gather :: Vexp -> Vexp -> Vexp
-gather dat@(Vexp _ (ColInfo {bounds}) _)  pos@(Vexp _ (ColInfo {count}) _) =
-  let vx = Shuffle {shop=Gather, shsource=dat, shpos=pos}
-      info = ColInfo { bounds, count }
-      -- data vals bounded by data values.
-      -- size bounded by count array.
-  in (Vexp vx info Nothing)
-
 complete :: Vx -> Either String Vexp
 complete vx =
   do colinfo <- inferMetadata vx
-     return (Vexp vx colinfo Nothing)
+     return (Vexp vx (checkColInfo colinfo) Nothing)
+
+checkColInfo :: ColInfo -> ColInfo
+checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
 
 inferMetadata :: Vx -> Either String ColInfo
 
