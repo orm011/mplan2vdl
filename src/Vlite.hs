@@ -548,7 +548,8 @@ maxForWidth vec =
 
 makeCompositeKey :: NonEmpty Vexp -> Either String Vexp
 makeCompositeKey (firstvexp :| rest) =
-  do out <- foldM composeKeys firstvexp rest
+  do shifted <- shiftToZero firstvexp -- needed bc empty list won't shift
+     out <- foldM composeKeys shifted rest
      maxval <- maxForWidth out
      maxvalV <- const_ maxval out
      out &. maxvalV  --mask used as a hint to Voodoo (to infer size)
