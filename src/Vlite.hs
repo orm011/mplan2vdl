@@ -339,19 +339,12 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
                  -- allow collisions b/c they do happen .
                 (Vexp vx info _)  <- fromScalar asenv expr --either monad
                 return $ addEntry lsts $ Vexp vx  info $ outputName arg
-           -- solveForward nt (M.Ref col, malias) = do (_, (x,y) ) <- NameTable.lookup col nt
-           --                                          return (case malias of
-           --                                                     Nothing -> (x, Just col, y)
-           --                                                     Just alias -> (x, Just alias, y))
-           -- solveForward _ _ = Left $ "this input is not a forward"
 
 
 -- problem:
 -- n2.n_name as all_nations.nation defined then directly uesd in a subsequent expression. not found.
 -- L2 as L2.L2 used to redefined L2.L2 from a sub-output (name clash on L2.L2) then not used
 -- in the  same project list .
-
-
 solve' config M.GroupBy { M.child,
                           M.inputkeys,
                           M.outputaggs } =
