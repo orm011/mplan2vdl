@@ -1,4 +1,4 @@
-module Error (unexpected,todo,check) where
+module Error (unexpected,todo,check,Err) where
 
 --import Text.Groom
 import Text.Printf (printf)
@@ -12,3 +12,5 @@ todo str a = printf "TODO %s %s" str (take 50 $ show a)
 -- this way to insert extra checks
 check :: (Show a) => a -> (a -> Bool) -> String -> Either String ()
 check val cond msg = if cond val then Right () else Left $ unexpected msg val
+
+type Err a = Either String a
