@@ -139,11 +139,15 @@ inferMetadata RangeC {rmin=rstart, rstep, rcount}
      in return $ ColInfo { bounds=(minimum extremes, maximum extremes)
                          , count=rcount }
 
-inferMetadata Shuffle { shop=_
+inferMetadata Shuffle { shop=Scatter
                       , shsource=(Vexp _ (ColInfo {bounds=sourcebounds})  _)
                       , shpos=(Vexp _ (ColInfo {bounds=(_,posmax)}) _) }
   = return $ ColInfo { bounds=sourcebounds, count=posmax }
 
+inferMetadata Shuffle { shop=Gather
+                      , shsource=(Vexp _ (ColInfo {bounds=sourcebounds})  _)
+                      , shpos=(Vexp _ (ColInfo {count}) _) }
+  = return $ ColInfo { bounds=sourcebounds, count }
 
 inferMetadata Fold { foldop=FSel
                    , fgroups=_
