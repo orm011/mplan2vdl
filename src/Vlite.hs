@@ -206,11 +206,11 @@ inferMetadata Binop
             Min -> Right (min l1 l2, min u1 u2) -- this is true, right?
             Max -> Right (max l1 l2, max u1 u2)
             Mod -> Right (0, u2) -- assuming mods are always positive
-            BitAnd -> if (l1 > 0 && l2 > 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
+            BitAnd -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
                       then do mx <- min (maxForWidth left) (maxForWidth right)
                               return (0,mx) -- precision could be improved.
                       else Left $ E.todo "cant deduce BitAnd bounds" ((l1,u1),(l2,u2))
-            BitOr -> if (l1 > 0 && l2 > 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
+            BitOr -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
                      then do mx <- max (maxForWidth left) (maxForWidth right)
                              return (0,mx) -- precision could be improved.
                      else Left $ E.todo "cant deduce BitOr bounds" ((l1,u1),(l2,u2))
