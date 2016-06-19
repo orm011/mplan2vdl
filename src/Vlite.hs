@@ -579,7 +579,7 @@ composeKeys l r =
      let oldbits = getBitWidth sleft
      let deltabits = getBitWidth sright
      let newbits = oldbits + deltabits
-     check newbits (<= 32) "cannot compose keys to something larger than 32 bits"
+     check newbits (< 32) "cannot compose keys to something larger than 32 bits"
      check deltabits (< 32) "we are shifting a 32 bit int by >=32 bits. undefined in C."
      dbits <- const_  deltabits sright
      shiftedleft <- sleft <<. dbits -- make space
