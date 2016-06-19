@@ -543,7 +543,7 @@ maxForWidth vec =
   -- bitwidth is 1, then max should be 0b1. (1 << 1) - 1 = (2 - 1) = 1 = 0xb1
   -- bitwidth is 2, then max should be 0xb11. (1 << 2) -1 = (4 - 1) = 3 = 0xb11
   -- cannot really subtract 1 from 1 << 31, b/c is underflow. so just check.
-     check width (< 31) "about to shift by more than 31"
+     check width (< 32) "about to shift by 32 or more"
      return $ (1 `shiftL` (fromInteger width)) - 1
 
 makeCompositeKey :: NonEmpty Vexp -> Either String Vexp
