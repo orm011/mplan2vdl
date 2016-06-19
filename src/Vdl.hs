@@ -2,7 +2,7 @@ module Vdl (vdlFromVexps) where
 
 import Control.Monad(foldM)
 import Name(Name(..))
-import Data.Int
+--import Data.Int
 import Debug.Trace
 --import Text.Groom
 import GHC.Generics
@@ -24,8 +24,8 @@ its function is to be easy to convert to text format.
 data Vd a =
   Load Name
   | Project { outname::Name , inname::Name, vec :: a } -- full rename only. used right after load
-  | RangeV { rmin::Int64, rstep::Int64, rvec :: a }
-  | RangeC {rmin::Int64, rstep::Int64, rcount::Int64 }
+  | RangeV { rmin::Integer, rstep::Integer, rvec :: a }
+  | RangeC {rmin::Integer, rstep::Integer, rcount::Integer }
   | Binary { op::Voodop, arg1::a, arg2::a  }
   | Scatter { scattersource::a, scatterfold::a, scatterpos::a }
   deriving (Eq,Show,Generic,Ord)
@@ -35,7 +35,7 @@ data W = W (Vd W) deriving (Eq,Show,Ord,Generic)-- used so that it can recurse f
 type Voodoo = Vd W
 type Vref = Vd Int -- used for ref version that can be printed as a series of expressions
 
-const_ :: Int64 -> Voodoo -> Voodoo
+const_ :: Integer -> Voodoo -> Voodoo
 const_ k v  = RangeV { rmin=k, rstep=0, rvec=W v }
 
 pos_ :: Voodoo -> Voodoo

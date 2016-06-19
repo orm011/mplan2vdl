@@ -115,8 +115,8 @@ TypeSpec
 | identifier '(' NumberListNE ')' { TypeSpec { tname=$1, tparams=$3 } }
 
 NumberListNE
-: number { ($1 : []) :: [Int] }
-| number ',' NumberListNE { ($1 : $3) :: [Int] }
+: number { ($1 : []) :: [Integer] }
+| number ',' NumberListNE { ($1 : $3) :: [Integer] }
 
 
  -------------------------------- Haskell ---------------------------------

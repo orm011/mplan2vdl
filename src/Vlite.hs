@@ -27,6 +27,9 @@ import Text.Groom
 import Data.List.NonEmpty(NonEmpty(..))
 --type Map = Map.Map
 --type VexpTable = Map Vexp Vexp  --used to dedup Vexps
+import Text.Printf
+import Control.Exception.Base
+
 
 type NameTable = NameTable.NameTable
 
@@ -40,8 +43,8 @@ instance NFData FoldOp
 
 data Vx =
   Load Name
-  | RangeV { rmin :: Int64, rstep :: Int64, rref::Vexp }
-  | RangeC { rmin :: Int64, rstep :: Int64, rcount::Int64 }
+  | RangeV { rmin :: Integer, rstep :: Integer, rref::Vexp }
+  | RangeC { rmin :: Integer, rstep :: Integer, rcount::Integer }
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
@@ -62,7 +65,7 @@ instance NFData Vexp
 pos_ :: Vexp -> Err Vexp
 pos_ v = complete $ RangeV {rmin=0, rstep=1, rref=v}
 
-const_ :: Int64 -> Vexp -> Err Vexp
+const_ :: Integer -> Vexp -> Err Vexp
 const_ k v = complete $ RangeV{rmin=k, rstep=0, rref=v}
 
 zeros_ :: Vexp -> Err Vexp
@@ -532,7 +535,7 @@ getScatterMask pdata@(Vexp _ (ColInfo {bounds=(pdatamin, pdatamax)}) _) =
   do pivots <- complete $ RangeC { rmin=pdatamin, rstep=1, rcount=pdatamax }
      complete $ Partition { pivots, pdata }
 
-maxForWidth :: Vexp -> Err Int64
+maxForWidth :: Vexp -> Err Integer
 maxForWidth vec =
   do let width = toInteger (getBitWidth vec)
   -- examples:
@@ -558,12 +561,19 @@ shiftToZero arg@(Vexp _ (ColInfo {bounds=(vmin,_)}) _)
             arg -. vminv
 
 -- bitwidth required to represent all members
-getBitWidth :: Vexp -> Int64
+getBitWidth :: Vexp -> Integer
 getBitWidth (Vexp _ (ColInfo {bounds=(l,u)}) _)
   = fromInteger $ max (bitsize l) (bitsize u)
 
-bitsize :: Int64 -> Integer
-bitsize num = toInteger $ (finiteBitSize num) - (countLeadingZeros num)
+bitsize :: Integer -> Integer
+bitsize num =
+  if num >= 0 then
+    if num < toInteger (maxBound :: Int32) then
+      let num32 = (fromInteger num) :: Int32
+          ans = toInteger $ (finiteBitSize num32) - (countLeadingZeros num32)
+      in assert (ans <= 31) ans
+    else error (printf "number %d is larger than maxInt32" num)
+  else error (printf "bitwidth only allowed for non-negative numbers (num=%d)" num)
 
 composeKeys :: Vexp -> Vexp -> Either String Vexp
 composeKeys l r =

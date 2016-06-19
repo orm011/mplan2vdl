@@ -53,7 +53,7 @@ data ScannedToken = ScannedToken { line :: Int
 data Token =
              Word String
            | ValueLiteral String
-           | NumberLiteral Int
+           | NumberLiteral Integer
            | LCurly
            | RCurly
            | LBrack

@@ -14,7 +14,7 @@ import Name(Name(..),TypeSpec(..))
 import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
-import Data.Int
+--import Data.Int
 --import Data.Monoid(mappend)
 --import Debug.Trace
 --import Control.Monad(foldM, mapM, void)
@@ -42,8 +42,8 @@ data MType =
   | MMonth
   | MDouble
   | MChar
-  | MDecimal Int Int
-  | MSecInterval Int
+  | MDecimal Integer Integer
+  | MSecInterval Integer
   | MMonthInterval
   | MBoolean
   deriving (Eq, Show, Generic, Data)
@@ -72,13 +72,13 @@ resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
         f "boolean" [] = Right MBoolean
         f name _ = Left $ E.unexpected  "unsupported typespec" name
 
-resolveCharLiteral :: String -> Either String Int64
+resolveCharLiteral :: String -> Either String Integer
 resolveCharLiteral ch = dictEncode ch
 
 {- assumes date is formatted properly: todo. error handling for tis -}
-resolveDateString :: String -> Int64
+resolveDateString :: String -> Integer
 resolveDateString datestr =
-  fromIntegral $ diffDays day zero
+  diffDays day zero
   where zero = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
         day = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" datestr) :: Day
 
@@ -141,7 +141,7 @@ resolveUnopOpcode nm =
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
   Ref Name
-  | IntLiteral Int64 {- use the widest possible type to not lose info -}
+  | IntLiteral Integer {- use the widest possible type to not lose info -}
   | Unary { unop:: UnaryOp, arg::ScalarExpr }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
@@ -210,7 +210,7 @@ data RelExpr =
               , idxcol :: Name
               }
   | TopN      { child :: RelExpr
-              , n :: Int64
+              , n :: Integer
               }
   deriving (Eq,Show, Generic, Data)
 instance NFData RelExpr
@@ -479,9 +479,9 @@ conjunction exprs =
        where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
 
 
-readIntLiteral :: String -> Either String Int64
+readIntLiteral :: String -> Either String Integer
 readIntLiteral str =
-  case reads str :: [(Int64, String)] of
+  case reads str :: [(Integer, String)] of
     [(num, [])] -> Right num
     _ -> Left $ E.unexpected "integer literal" str
 

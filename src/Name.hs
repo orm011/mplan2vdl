@@ -17,7 +17,7 @@ import Data.Data
 
 {- eg decimal(15,2) , or smallint  -}
 data TypeSpec = TypeSpec { tname :: String
-                         , tparams :: [Int] } deriving (Eq,Show,Generic)
+                         , tparams :: [Integer] } deriving (Eq,Show,Generic)
 
 instance NFData TypeSpec
 

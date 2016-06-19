@@ -4,12 +4,12 @@ module Dict
 
 import qualified  Data.Map.Strict as Map
 import qualified Data.ByteString as B
-import Data.Int
+import Data.Int()
 --import Data.Word
 
 type Map = Map.Map
 
-dictEncode :: String -> Either String Int64
+dictEncode :: String -> Either String Integer
 dictEncode str =
   case Map.lookup (B.pack (map (toEnum . fromEnum)  str)) dict of
     Just x -> Right x
@@ -85,7 +85,7 @@ packFirst (a,b) =
   let w8 = map (toEnum . fromEnum) a in
   (B.pack w8, b)
 
-dict :: Map B.ByteString Int64
+dict :: Map B.ByteString Integer
 dict = Map.fromList $  map (packFirst . lastTwo)
  [(region,r_name,"AFRICA",16)
  ,(region,r_name,"AMERICA",40)
