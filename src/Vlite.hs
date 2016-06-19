@@ -1,5 +1,6 @@
 module Vlite( vexpsFromMplan
             , Vexp(..)
+            , Vx(..)
             , BinaryOp(..)
             , ShOp(..)
             , FoldOp(..)) where
