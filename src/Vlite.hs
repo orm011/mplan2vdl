@@ -554,7 +554,8 @@ shiftToZero :: Vexp -> Err Vexp
 shiftToZero arg@(Vexp _ (ColInfo {bounds=(vmin,_)}) _)
   = if vmin == 0 then return arg
     else do vminv <- const_ vmin arg
-            arg -. vminv
+            ret@(Vexp _ (ColInfo {bounds=(newmin,_)}) _) <- arg -. vminv
+            return $ assert (newmin == 0) ret
 
 -- bitwidth required to represent all members
 getBitWidth :: Vexp -> Integer
