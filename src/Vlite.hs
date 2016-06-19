@@ -533,7 +533,7 @@ getScatterMask pdata@(Vexp _ (ColInfo {bounds=(pdatamin, pdatamax)}) _) =
 
 maxForWidth :: Vexp -> Err Integer
 maxForWidth vec =
-  do let width = toInteger (getBitWidth vec)
+  do let width = getBitWidth vec
   -- examples:
   -- bitwidth is 0, then max should be 0:  (1 << 0) - 1 = (1 - 1) = 0
   -- bitwidth is 1, then max should be 0b1. (1 << 1) - 1 = (2 - 1) = 1 = 0xb1
@@ -559,7 +559,7 @@ shiftToZero arg@(Vexp _ (ColInfo {bounds=(vmin,_)}) _)
 -- bitwidth required to represent all members
 getBitWidth :: Vexp -> Integer
 getBitWidth (Vexp _ (ColInfo {bounds=(l,u)}) _)
-  = fromInteger $ max (bitsize l) (bitsize u)
+  = max (bitsize l) (bitsize u)
 
 bitsize :: Integer -> Integer
 bitsize num =
