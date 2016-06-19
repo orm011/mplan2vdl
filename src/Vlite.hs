@@ -267,7 +267,7 @@ whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
 solve :: Config -> M.RelExpr -> Either String Env
-solve config relexp = solve' config relexp >>= makeEnv
+solve config relexp = (solve' config relexp) >>= makeEnv
 
 solve' :: Config -> M.RelExpr -> Either String [Vexp]
 
