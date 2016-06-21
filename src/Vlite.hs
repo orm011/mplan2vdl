@@ -336,9 +336,11 @@ solve' config M.Table { M.tablename=_
   in do snontids@(refv@Vexp { }: _)  <- nontidloads --either
         case tidcols of
           [] -> return $ snontids
-          [tidcol] ->  let anon = pos_ refv
-                           named = anon { name=Just $ decideAlias tidcol }
-                       in return $ named : snontids
+          [tidcol@(orig,_)] ->
+            let anon = pos_ refv
+                lineage = Just (orig, pos_ refv) -- lineage of itself.
+                named = anon { lineage, name=Just $ decideAlias tidcol }
+            in return $ named : snontids
           _ -> Left $ E.unexpected "multiple tidcols defined in table" tidcols
   where decideAlias (orig, Nothing) = orig
         decideAlias (_, Just x) = x
