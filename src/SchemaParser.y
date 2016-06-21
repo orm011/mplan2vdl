@@ -13,7 +13,7 @@ import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 --import Text.Groom
 --import Debug.Trace
-import Data.String.Utils(join)
+import Data.String.Utils(join,replace)
 import Name(Name(..),TypeSpec(..))
 import Data.List.NonEmpty hiding (head,tail,take)
 import Prelude hiding (zip)
@@ -107,8 +107,8 @@ QQualifiedName
 : QQualifiedNameBuilder { Name  $ dropsys $1 }
 
 QQualifiedNameBuilder
-: qidentifier { ( [$1] :: [String]) --qiden }
-| qidentifier '.' QQualifiedNameBuilder { ($1 : $3) :: [String] --qiden }
+: qidentifier { ( [dropq $1] :: [String]) --qiden }
+| qidentifier '.' QQualifiedNameBuilder { ( (dropq $1) : $3) :: [String] --qiden }
 
 TypeSpec
 : identifier   { TypeSpec { tname = $1, tparams=[]  } }
@@ -153,6 +153,9 @@ fromString :: String -> Either String [Table]
 fromString str  =
   let tokens = Scanner.scan str
   in parse tokens
+
+dropq :: String -> String
+dropq str = replace "\"" "" str
 
 -- drop the 'sys' prefix that shows up some times (but not all of the time)
 dropsys :: [String] -> [String]
