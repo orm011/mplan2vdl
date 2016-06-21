@@ -131,7 +131,7 @@ a !=. b = (const_ 1 a) -. (a ==. b)
 -- only have 0 or 1 in the multiplication.
 
 voodooFromVexp :: V.Vexp -> Either String Voodoo
-voodooFromVexp (V.Vexp vx _ _) = voodooFromVx vx
+voodooFromVexp (V.Vexp vx _ _ _) = voodooFromVx vx
 
 voodooFromVx :: V.Vx -> Either String Voodoo
 

@@ -1,4 +1,4 @@
-module Error (unexpected,todo,check,Err) where
+module Error (unexpected,todo,check,Err,errzip) where
 
 --import Text.Groom
 import Text.Printf (printf)
@@ -14,3 +14,8 @@ check :: (Show a) => a -> (a -> Bool) -> String -> Either String ()
 check val cond msg = if cond val then Right () else Left $ unexpected msg val
 
 type Err a = Either String a
+
+errzip :: Err a -> Err b -> Err (a,b)
+errzip (Left m)  _ = Left m
+errzip _  (Left m) = Left m
+errzip (Right a) (Right b) = Right (a,b)

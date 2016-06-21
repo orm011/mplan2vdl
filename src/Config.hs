@@ -7,12 +7,17 @@ module Config ( Config(..)
 
 import Name as NameTable
 --import Data.Int
-import SchemaParser(Table(..))
+import SchemaParser(Table(..),Key(..))
 import qualified Data.Vector as V
 import Control.Monad(foldM)
 import Control.DeepSeq(NFData)
 import GHC.Generics
 import Control.Exception.Base
+import qualified Data.Map.Strict as Map
+import Data.List.NonEmpty(NonEmpty(..))
+import qualified Data.List.NonEmpty as N
+type Map = Map.Map
+
 
 -- we use integer in the rec so that strings get
 -- parsed to Integer.
@@ -48,13 +53,26 @@ addEntry nametab (tab,col,colmin,colmax,colcount) =
 makeConfig :: Integer -> V.Vector BoundsRec -> [Table] -> Either String Config
 makeConfig grainsizelg boundslist tables =
   do colinfo <- foldM addEntry NameTable.empty boundslist
-     return $ Config { grainsizelg, colinfo, tables }
+     let allrefs = foldMap makeFKEntries tables
+     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs }
 
+concatName :: Name -> Name -> Name
+concatName (Name a) (Name b) = Name (a ++ b)
 
-data Config =  Config  { grainsizelg :: Integer -- log of grainsize
+makeFKEntries :: Table -> [(NonEmpty (Name, Name), Name)]
+makeFKEntries Table { name, fkeys } =
+  do FKey { references, colmap, fkconstraint } <- fkeys
+     let (local,remote) = N.unzip colmap
+     let localcols = fmap (concatName name) local
+     let remotecols = fmap (concatName references) remote
+     let joinidx = concatName name fkconstraint
+     return $ (N.zip localcols remotecols, joinidx)
+
+data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , tables:: [Table]
+                       , fkrefs :: Map (NonEmpty (Name,Name)) Name
+                                   -- fully qualifed column mames
                        }
 
 --- which queries do we want.
--- really: given colname.
+--- really: given colname

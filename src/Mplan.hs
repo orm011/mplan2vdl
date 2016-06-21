@@ -205,9 +205,9 @@ data RelExpr =
               , inputkeys :: [Name]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
-  | FKJoin    { table :: RelExpr
-              , references :: RelExpr
-              , idxcol :: Name
+  | EquiJoin    { table :: RelExpr
+                , references :: RelExpr
+                , cond :: (Name, Name)
               }
   | TopN      { child :: RelExpr
               , n :: Integer
@@ -306,26 +306,24 @@ solve P.Node { P.relop = "select"
 
 {-only handling joins where the condition is
 done via  a foreign key -}
-solve arg@P.Node { P.relop = "join"
+solve P.Node { P.relop = "join"
              , P.children = [l, r]
              , P.arg_lists =
                [ P.Expr
                  { P.expr=P.Infix
                    { P.infixop = "="
-                   , P.left = P.Expr (P.Ref idxcol _) Nothing
-                   , P.right = P.Expr (P.Ref _ attrs) Nothing
+                   , P.left = P.Expr (P.Ref left  _) Nothing
+                   , P.right = P.Expr (P.Ref right _) Nothing
                    }
                  , P.alias = _}]:[] {-only one condition-}
              } =
   do table  <- solve l
      references <- solve r
-     let hasJoinIdx attrlist = filter (\f -> case f of { P.JoinIdx _ -> True; _ -> False; }) attrlist  /= []
-     check attrs hasJoinIdx $ "need a join index for a fk join at " ++ (take 100 $ show arg)
-     return $ FKJoin { table, references, idxcol }
+     return $ EquiJoin { table, references, cond=(left, right) }
 
 solve arg@P.Node { P.relop="join"
              , P.children= _
-             , P.arg_lists=_ } = Left $ E.unexpected "only handling joins via fk right now" arg
+             , P.arg_lists=_ } = Left $ E.unexpected "only handling joins with a single equality condition" arg
 
 
 solve P.Node { P.relop = "top N"
@@ -496,25 +494,25 @@ pushFKJoins :: RelExpr -> RelExpr
 pushFKJoins = rewrite swap
   where -- pattern order matters in terms of which gets preferred
     --dimension table selects get pushed up as well, after fact table ones
-    swap FKJoin { table
+    swap EquiJoin { table
                 , references = Select { child
                                        , predicate }
-                , idxcol
+                , cond
                 } =
-      Just $ Select { child=FKJoin { table
-                                   , references = child
-                                   , idxcol }
+      Just $ Select { child=EquiJoin { table
+                                     , references = child
+                                     , cond }
                     , predicate }
     -- fact table selects get pushed up as well, after dim table
     -- NOTE: the predicate merge step is meant to map bottommost to leftmost
-    swap FKJoin { table = Select { child=selectchild -- push left select
-                                 , predicate }
-                , references
-                , idxcol
-                } =
-      Just $ Select { child=FKJoin { table = selectchild
-                                   , references
-                                   , idxcol }
+    swap EquiJoin { table = Select { child=selectchild -- push left select
+                                   , predicate }
+                  , references
+                  , cond
+                  } =
+      Just $ Select { child=EquiJoin { table = selectchild
+                                     , references
+                                     , cond }
                     , predicate }
     swap _ = Nothing
 

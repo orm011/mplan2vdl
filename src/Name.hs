@@ -4,7 +4,8 @@ module Name (Name(..)
             ,empty
             ,insert
             ,insertWeak
-            ,lookup) where
+            ,lookup
+            ,lookup_err) where
 
 import Data.String.Utils(join)
 import qualified Data.Map.Strict as Map
@@ -59,6 +60,12 @@ isprefix [] _  = True
 isprefix _ [] = False
 isprefix (a:resta) (b:restb) =
   if a == b then isprefix resta restb else False
+
+lookup_err :: Name -> NameTable v -> (Name, v)
+lookup_err n tab =
+  case lookup n tab of
+    Left _ -> error "not found"
+    Right ans -> ans
 
 lookup :: Name -> NameTable v -> Either String (Name, v)
 lookup n@(Name lst) (NameTable nt) =
