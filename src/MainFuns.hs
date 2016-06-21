@@ -1,6 +1,6 @@
 module MainFuns (main) where
 
-import System.Environment (getProgName)
+import System.Environment (getProgName,getArgs)
 import qualified System.Exit
 import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
@@ -84,6 +84,8 @@ readBoundsFile fname =
 
 main :: IO ()
 main = do
+  gargs <-  getArgs
+  hPutStrLn stderr (show gargs)
   cmdargs <- cmdArgs cmdTemplate
   checkUsage cmdargs
   let action = if dot cmdargs
