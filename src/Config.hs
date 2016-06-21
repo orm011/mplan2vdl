@@ -66,7 +66,11 @@ makeFKEntries Table { name, fkeys } =
      let localcols = fmap (concatName name) local
      let remotecols = fmap (concatName references) remote
      let joinidx = concatName name fkconstraint
-     return $ (N.zip localcols remotecols, joinidx)
+     let implicit = N.zip localcols remotecols
+     let tidname = concatName references (Name ["%TID%"])
+     let explicit = ( joinidx
+                    , tidname ) :|[]
+     [ (implicit,joinidx), (explicit, joinidx) ]
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
