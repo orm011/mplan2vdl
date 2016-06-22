@@ -686,9 +686,15 @@ composeKeys l r =
 make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Either String Vexp
 make2LevelFold config foldop fgroups fdata =
   do let pos = pos_ fgroups
-     let gsize = const_ (grainsizelg config) fgroups
-     let level1par = pos >>. gsize
-     level1groups <- composeKeys fgroups level1par
+     let log_gsize = const_ (grainsizelg config) fgroups
+     let ones = ones_ fgroups
+     -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) | 1 = 01010101...
+     -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) | 1 = 00110011
+     -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) | 1 ...
+     let level1par = (pos >>. log_gsize) &. ones
+     let level1groups = composeKeys fgroups level1par
      let level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
      let level2results = complete $ Fold { foldop, fgroups, fdata=level1results }
-     return level2results
+     return  $ assert (getBitWidth level1par == 1) level2results
+
+
