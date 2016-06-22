@@ -408,15 +408,15 @@ solve' config M.GroupBy { M.child,
      let gbkeys = case keyvecs of
            [] -> zeros_ refv :| []
            a : rest -> a :| rest
-     gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } <- makeCompositeKey gbkeys
-     check gmin (== 0) "for a group key expecting gmin to be 0"
-     sequence $ (do pr@(agg, _) <- outputaggs -- list monad
-                    return ( do anon  <- solveAgg config env gkey agg
-                                let outalias = case pr of
-                                      (M.GDominated n, Nothing) -> Just n
-                                      (_, alias) -> alias
-                                      _ -> Nothing
-                                return $ anon {name=outalias}))
+     let gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } = makeCompositeKey gbkeys
+     assert (gmin == 0) $
+       sequence $ (do pr@(agg, _) <- outputaggs -- list monad
+                      return ( do anon  <- solveAgg config env gkey agg
+                                  let outalias = case pr of
+                                        (M.GDominated n, Nothing) -> Just n
+                                        (_, alias) -> alias
+                                        _ -> Nothing
+                                  return $ anon {name=outalias}))
 
 {-direct, foreign key join of two tables.
 for now, this join assumes but does not check
@@ -642,13 +642,13 @@ maxForWidth vec =
   in assert (width < 32) $ --"about to shift by 32 or more"
      (1 `shiftL` (fromInteger width)) - 1
 
-makeCompositeKey :: NonEmpty Vexp -> Either String Vexp
+makeCompositeKey :: NonEmpty Vexp -> Vexp
 makeCompositeKey (firstvexp :| rest) =
-  do let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
-     out <- foldM composeKeys shifted rest
-     let maxval = maxForWidth out
-     let maxvalV = const_ maxval out
-     return $ out &. maxvalV  --mask used as a hint to Voodoo (to infer size)
+  let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
+      out = foldl' composeKeys shifted rest
+      maxval = maxForWidth out
+      maxvalV = const_ maxval out
+  in  out &. maxvalV  --mask used as a hint to Voodoo (to infer size)
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
@@ -672,18 +672,15 @@ bitsize num =
     else error (printf "number %d is larger than maxInt32" num)
   else error (printf "bitwidth only allowed for non-negative numbers (num=%d)" num)
 
-composeKeys :: Vexp -> Vexp -> Either String Vexp
+composeKeys :: Vexp -> Vexp -> Vexp
 composeKeys l r =
-  do let sleft = shiftToZero l
-     let sright = shiftToZero r
-     let oldbits = getBitWidth sleft
-     let deltabits = getBitWidth sright
-     let newbits = oldbits + deltabits
-     check newbits (< 32) "cannot compose keys to something larger than 32 bits"
-     check deltabits (< 32) "we are shifting a 32 bit int by >=32 bits. undefined in C."
-     let dbits = const_  deltabits sright
-     let shiftedleft = sleft <<. dbits -- make space
-     return $ shiftedleft |. sright
+  let sleft = shiftToZero l
+      sright = shiftToZero r
+      oldbits = getBitWidth sleft
+      deltabits = getBitWidth sright
+      newbits = oldbits + deltabits
+  in assert (newbits < 32) $
+     (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
 make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Either String Vexp
