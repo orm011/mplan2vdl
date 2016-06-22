@@ -265,6 +265,16 @@ inferLineage Shuffle { shop=Gather
                                           , shpos
                                           })
 
+
+inferLineage Fold { foldop
+                   , fgroups
+                   , fdata = Vexp { lineage }
+                   } =
+  do (name, lineagev) <- lineage
+     if foldop == FMin || foldop == FMax
+       then return $ (name, complete $ Fold {foldop, fgroups, fdata=lineagev})
+       else Nothing
+
 inferLineage _ = Nothing
 
 
