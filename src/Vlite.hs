@@ -429,12 +429,12 @@ can be anything, as the pointers are still valid.
 
 (eg, after a filter on the right child...)
 -}
-solve' config M.EquiJoin { M.table -- can be derived rel
-                     , M.references = references@(M.Table _ _) -- only unfiltered rel.
-                     , M.cond=(key1, key2)
-                     } =
-  do Env leftcols leftenv  <- solve config table
-     Env rightcols rightenv <- solve config references
+solve' config M.EquiJoin { M.leftch
+                         , M.rightch
+                         , M.cond=(key1, key2)
+                         } =
+  do Env leftcols leftenv  <- solve config leftch
+     Env rightcols rightenv <- solve config rightch
      --- find the keys in the subrelations. the order is not well defined,
      --- so, try both and check if there was ambiguity.
      let tryOne =
@@ -458,7 +458,7 @@ solve' config M.EquiJoin { M.table -- can be derived rel
            then case (idx2,idx1) of
              (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,idx1,cols2) -- use the idx1 as gather mask against cols2
              (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,idx2,cols1)
-             (_,_) -> error "both children of this self join have been modified. need more work for that"
+             (_,_) -> error $ "both children of this self join have been modified.\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch)
            else let try1 = Map.lookup ((colname1,colname2):|[]) (fkrefs config)
                     try2 = Map.lookup ((colname2,colname1):|[]) (fkrefs config)
                 in case (try1,try2) of
@@ -472,7 +472,7 @@ solve' config M.EquiJoin { M.table -- can be derived rel
                             gidx = complete (Shuffle {shop=Gather, shpos=idx1, shsource=idxcol})
                         in case idx2 of
                           Vexp { vx=RangeV {rmin=0, rstep=1} } -> (cols1,gidx,cols2)
-                          _ -> error "assuming the second column has not been modified"
+                          _ -> error $ "(fk goes left -> right) the primary column (right) has been modified\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch) ++ "\n" ++ (take 50 $ show idx2)
                       (Nothing, Just joinidx) -> -- try2 worked. so colname2 -> colname1 wins.
                         let idxcol = Vexp { vx = Load joinidx
                                           , info = snd $ NameTable.lookup_err joinidx (colinfo config)
@@ -481,7 +481,7 @@ solve' config M.EquiJoin { M.table -- can be derived rel
                             gidx = complete (Shuffle {shop=Gather, shpos=idx2, shsource=idxcol})
                         in case idx1 of
                           Vexp { vx=RangeV {rmin=0, rstep=1} } -> (cols2,gidx,cols1)
-                          _ -> error "assuming the second column has not been modified"
+                          _ -> error $ "(fk goes right -> left) the primary column (left) has been modified\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch) ++ "\n" ++ (take 50 $ show idx1)
      let joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
                                let joined_anon = complete $ Shuffle { shop=Gather
                                                                     , shsource=dimcol
@@ -490,7 +490,7 @@ solve' config M.EquiJoin { M.table -- can be derived rel
      return $ factcols ++ joined_dimcols
 
 
-solve' _ (M.EquiJoin _ _ _) = Left $ "didnt pattern match the main join. this join is different."
+solve' _ (M.EquiJoin _ _ _) = error "didnt pattern match the main join. this join is different."
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
