@@ -4,7 +4,7 @@ module Error (unexpected,todo,check,Err,errzip) where
 import Text.Printf (printf)
 
 unexpected :: (Show a) => String -> a -> String
-unexpected str a = printf "unexpected %s %s" str (take 50 $ show a)
+unexpected str a = printf "unexpected %s %s" str (take 500 $ show a)
 
 todo :: (Show a) => String -> a -> String
 todo str a = printf "TODO %s %s" str (take 50 $ show a)

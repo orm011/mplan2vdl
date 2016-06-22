@@ -205,8 +205,8 @@ data RelExpr =
               , inputkeys :: [Name]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
-  | EquiJoin    { table :: RelExpr
-                , references :: RelExpr
+  | EquiJoin    { leftch :: RelExpr -- we will figure out if there is an fk later.
+                , rightch :: RelExpr
                 , cond :: (Name, Name)
               }
   | TopN      { child :: RelExpr
@@ -306,7 +306,7 @@ solve P.Node { P.relop = "select"
 
 {-only handling joins where the condition is
 done via  a foreign key -}
-solve P.Node { P.relop = "join"
+solve P.Node { P.relop
              , P.children = [l, r]
              , P.arg_lists =
                [ P.Expr
@@ -316,15 +316,23 @@ solve P.Node { P.relop = "join"
                    , P.right = P.Expr (P.Ref right _) Nothing
                    }
                  , P.alias = _}]:[] {-only one condition-}
-             } =
-  do table  <- solve l
-     references <- solve r
-     return $ EquiJoin { table, references, cond=(left, right) }
+             }
+  | ("semijoin" == relop || "join" == relop) =
+    do leftch  <- solve l
+       rightch <- solve r
+       return $ EquiJoin { leftch, rightch, cond=(left, right) }
 
-solve arg@P.Node { P.relop="join"
-             , P.children= _
-             , P.arg_lists=_ } = Left $ E.unexpected "only handling joins with a single equality condition" arg
+solve P.Node { P.relop
+             , P.children= [_,_]
+             , P.arg_lists = (_:cond2:_):_   }
+  | (relop == "join" || relop == "semijoin") =
+      Left $ E.unexpected  (relop ++ " condition has a second predicate: ") cond2
 
+solve P.Node { P.relop
+             , P.children= [_,_]
+             , P.arg_lists =[arg]:[]  }
+  | (relop == "join" || relop == "semijoin")
+   =  Left $ E.unexpected (relop ++ " condition is not an equality: ") arg
 
 solve P.Node { P.relop = "top N"
              , P.children = [ch]
@@ -494,24 +502,24 @@ pushFKJoins :: RelExpr -> RelExpr
 pushFKJoins = rewrite swap
   where -- pattern order matters in terms of which gets preferred
     --dimension table selects get pushed up as well, after fact table ones
-    swap EquiJoin { table
-                , references = Select { child
-                                       , predicate }
+    swap EquiJoin { leftch
+                , rightch = Select { child
+                                   , predicate }
                 , cond
                 } =
-      Just $ Select { child=EquiJoin { table
-                                     , references = child
+      Just $ Select { child=EquiJoin { leftch
+                                     , rightch = child
                                      , cond }
                     , predicate }
     -- fact table selects get pushed up as well, after dim table
     -- NOTE: the predicate merge step is meant to map bottommost to leftmost
-    swap EquiJoin { table = Select { child=selectchild -- push left select
+    swap EquiJoin { leftch = Select { child=selectchild -- push left select
                                    , predicate }
-                  , references
+                  , rightch
                   , cond
                   } =
-      Just $ Select { child=EquiJoin { table = selectchild
-                                     , references
+      Just $ Select { child=EquiJoin { leftch = selectchild
+                                     , rightch
                                      , cond }
                     , predicate }
     swap _ = Nothing
