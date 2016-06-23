@@ -27,7 +27,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 --type Map = Map.Map
 --type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 import Text.Printf
-import Control.Exception.Base
+import Control.Exception.Base hiding (mask)
 import qualified Data.Map.Strict as Map
 
 --type Map = Map.Map
@@ -52,14 +52,25 @@ data Vx =
   deriving (Eq,Show,Generic)
 instance NFData Vx
 
+data UniqueSpec = Unique | Any deriving (Eq,Show,Generic)
+instance NFData UniqueSpec
+
+data Lineage = Pure {col::Name, mask::Vexp, quant::UniqueSpec} | None  deriving (Eq,Show,Generic)
+instance NFData Lineage
+
 data Vexp = Vexp { vx::Vx
                  , info::ColInfo
-                 , lineage::Maybe (Name, Vexp)
-                            -- if it is set, then the values all come from
-                            -- the vexp is a gather mask such that. vx = gather (Load name) vexp
-                            -- the original table column.
-                            -- the inner vexp must have its lineage and name set to nothing.
+                 , lineage::Lineage
                  , name::Maybe Name } deriving (Eq,Show,Generic)
+
+-- if lineage is set to somthing, it means the
+-- column values all come untouched from an actual table column (as opposed to being derivative)
+-- however, the values may have been shuffled/duplicated in different ways. the Vexp shows if this is so.
+-- basically, the following identity holds: vx = gather gathermask=lineagevx data=tableName
+-- if the uniqueSpec is unique, then it means that the column has not duplicated values wrt
+-- the original one.
+-- Note also: right now, uniqueSpec means conditionally unique: if the original column was unique (such as the pos id)
+-- then the current version is also unique.
 
 instance NFData Vexp
 
@@ -133,12 +144,14 @@ complete vx =
       lineage = checkLineage $ inferLineage vx
   in Vexp { vx, info, lineage, name=Nothing }
 
-checkLineage :: Maybe (Name, Vexp) -> Maybe (Name, Vexp)
+checkLineage :: Lineage -> Lineage
 checkLineage l =
-  do (_, Vexp {lineage, name}) <- l -- maybe monad
-     case (lineage,name) of
-       (Nothing, Nothing) -> l
-       _ -> error "lineage vector should not itself have lineage or name"
+  case l of
+    None -> None
+    Pure  _ Vexp {lineage, name} _ ->
+      case (lineage,name) of
+        (None, Nothing) -> l
+        _ -> error "lineage vector should not itself have lineage or name"
 
 inferMetadata :: Vx -> ColInfo
 
@@ -245,37 +258,40 @@ inferMetadata Binop
                             in (minimum extremes, maximum extremes)
            in ColInfo {bounds, count}
 
-inferLineage :: Vx -> Maybe (Name, Vexp)
+inferLineage :: Vx -> Lineage
 
 inferLineage Shuffle { shop=Scatter --- note: we are assuming the scatter covers everything.
                      , shsource=Vexp {lineage}
                      , shpos }
-  = do (name, lineagev) <- lineage -- maybe monad
-       return $ (name, complete $ Shuffle { shop=Scatter
-                                          , shsource=lineagev
-                                          , shpos
-                                          })
+ | Pure {col, mask=lineagev, quant} <- lineage  =
+     Pure  {col
+           , mask=complete $ Shuffle { shop=Scatter
+                                     , shsource=lineagev
+                                     , shpos
+                                     }
+           , quant }  -- scatter does not duplicate values
 
 inferLineage Shuffle { shop=Gather
                      , shsource=Vexp {lineage}
                      , shpos }
-  = do (name, lineagev) <- lineage
-       return $ (name, complete $ Shuffle { shop=Gather
-                                          , shsource=lineagev
-                                          , shpos
-                                          })
-
+  | Pure {col, mask=lineagev} <- lineage  =
+      Pure { col
+           , mask=complete $ Shuffle { shop=Gather
+                                     , shsource=lineagev
+                                     , shpos
+                                     }
+           , quant=Any } -- gather can duplicate values.
 
 inferLineage Fold { foldop
                    , fgroups
                    , fdata = Vexp { lineage }
-                   } =
-  do (name, lineagev) <- lineage
-     if foldop == FMin || foldop == FMax
-       then return $ (name, complete $ Fold {foldop, fgroups, fdata=lineagev})
-       else Nothing
+                   }
+  | (foldop == FMin) || (foldop == FMax)
+  , Pure  {col, mask=lineagev, quant} <- lineage =
+      Pure {col, mask=complete $ Fold {foldop, fgroups, fdata=lineagev}, quant}
+       --Foldmin, max also preserve
 
-inferLineage _ = Nothing
+inferLineage _ = None
 
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [Vexp]
@@ -339,8 +355,8 @@ solve' config M.Table { M.tablename=_
                        let alias = Just $ decideAlias col
                        return $ (do (_,info) <- NameTable.lookup colnam (colinfo config)  -- either monad
                                     let vx=Load colnam
-                                    let partial=Vexp {vx, info, lineage=Nothing, name=Nothing} -- this is just for type compatiblity. 
-                                    let lineage=Just (colnam, pos_ partial) -- TODO: use a single vector for lineage range (eg primary key)
+                                    let partial=Vexp {vx, info, lineage=None, name=Nothing} -- this is just for type compatiblity.
+                                    let lineage=Pure{col=colnam, mask=pos_ partial, quant=Unique} -- TODO: use a single vector for lineage range (eg primary key)
                                     let completed = partial {lineage=lineage, name=alias}
                                     return $ completed))
   in do snontids@(refv@Vexp { }: _)  <- nontidloads --either
@@ -348,7 +364,7 @@ solve' config M.Table { M.tablename=_
           [] -> return $ snontids
           [tidcol@(orig,_)] ->
             let anon = pos_ refv
-                lineage = Just (orig, pos_ refv) -- lineage of itself.
+                lineage = Pure {col=orig, mask=pos_ refv, quant=Unique} -- lineage of itself.
                 named = anon { lineage, name=Just $ decideAlias tidcol }
             in return $ named : snontids
           _ -> Left $ E.unexpected "multiple tidcols defined in table" tidcols
@@ -357,7 +373,7 @@ solve' config M.Table { M.tablename=_
         isTid (Name [_, "%TID%"], _) = True
         isTid (Name [_, _], _) = False
         isTid _ = undefined -- this should never happen. used here for warning.
-        
+
         ---not expecting names with more than two components
 
 {- Project: not dealing with ordered queries right now
@@ -438,11 +454,11 @@ solve' config M.EquiJoin { M.leftch
        (Right _, Right _) -> Left "ambiguous key lookup"
      --- check which way the reference goes
      let (colname1, idx1) = case skey1 of
-           Vexp { lineage=Just (a,b)  } -> (a,b)
-           Vexp { lineage=Nothing } -> error "no lineage available for join"
+           Vexp { lineage=Pure {col=a, mask=b} } -> (a,b)
+           Vexp { lineage=None } -> error "no lineage available for join"
      let (colname2,idx2) = case skey2 of
-           Vexp { lineage=Just (a,b)  } -> (a,b)
-           Vexp { lineage=Nothing } -> error "no lineage available for join"
+           Vexp { lineage=Pure {col=a,mask=b}  } -> (a,b)
+           Vexp { lineage=None } -> error "no lineage available for join"
      let (factcols, gatheridx, dimcols) =
            if (colname1 == colname2)  -- self join. look for version of table that is intact
            then case (idx2,idx1) of
@@ -457,7 +473,7 @@ solve' config M.EquiJoin { M.leftch
                       (Just joinidx, Nothing) -> -- try1 worked. so colname1 -> colname2 wins.
                         let idxcol = Vexp { vx = Load joinidx
                                           , info = snd $ NameTable.lookup_err joinidx (colinfo config)
-                                          , lineage = Nothing
+                                          , lineage = None
                                           , name =  Nothing }
                             gidx = complete (Shuffle {shop=Gather, shpos=idx1, shsource=idxcol})
                         in case idx2 of
@@ -466,7 +482,7 @@ solve' config M.EquiJoin { M.leftch
                       (Nothing, Just joinidx) -> -- try2 worked. so colname2 -> colname1 wins.
                         let idxcol = Vexp { vx = Load joinidx
                                           , info = snd $ NameTable.lookup_err joinidx (colinfo config)
-                                          , lineage = Nothing
+                                          , lineage = None
                                           , name =  Nothing }
                             gidx = complete (Shuffle {shop=Gather, shpos=idx2, shsource=idxcol})
                         in case idx1 of
