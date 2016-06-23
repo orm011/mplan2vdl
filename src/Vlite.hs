@@ -418,17 +418,7 @@ solve' config M.GroupBy { M.child,
                                         _ -> Nothing
                                   return $ anon {name=outalias}))
 
-{-direct, foreign key join of two tables.
-for now, this join assumes but does not check
-that the two tables have a fk dependency between them
 
-the reason only tables are allowed as right-children is
-that after filtering the right child, the old position pointers
-for the  are effectively invalid. On the other hand, the left table
-can be anything, as the pointers are still valid.
-
-(eg, after a filter on the right child...)
--}
 solve' config M.EquiJoin { M.leftch
                          , M.rightch
                          , M.cond=(key1, key2)
@@ -489,8 +479,6 @@ solve' config M.EquiJoin { M.leftch
                                return $ joined_anon { name=name } ) -- preserve the names
      return $ factcols ++ joined_dimcols
 
-
-solve' _ (M.EquiJoin _ _ _) = error "didnt pattern match the main join. this join is different."
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
