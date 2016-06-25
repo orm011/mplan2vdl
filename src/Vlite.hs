@@ -459,20 +459,22 @@ solve' config M.EquiJoin { M.leftch
      let (colname2,idx2) = case skey2 of
            Vexp { lineage=Pure {col=a,mask=b}  } -> (a,b)
            Vexp { lineage=None } -> error "no lineage available for join"
-     let (factcols, dimcols, (gatheridx, selectidx)) = ( -- select idx is a list of positions. --gatheridx is a mask that can be applied to cols after select
+     let (factcols, dimcols, JoinIdx {selectmask=selectidx, gathermask=gatheridx}) = ( -- select idx is a list of positions. --gatheridx is a mask that can be applied to cols after select
            if (colname1 == colname2)
               -- self join. look for version of table that is intact
            then case (idx2,idx1) of -- TODO handle case where both have been changed.
-             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2,(idx1, ones_ idx1)) -- use the idx1 as gather mask against cols2
-             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1,(idx2, ones_ idx2))
+             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2, JoinIdx{gathermask=idx1,
+                                                                               selectmask=ones_ idx1}) -- use the idx1 as gather mask against cols2
+             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1,JoinIdx{gathermask=idx2,
+                                                                              selectmask=ones_ idx2})
              (_,_) -> error $ "both children of this self join have been modified.\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch)
            else case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
                       Nothing -> error "no fk constraint available for join"
                       Just ((fact_cname, dim_cname) :| [], fkidx)
                         | (fact_cname == colname1) && (dim_cname == colname2)
-                          -> (cols1, cols2, deduceMasks idx1 idx2 fkidx)
+                          -> (cols1, cols2, deduceMasks config idx1 idx2 fkidx)
                         | (fact_cname == colname2) && (dim_cname == colname1)
-                          -> (cols2, cols1, deduceMasks idx2 idx1 fkidx)
+                          -> (cols2, cols1, deduceMasks config idx2 idx1 fkidx)
                       _ -> error "multiple fk columns?")
      let cleaned_factcols = (do factcol@Vexp {name } <- factcols
                                 let out_anon = complete $ Shuffle { shop=Gather
@@ -488,23 +490,6 @@ solve' config M.EquiJoin { M.leftch
                                return $ joined_anon { name=name }
                            ) -- preserve the names
      return $ cleaned_factcols ++ joined_dimcols
-       where deduceMasks _ dimcolv fkidx =
-               let idxcol = Vexp { vx = Load fkidx
-                                 , info = snd $ NameTable.lookup_err fkidx (colinfo config)
-                                 , lineage = None
-                                 , name =  Nothing }
-                   gidx = complete $ Shuffle {shop=Gather, shpos=dimcolv, shsource=idxcol}
-               in case dimcolv of
-                 Vexp { vx=RangeV {rmin=0, rstep=1} } -> (gidx, ones_ gidx)
-                 _ -> error $ "the dimension column has been modified:" ++ (show fkidx)
-
-             -- topos datavec booleanvec =
-             --   let shpos = complete $ Fold { foldop=FSel
-             --                                , fgroups=pos_ boolean
-             --                                , fdata = booleanvec
-             --                                }
-             --               datai
-
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
@@ -716,5 +701,79 @@ make2LevelFold config foldop fgroups fdata =
      let level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
      let level2results = complete $ Fold { foldop, fgroups, fdata=level1results }
      return  $ assert (getBitWidth level1par == 1) level2results
+
+
+data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
+-- select is a positions list
+-- gathermask is only valid whenapplied to a clumn after select.
+
+deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
+deduceMasks config fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
+  let fact_dim_idx = Vexp { vx = Load fact_dim_idx_name
+                          , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
+                          , lineage = None
+                          , name =  Nothing }
+      fprime_dim_idx = complete $ Shuffle { shop=Gather
+                                          , shpos=fprime_fact_idx
+                                          , shsource=fact_dim_idx }
+  in case dimprime_dim_idx of
+    Vexp { lineage=Pure {quant=Unique} } ->
+      let ones = ones_ dimprime_dim_idx
+          pos = pos_ dimprime_dim_idx
+          dim_dimprime_valid = complete $ Shuffle { shop=Scatter
+                                         , shsource=ones
+                                         , shpos=dimprime_dim_idx
+                                         }
+          dim_dimprime_idx = complete $ Shuffle { shop=Scatter
+                                      , shsource=pos
+                                      , shpos=dimprime_dim_idx
+                                      }
+          fprime_dimprime_valid = complete $ Shuffle  { shop=Gather
+                                                      , shsource=dim_dimprime_valid
+                                                      , shpos=fprime_dim_idx
+                                                      }
+          fprime_dimprime_pos = complete $ Shuffle { shop=Gather
+                                                   , shsource=dim_dimprime_idx
+                                                   , shpos=fprime_dim_idx
+                                                   }
+          selectmask = complete $ Fold {foldop=FSel
+                                       ,fgroups=pos_ fprime_dimprime_valid
+                                       ,fdata=fprime_dimprime_valid
+                                       }
+          cleaned_fprime_dimprime_pos = complete $ Shuffle { shop=Gather
+                                                           , shpos=selectmask
+                                                           , shsource=fprime_dimprime_pos
+                                                           }
+      in JoinIdx{selectmask, gathermask=cleaned_fprime_dimprime_pos}
+         -- remember: select mask is used to filter out the missing entries
+         -- the left argument is used to gather from the cleaned fact side to the dim
+    _ -> error $ "the dimension column has been modified:" ++ (show fact_dim_idx)
+
+
+{-
+Diagram to understand the join deduce masks code:
+
+fact'                                     dim'
+  |                                        |
+  |  (fprime_fact_idx in lineage)          | (dimprime_dim_idx in lineage)
+  |                                        |
+  V                                        V
+fact -----------------------------------> dim
+         (fact_dim_idx provided by db)
+
+ idx1  idx2
+a---->b---->c
+means we can use Gather {gatherpos=idx1, gatherdata=idx2}
+to compute a direct index for a ---> c
+
+   idx
+a'------>a where a' is unique wrt. to a means we can do
+Scatter {scatterpos=idx, scatterdata=ones} to get which entries of a remain in a'
+Scatter {scatterpos=idx, scatterpos=pos } to get a gather revidx such that
+
+   revidx
+(filtered a valid) -----> a' is valid.
+
+-}
 
 
