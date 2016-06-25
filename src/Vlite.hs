@@ -485,7 +485,8 @@ solve' config M.EquiJoin { M.leftch
                                let joined_anon = complete $ Shuffle { shop=Gather
                                                                     , shsource=dimcol
                                                                     , shpos=gatheridx }
-                               return $ joined_anon { name=name } ) -- preserve the names
+                               return $ joined_anon { name=name }
+                           ) -- preserve the names
      return $ cleaned_factcols ++ joined_dimcols
        where deduceMasks _ dimcolv fkidx =
                let idxcol = Vexp { vx = Load fkidx
