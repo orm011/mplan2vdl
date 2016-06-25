@@ -59,7 +59,7 @@ makeConfig grainsizelg boundslist tables =
 concatName :: Name -> Name -> Name
 concatName (Name a) (Name b) = Name (a ++ b)
 
-makeFKEntries :: Table -> [(NonEmpty (Name, Name), Name)]
+makeFKEntries :: Table -> [(NonEmpty (Name, Name), (NonEmpty (Name, Name), Name))]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
@@ -67,14 +67,20 @@ makeFKEntries Table { name, fkeys } =
      let remotecols = fmap (concatName references) remote
      let joinidx = concatName name fkconstraint
      let implicit = N.zip localcols remotecols
+     let implicit_back = N.zip remotecols localcols
      let tidname = concatName references (Name ["%TID%"])
      let explicit = ( joinidx
                     , tidname ) :|[]
-     [ (implicit,joinidx), (explicit, joinidx) ]
+     let explicit_back = (tidname, joinidx) :| []
+     [ (implicit, (implicit,joinidx))
+       , (implicit_back, (implicit,joinidx))
+       , (explicit, (explicit, joinidx))
+       , (explicit_back, (explicit, joinidx)) ]
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map (NonEmpty (Name,Name)) Name
+                       , fkrefs :: Map (NonEmpty (Name,Name)) (NonEmpty(Name,Name),Name)
+                                   -- shows the fact -> dimension direction of the dependence
                                    -- fully qualifed column mames
                        }
 

@@ -459,41 +459,35 @@ solve' config M.EquiJoin { M.leftch
      let (colname2,idx2) = case skey2 of
            Vexp { lineage=Pure {col=a,mask=b}  } -> (a,b)
            Vexp { lineage=None } -> error "no lineage available for join"
-     let (factcols, gatheridx, dimcols) =
+     let (factcols, dimcols, gatheridx) = (
            if (colname1 == colname2)  -- self join. look for version of table that is intact
-           then case (idx2,idx1) of
-             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,idx1,cols2) -- use the idx1 as gather mask against cols2
-             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,idx2,cols1)
+           then case (idx2,idx1) of -- TODO handle case where both have been changed.
+             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2,idx1) -- use the idx1 as gather mask against cols2
+             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1,idx2)
              (_,_) -> error $ "both children of this self join have been modified.\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch)
-           else let try1 = Map.lookup ((colname1,colname2):|[]) (fkrefs config)
-                    try2 = Map.lookup ((colname2,colname1):|[]) (fkrefs config)
-                in case (try1,try2) of
-                      (Nothing, Nothing) -> error "no enough information to join these cols"
-                      (Just _, Just _) -> error "fk constraint in both directions?"
-                      (Just joinidx, Nothing) -> -- try1 worked. so colname1 -> colname2 wins.
-                        let idxcol = Vexp { vx = Load joinidx
-                                          , info = snd $ NameTable.lookup_err joinidx (colinfo config)
-                                          , lineage = None
-                                          , name =  Nothing }
-                            gidx = complete (Shuffle {shop=Gather, shpos=idx1, shsource=idxcol})
-                        in case idx2 of
-                          Vexp { vx=RangeV {rmin=0, rstep=1} } -> (cols1,gidx,cols2)
-                          _ -> error $ "(fk goes left -> right) the primary column (right) has been modified\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch) ++ "\n" ++ (take 50 $ show idx2)
-                      (Nothing, Just joinidx) -> -- try2 worked. so colname2 -> colname1 wins.
-                        let idxcol = Vexp { vx = Load joinidx
-                                          , info = snd $ NameTable.lookup_err joinidx (colinfo config)
-                                          , lineage = None
-                                          , name =  Nothing }
-                            gidx = complete (Shuffle {shop=Gather, shpos=idx2, shsource=idxcol})
-                        in case idx1 of
-                          Vexp { vx=RangeV {rmin=0, rstep=1} } -> (cols2,gidx,cols1)
-                          _ -> error $ "(fk goes right -> left) the primary column (left) has been modified\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch) ++ "\n" ++ (take 50 $ show idx1)
+           else case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
+                      Nothing -> error "no fk constraint available for join"
+                      Just ((fact_cname, dim_cname) :| [], fkidx)
+                        | (fact_cname == colname1) && (dim_cname == colname2)
+                          -> (cols1, cols2, deduceMasks idx1 idx2 fkidx)
+                        | (fact_cname == colname2) && (dim_cname == colname1)
+                          -> (cols2, cols1, deduceMasks idx2 idx1 fkidx)
+                      _ -> error "multiple fk columns?")
      let joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
                                let joined_anon = complete $ Shuffle { shop=Gather
                                                                     , shsource=dimcol
                                                                     , shpos=gatheridx }
                                return $ joined_anon { name=name } ) -- preserve the names
      return $ factcols ++ joined_dimcols
+       where deduceMasks _ dimcolv fkidx =
+               let idxcol = Vexp { vx = Load fkidx
+                                 , info = snd $ NameTable.lookup_err fkidx (colinfo config)
+                                 , lineage = None
+                                 , name =  Nothing }
+                   gidx = complete $ Shuffle {shop=Gather, shpos=dimcolv, shsource=idxcol}
+               in case dimcolv of
+                 Vexp { vx=RangeV {rmin=0, rstep=1} } -> gidx
+                 _ -> error $ "the dimension column has been modified:" ++ (show fkidx)
 
 
 solve' config M.Select { M.child -- can be derived rel
