@@ -7,17 +7,18 @@ module Name (Name(..)
             ,lookup
             ,lookup_err) where
 
-import Data.String.Utils(join)
+--import Data.String.Utils(join)
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 import Text.Printf
 import Prelude hiding (lookup)
 import Control.DeepSeq(NFData)
 import Data.Data
-
+import qualified Data.ByteString.Lazy as B
+--import qualified Data.ByteString.Builder as Bld
 
 {- eg decimal(15,2) , or smallint  -}
-data TypeSpec = TypeSpec { tname :: String
+data TypeSpec = TypeSpec { tname :: B.ByteString
                          , tparams :: [Integer] } deriving (Eq,Show,Generic)
 
 instance NFData TypeSpec
@@ -39,17 +40,16 @@ We assume all lookups are either successful, or there was an error.
 
 -}
 
-data Name = Name [String] deriving (Eq, Generic, Ord, Data)
+data Name = Name [B.ByteString] deriving (Eq, Generic, Ord, Data, Show)
 
 type Map = Map.Map
 
-instance Show Name where
-  show (Name lst) = join "." lst
+-- instance Show Name where
+--   show (Name lst) 
 
 instance NFData Name
 
-data NameTable v = NameTable (Map [String] v)
-
+data NameTable v = NameTable (Map [B.ByteString] v)
 
 
 empty :: NameTable v

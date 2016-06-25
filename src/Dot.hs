@@ -1,18 +1,22 @@
-module Dot (toDotString) where
+{-# LANGUAGE ScopedTypeVariables #-}
 
+module Dot (toDotString) where
 import TreeParser
 import Name ()
 import Data.List(foldl')
 import Text.Printf (printf)
-import Data.String.Utils(join,replace)
+import Data.String.Utils(replace)
 import Data.List.NonEmpty hiding (map, last, reverse,zip)
 import qualified Data.List.NonEmpty as N
 import Prelude hiding (map,last,reverse)
 import qualified Prelude as P
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
+
 
 --import Debug.Trace
 
-data Dot = Dot (NonEmpty (Int, String, [String])) [(Int,Int)]
+data Dot = Dot (NonEmpty (Int, B.ByteString, [B.ByteString])) [(Int,Int)]
 
 cat :: NonEmpty a -> NonEmpty a -> NonEmpty a
 cat a b = foldr (<|) b a -- b is the accumulate
@@ -31,32 +35,32 @@ toDot n (TNode { relop, children, arg_lists }) =
   in (n', Dot acclabels (chedges ++ accedges))
 
 
-toDot n (TLeaf name  attr) = (n+1, Dot ((n,"table " ++ show name,[attr]) :| []) [])
+toDot n (TLeaf name  attr) = (n+1, Dot ((n, B.append "table " (C.pack $ show name), [attr]) :| []) [])
 
 fromTRelToDot :: TRel -> Dot
 fromTRelToDot r = snd $ toDot 0 r
 
-fromDotToDotString :: String -> Dot -> String
+fromDotToDotString :: B.ByteString -> Dot -> B.ByteString
 fromDotToDotString gname (Dot labels edges) =
-  let prologue = [printf "digraph \"%s\" {" gname ]
-      epilogue = ["}"]
+  let (prologue :: [B.ByteString]) = P.map C.pack ([printf ("digraph \"%s\" {" ::String) (C.unpack gname) ]::[String])
+      (epilogue :: [B.ByteString])  = P.map C.pack (["}"] ::[String])
       printnodelabel (n, labelname, _) =
-        printf "%d [ label = \"[%d] %s\" ]" n n labelname
+        C.pack (printf ("%d [ label = \"[%d] %s\" ]"::String) n n $ C.unpack labelname)
       printnodemeta (n, _, attrs) =
         do (attr,i) <- zip attrs [0..]
-           let cleanattr = replace " ," ", "  $ replace "\"" "" attr --quotations confuse me and confuse dot
+           let cleanattr = replace " ," ", "  $ replace "\"" "" (C.unpack attr) --quotations confuse me and confuse dot
            let attrnode = show $ (n + 1) * 10000 + i -- +1 bc zero id
-           return $ ( printf "%s [ label=\"%s\" shape = \"box\" color=\"blue\" ]" attrnode cleanattr
-                    , printf "%d -> %s [style=\"dotted\" color=\"blue\"]" n attrnode
+           return $ ( C.pack $ printf ("%s [ label=\"%s\" shape = \"box\" color=\"blue\" ]"::String) attrnode cleanattr
+                    , C.pack $ printf ("%d -> %s [style=\"dotted\" color=\"blue\"]"::String) n attrnode
                     )
-      printedge (a,b) = printf "%d -> %d" a b
+      printedge (a,b) = C.pack $ printf ("%d -> %d"::String)  a  b
       operlabels = P.map printnodelabel (P.reverse $ toList labels)
       (metalabels,metaedges) = P.unzip (P.foldMap printnodemeta $ toList labels)
       operedges = (P.map printedge edges)
-      alllines = foldl' (++) [] [prologue, metalabels, operlabels, metaedges, operedges, epilogue]
-  in  join "\n" alllines
+      (alllines :: [B.ByteString]) = foldl' (++) [] [prologue, metalabels, operlabels, metaedges, operedges, epilogue]
+  in  B.intercalate "\n" alllines
 
-toDotString :: String -> TRel -> String
+toDotString :: B.ByteString -> TRel -> B.ByteString
 toDotString name rel =
   let dot = fromTRelToDot rel
   in fromDotToDotString name dot

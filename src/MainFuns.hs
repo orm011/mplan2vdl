@@ -6,8 +6,8 @@ import System.IO (hPutStrLn, stderr)
 import Text.Printf (printf)
 --import Text.Groom (groom)
 --import Control.Monad(foldM)
-import Data.List.Utils (startswith)
-import Data.String.Utils (lstrip,join)
+--import Data.List.Utils (startswith)
+--import Data.String.Utils (lstrip,join)
 import System.Console.CmdArgs.Implicit
 import Config
 
@@ -24,7 +24,9 @@ import Data.Int()
 import qualified Data.Vector as V
 import Data.Vector()
 import Name as NameTable()
-import qualified Data.ByteString.Lazy as BL
+--import qualified Data.ByteString.Char8 as BC
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Dot
 
 data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
@@ -51,19 +53,19 @@ checkInput msg f  = if f
                     else (hPutStrLn stderr $ "usage: " ++ msg ++ " (see --help)")
                          >> System.Exit.exitFailure
 
-iscomment :: String -> Bool
-iscomment ln = let stripped = lstrip ln
-               in (startswith "#" stripped) || ( startswith "%" stripped)
-                  || ( startswith "--" stripped)
+iscomment :: B.ByteString -> Bool
+iscomment ln = let stripped = C.dropWhile (== ' ') ln
+               in (C.isPrefixOf "#" stripped) || ( C.isPrefixOf "%" stripped)
+                  || ( C.isPrefixOf "--" stripped)
 
-filterComments :: String -> String
+filterComments :: B.ByteString -> B.ByteString
 filterComments alltext =
-  let lins = lines alltext
-  in join "\n" $ map (\l -> if iscomment l then "" else l) lins
+  let lins = C.lines alltext
+  in C.intercalate "\n" $ map (\l -> if iscomment l then "" else l) lins
      -- unlike filter, replacing with empty string preserves line numbers
 
-readCommentedFile :: String -> IO String
-readCommentedFile fname  = do contents <- readFile fname
+readCommentedFile :: String -> IO B.ByteString
+readCommentedFile fname  = do contents <- B.readFile fname
                               return $ filterComments contents
 
 checkUsage :: Mplan2Vdl -> IO ()
@@ -79,7 +81,7 @@ checkUsage cmdargs  =
 
 readBoundsFile :: String -> IO (Either String (V.Vector BoundsRec))
 readBoundsFile fname =
-  do boundsf <- BL.readFile fname
+  do boundsf <- B.readFile fname
      return $ ( decode NoHeader boundsf)
 
 main :: IO ()
@@ -101,7 +103,7 @@ main = do
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage
-    Right result -> putStrLn $ result
+    Right result -> C.putStrLn $ result
 
 fatal :: String -> IO ()
 fatal message = do
@@ -109,14 +111,14 @@ fatal message = do
   hPutStrLn stderr $ printf "%s: %s" progName message
   System.Exit.exitFailure
 
-emitdot :: String -> String -> Config -> Either String String
+emitdot :: String -> C.ByteString -> Config -> Either String C.ByteString
 emitdot qname planstring config =
   do parseTree <- case TP.fromString planstring config of
        Left err -> Left $ "(at Parse stage)" ++ err
        other -> other
-     return $ Dot.toDotString qname parseTree
+     return $ Dot.toDotString (C.pack qname) parseTree
 
-compile :: String -> Config -> Either String String
+compile :: C.ByteString -> Config -> Either String C.ByteString
 compile planstring config =
   do parseTree <- case P.fromString planstring config of
                     Left err -> Left $ "(at Parse stage)" ++ err
@@ -132,4 +134,4 @@ compile planstring config =
      vdl <- case Vdl.vdlFromVexps vexps config of
                   Left err -> Left $ "(at Vdl stage)" ++ err
                   other -> other
-     return $ show vdl
+     return $ (C.pack $ show vdl)

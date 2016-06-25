@@ -29,6 +29,9 @@ import Config
 import qualified Error as E
 import Error(check)
 import Data.List(foldl')
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
+
 
 --type Map = Map.Map
 
@@ -72,15 +75,15 @@ resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
         f "boolean" [] = Right MBoolean
         f name _ = Left $ E.unexpected  "unsupported typespec" name
 
-resolveCharLiteral :: String -> Either String Integer
-resolveCharLiteral ch = dictEncode ch
+resolveCharLiteral :: B.ByteString -> Either String Integer
+resolveCharLiteral ch = dictEncode (C.unpack ch)
 
 {- assumes date is formatted properly: todo. error handling for tis -}
-resolveDateString :: String -> Integer
+resolveDateString :: B.ByteString -> Integer
 resolveDateString datestr =
   diffDays day zero
   where zero = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
-        day = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" datestr) :: Day
+        day = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" (C.unpack datestr)) :: Day
 
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic, Data)
 instance NFData OrderSpec
@@ -94,7 +97,7 @@ data BinaryOp =
 instance NFData BinaryOp
 
 
-resolveInfix :: String -> Either String BinaryOp
+resolveInfix :: B.ByteString -> Either String BinaryOp
 resolveInfix str =
   case str of
     "<" -> Right Lt
@@ -326,13 +329,13 @@ solve P.Node { P.relop
              , P.children= [_,_]
              , P.arg_lists = (_:cond2:_):_   }
   | (relop == "join" || relop == "semijoin") =
-      Left $ E.unexpected  (relop ++ " condition has a second predicate: ") cond2
+      Left $ E.unexpected  ((C.unpack relop) ++ " condition has a second predicate: ") cond2
 
 solve P.Node { P.relop
              , P.children= [_,_]
              , P.arg_lists =[arg]:[]  }
   | (relop == "join" || relop == "semijoin")
-   =  Left $ E.unexpected (relop ++ " condition is not an equality: ") arg
+   =  Left $ E.unexpected ((C.unpack relop) ++ " condition is not an equality: ") arg
 
 solve P.Node { P.relop = "top N"
              , P.children = [ch]
@@ -485,10 +488,10 @@ conjunction exprs =
        where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
 
 
-readIntLiteral :: String -> Either String Integer
+readIntLiteral :: B.ByteString -> Either String Integer
 readIntLiteral str =
-  case reads str :: [(Integer, String)] of
-    [(num, [])] -> Right num
+  case (C.readInteger str :: Maybe (Integer, B.ByteString)) of
+    Just (num, "") -> Right num
     _ -> Left $ E.unexpected "integer literal" str
 
 mplanFromParseTree :: P.Rel -> Config -> Either String RelExpr

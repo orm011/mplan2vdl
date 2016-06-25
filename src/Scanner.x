@@ -7,9 +7,12 @@ module Scanner ( ScannedToken(..)
                , formatTokenOrError
                ) where
 
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
+
 }
 
-%wrapper "posn"
+%wrapper "posn-bytestring"
 
 ----------------------------------- Tokens ------------------------------------
 
@@ -30,7 +33,11 @@ tokens :-
   \.   { \posn _ -> scannedToken posn Dot }
   \;   { \posn _ -> scannedToken posn Semi }
   \"$withinquotes* \" { \posn s -> scannedToken posn ( ValueLiteral s ) }
-  $num+ {\posn s -> scannedToken posn ( NumberLiteral (read s) ) {- used only for internal types -} }
+  $num+ {\posn s -> let { parsedInt = C.readInteger s}
+                    in  case parsedInt of
+                          Just (i, "") -> scannedToken posn ( NumberLiteral $! i)   {- used only for internal types -}
+                          _ -> error "parsing int"
+                    }
   "NOT NULL"  { \posn _ -> scannedToken posn (Word "NOT NULL") }
   "no nil"  { \posn _ -> scannedToken posn (Word "no nil") }
   "PRIMARY KEY" { \posn _ -> scannedToken posn (Word "PRIMARY KEY") }
@@ -51,8 +58,8 @@ data ScannedToken = ScannedToken { line :: Int
 
 -- | A token.
 data Token =
-             Word String
-           | ValueLiteral String
+             Word B.ByteString
+           | ValueLiteral B.ByteString
            | NumberLiteral Integer
            | LCurly
            | RCurly
@@ -66,8 +73,8 @@ data Token =
            deriving (Eq)
 
 instance Show Token where
-  show (Word s) = s
-  show (ValueLiteral s) = s
+  show (Word s) = show s
+  show (ValueLiteral s) = show s
   show (NumberLiteral n) = show n
   show LCurly = "{"
   show RCurly = "}"
@@ -88,7 +95,7 @@ scannedToken (AlexPn _ lineNo columnNo) tok = ScannedToken lineNo columnNo tok
 
 ---------------------------- Scanning entry point -----------------------------
 
-scan :: String -> [ScannedToken] -- [Either String ScannedToken]
+scan :: B.ByteString -> [ScannedToken] -- [Either String ScannedToken]
 scan = alexScanTokens
 
 formatTokenOrError :: Either String ScannedToken -> Either String String

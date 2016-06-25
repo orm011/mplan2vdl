@@ -1,6 +1,7 @@
 -- -*- haskell -*-
 {
-module Parser ( parse
+{-# LANGUAGE ScopedTypeVariables #-}
+  module Parser ( parse
               , fromString
               , Rel(..)
               , ScalarExpr(..)
@@ -17,6 +18,8 @@ import Text.Groom
 import Debug.Trace
 import Data.String.Utils(join)
 import Config
+import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
 
 import Name(Name(..),TypeSpec(..))
 }
@@ -72,7 +75,7 @@ Leaf
   { Leaf { source=$3, columns=$6 }  }
 
 Node
-: IdentifierListNE '(' NodeListNE ')' BracketListNE { Node { relop = (join " " $1), children = $3, arg_lists = $5 } }
+: IdentifierListNE '(' NodeListNE ')' BracketListNE { Node { relop = (C.intercalate " " $1), children = $3, arg_lists = $5 } }
 
 IdentifierListNE
 : identifier { [$1] }
@@ -186,7 +189,7 @@ BasicExprBare
   { Call { fname = $1, args = $4 } }
 | TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
 | TypeSpec literal  { Literal {tspec=$1
-                             ,stringRep = reverse $ tail $ reverse $ tail $2
+                             ,stringRep = B.reverse $ B.tail $ B.reverse $ B.tail $2
                              }
                    }
 | FilterExpr { $1 }
@@ -237,7 +240,7 @@ instance NFData Attr
 
 {- todo: deal with things like x < y < z that show up in the select args-}
 data ScalarExpr =  Literal { tspec :: TypeSpec
-                           , stringRep :: String
+                           , stringRep :: B.ByteString
                            }
                    | Ref   { rname :: Name, attrs::[Attr] }
                    | Call  { fname :: Name
@@ -246,18 +249,18 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                    | Cast  { tspec :: TypeSpec
                            , value :: Expr
                            }
-                   | Infix { infixop :: String
+                   | Infix { infixop :: B.ByteString
                            , left :: Expr
                            , right :: Expr
                            }
                    | Interval { ifirst :: Expr
-                              , firstop::String
+                              , firstop::B.ByteString
                               , imiddle::Expr
-                              , secondop::String
+                              , secondop::B.ByteString
                               , ilast::Expr
                               }
                    | Filter{ arg :: Expr
-                           , oper :: String {-eg like, or ilike or iregex -}
+                           , oper :: B.ByteString {-eg like, or ilike or iregex -}
                            , negated :: Bool
                            , pattern :: Expr
                            , escape :: ScalarExpr
@@ -271,7 +274,7 @@ data ScalarExpr =  Literal { tspec :: TypeSpec
                    deriving (Eq, Show, Generic)
 instance NFData ScalarExpr
 
-data Rel = Node { relop :: String {- relational op like join -}
+data Rel = Node { relop :: B.ByteString {- relational op like join -}
                 , children :: [Rel]
                 , arg_lists :: [[Expr]]  }
            | Leaf { source :: Name, columns :: [Expr] }
@@ -282,10 +285,10 @@ instance NFData Rel
 parseError :: [ScannedToken] -> Either String a
 parseError [] = Left "unexpected EOF"
 parseError toks =
-  Left $ printf "At %d:%d. unexpected token%s (at most %d shown): '%s'."
+  Left $ printf ("At %d:%d. unexpected token%s (at most %d shown): '%s'." :: String)
                 lineNo
                 columnNo
-                (if (not $ null $ tail toks) then "s" else "")
+                ((if (not $ null $ tail toks) then "s" else "")::String)
                 numToks
                 badTokenText
   where numToks = 10
@@ -294,7 +297,7 @@ parseError toks =
         columnNo = Scanner.column firstBadToken
         badTokenText = concatMap ((++ "  ") . show . extractRawToken) (take numToks toks)
 
-fromString :: String -> Config -> Either String Rel
+fromString :: B.ByteString -> Config -> Either String Rel
 fromString str cfg  =
   let tokens = Scanner.scan str
       in parse tokens
@@ -304,7 +307,7 @@ fromString str cfg  =
      -- trace tr parsetree
 
 -- drop the 'sys' prefix that shows up some times (but not all of the time)
-dropsys :: [String] -> [String]
+dropsys :: [B.ByteString] -> [B.ByteString]
 dropsys ("sys":rest) = rest
 dropsys x = x
 
