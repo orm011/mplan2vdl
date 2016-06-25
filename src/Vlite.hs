@@ -459,11 +459,12 @@ solve' config M.EquiJoin { M.leftch
      let (colname2,idx2) = case skey2 of
            Vexp { lineage=Pure {col=a,mask=b}  } -> (a,b)
            Vexp { lineage=None } -> error "no lineage available for join"
-     let (factcols, dimcols, gatheridx) = (
-           if (colname1 == colname2)  -- self join. look for version of table that is intact
+     let (factcols, dimcols, (gatheridx, selectidx)) = ( -- select idx is a list of positions. --gatheridx is a mask that can be applied to cols after select
+           if (colname1 == colname2)
+              -- self join. look for version of table that is intact
            then case (idx2,idx1) of -- TODO handle case where both have been changed.
-             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2,idx1) -- use the idx1 as gather mask against cols2
-             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1,idx2)
+             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2,(idx1, ones_ idx1)) -- use the idx1 as gather mask against cols2
+             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1,(idx2, ones_ idx2))
              (_,_) -> error $ "both children of this self join have been modified.\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch)
            else case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
                       Nothing -> error "no fk constraint available for join"
@@ -473,12 +474,19 @@ solve' config M.EquiJoin { M.leftch
                         | (fact_cname == colname2) && (dim_cname == colname1)
                           -> (cols2, cols1, deduceMasks idx2 idx1 fkidx)
                       _ -> error "multiple fk columns?")
+     let cleaned_factcols = (do factcol@Vexp {name } <- factcols
+                                let out_anon = complete $ Shuffle { shop=Gather
+                                                                  , shsource=factcol
+                                                                  , shpos=selectidx
+                                                                  }
+                                return $ out_anon {name=name}
+                            )
      let joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
                                let joined_anon = complete $ Shuffle { shop=Gather
                                                                     , shsource=dimcol
                                                                     , shpos=gatheridx }
                                return $ joined_anon { name=name } ) -- preserve the names
-     return $ factcols ++ joined_dimcols
+     return $ cleaned_factcols ++ joined_dimcols
        where deduceMasks _ dimcolv fkidx =
                let idxcol = Vexp { vx = Load fkidx
                                  , info = snd $ NameTable.lookup_err fkidx (colinfo config)
@@ -486,8 +494,15 @@ solve' config M.EquiJoin { M.leftch
                                  , name =  Nothing }
                    gidx = complete $ Shuffle {shop=Gather, shpos=dimcolv, shsource=idxcol}
                in case dimcolv of
-                 Vexp { vx=RangeV {rmin=0, rstep=1} } -> gidx
+                 Vexp { vx=RangeV {rmin=0, rstep=1} } -> (gidx, ones_ gidx)
                  _ -> error $ "the dimension column has been modified:" ++ (show fkidx)
+
+             -- topos datavec booleanvec =
+             --   let shpos = complete $ Fold { foldop=FSel
+             --                                , fgroups=pos_ boolean
+             --                                , fdata = booleanvec
+             --                                }
+             --               datai
 
 
 solve' config M.Select { M.child -- can be derived rel
