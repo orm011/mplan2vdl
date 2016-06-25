@@ -472,9 +472,9 @@ solve' config M.EquiJoin { M.leftch
                       Nothing -> error "no fk constraint available for join"
                       Just ((fact_cname, dim_cname) :| [], fkidx)
                         | (fact_cname == colname1) && (dim_cname == colname2)
-                          -> (cols1, cols2, deduceMasks config idx1 idx2 fkidx)
+                          -> (cols1, cols2, deduceMasks config skey1 skey2 fkidx)
                         | (fact_cname == colname2) && (dim_cname == colname1)
-                          -> (cols2, cols1, deduceMasks config idx2 idx1 fkidx)
+                          -> (cols2, cols1, deduceMasks config skey2 skey1 fkidx)
                       _ -> error "multiple fk columns?")
      let cleaned_factcols = (do factcol@Vexp {name } <- factcols
                                 let out_anon = complete $ Shuffle { shop=Gather
@@ -709,6 +709,7 @@ data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 
 deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
 deduceMasks config fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
+  seq fprime_fact_idx $ seq dimprime_dim_idx $ seq fact_dim_idx_name $
   let fact_dim_idx = Vexp { vx = Load fact_dim_idx_name
                           , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
                           , lineage = None
@@ -747,7 +748,7 @@ deduceMasks config fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
       in JoinIdx{selectmask, gathermask=cleaned_fprime_dimprime_pos}
          -- remember: select mask is used to filter out the missing entries
          -- the left argument is used to gather from the cleaned fact side to the dim
-    _ -> error $ "the dimension column has been modified:" ++ (show fact_dim_idx)
+    _ -> error $ "the dimension column has been modified:" -- ++ (show dimprime_dim_idx)
 
 
 {-
