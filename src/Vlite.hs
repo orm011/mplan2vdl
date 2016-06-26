@@ -29,6 +29,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import Text.Printf
 import Control.Exception.Base hiding (mask)
 import qualified Data.Map.Strict as Map
+import Data.Ord()
 
 --type Map = Map.Map
 type NameTable = NameTable.NameTable
@@ -49,7 +50,7 @@ data Vx =
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Ord,Show,Generic)
 instance NFData Vx
 
 data UniqueSpec = Unique | Any deriving (Eq,Show,Generic)
@@ -62,6 +63,10 @@ data Vexp = Vexp { vx::Vx
                  , info::ColInfo
                  , lineage::Lineage
                  , name::Maybe Name } deriving (Eq,Show,Generic)
+
+instance Ord Vexp where -- ignore metadata
+  compare (Vexp{vx=vx1}) (Vexp{vx=vx2}) = compare vx1 vx2
+
 
 -- if lineage is set to somthing, it means the
 -- column values all come untouched from an actual table column (as opposed to being derivative)

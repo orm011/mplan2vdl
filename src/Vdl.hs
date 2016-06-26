@@ -130,78 +130,86 @@ a !=. b = (const_ 1 a) -. (a ==. b)
 -- NOTE: check needed to make sure we
 -- only have 0 or 1 in the multiplication.
 
-voodooFromVexp :: V.Vexp -> Either String Voodoo
-voodooFromVexp (V.Vexp vx _ _ _) = voodooFromVx vx
+type MemoTable = Map V.Vx Voodoo
 
-voodooFromVx :: V.Vx -> Either String Voodoo
+voodooFromVexpMemo :: MemoTable -> V.Vexp -> Either String (MemoTable, Voodoo)
+voodooFromVexpMemo s (V.Vexp vx _ _ _) =
+  case Map.lookup vx s of
+    Nothing -> do (s',r) <- voodooFromVxNoMemo s vx
+                  let s'' = Map.insert vx r s'
+                  return (s'',r)
+    Just r -> return (s, r)
 
-voodooFromVx (V.Load n) =
+voodooFromVxNoMemo :: MemoTable -> V.Vx -> Either String (MemoTable, Voodoo)
+
+voodooFromVxNoMemo st (V.Load n) =
   do inname <- (case n of
                    Name (_:s:rest) -> Right $ Name $ s:rest
                    _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
-     return $    Project { outname=Name ["val"]
+     return $    (st, Project { outname=Name ["val"]
                           , inname
-                          , vec = W $ Load n }
-voodooFromVx (V.RangeV {V.rmin, V.rstep, V.rref}) =
-  do v <- voodooFromVexp rref
-     return $ RangeV {rmin, rstep, rvec=W v}
+                          , vec = W $ Load n })
 
-voodooFromVx (V.RangeC {V.rmin, V.rstep, V.rcount}) =
-  return $ RangeC {rmin, rstep, rcount }
+voodooFromVxNoMemo s (V.RangeV {V.rmin, V.rstep, V.rref}) =
+  do (s',v) <- voodooFromVexpMemo s rref
+     return $ (s', RangeV {rmin, rstep, rvec=W v})
 
+voodooFromVxNoMemo s (V.RangeC {V.rmin, V.rstep, V.rcount}) =
+  return $ (s, RangeC {rmin, rstep, rcount })
 
-voodooFromVx (V.Binop { V.binop, V.left, V.right}) =
-  do l <- voodooFromVexp left
-     r <- voodooFromVexp right
-     case binop of
-       V.Gt -> Right $ l >. r
-       V.Eq -> Right $ l ==. r
-       V.Mul -> Right $ l *. r
-       V.Sub -> Right $ l -. r
-       V.Add -> Right $ l +. r
-       V.Lt -> Right $ l <. r
-       V.Leq -> Right $ l <=. r
-       V.Geq -> Right $ l >=. r
-       V.Min -> Right $ (l <=. r) ?. (l, r)
-       V.Max -> Right $ (l >=. r) ?. (l, r)
-       V.LogAnd -> Right $ (l &&. r)
-       V.LogOr -> Right $ (l ||. r)
-       V.Div -> Right $ (l /. r)
-       V.BitShift -> Right $  (l >>. r)
-       V.Neq -> Right $ (l !=. r)
-       V.BitOr -> Right $ (l |. r)
-       V.BitAnd -> Right $ (l &. r)
-       _ -> Left $ "binop not implemented: " ++ show binop
+voodooFromVxNoMemo s (V.Binop { V.binop, V.left, V.right}) =
+  do (s', l) <- voodooFromVexpMemo s left
+     (s'', r) <- voodooFromVexpMemo s' right
+     let t = case binop of
+              V.Gt -> l >. r
+              V.Eq -> l ==. r
+              V.Mul -> l *. r
+              V.Sub -> l -. r
+              V.Add -> l +. r
+              V.Lt -> l <. r
+              V.Leq -> l <=. r
+              V.Geq -> l >=. r
+              V.Min -> (l <=. r) ?. (l, r)
+              V.Max -> (l >=. r) ?. (l, r)
+              V.LogAnd -> (l &&. r)
+              V.LogOr -> (l ||. r)
+              V.Div -> (l /. r)
+              V.BitShift ->  (l >>. r)
+              V.Neq ->  (l !=. r)
+              V.BitOr -> (l |. r)
+              V.BitAnd -> (l &. r)
+              V.Mod -> error "implement this?"
+     return $ (s'',t)
 
-voodooFromVx  (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
-  do source <- voodooFromVexp shsource
-     positions <- voodooFromVexp shpos
-     case shop of
-       V.Gather -> Right $ Binary { op=Gather, arg1=W source, arg2=W positions }
-       V.Scatter -> let scatterfold = W $ pos_ source
-                        in Right $ Scatter { scattersource=W source, scatterfold, scatterpos=W positions }
-       _ -> Left $ "shop not implemented" ++ show shop
+voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
+  do (s', source) <- voodooFromVexpMemo s shsource
+     (s'', positions) <- voodooFromVexpMemo s' shpos
+     return $ (s'', case shop of
+                  V.Gather -> Binary { op=Gather, arg1=W source, arg2=W positions }
+                  V.Scatter -> let scatterfold = W $ pos_ source
+                               in Scatter { scattersource=W source, scatterfold, scatterpos=W positions })
 
-voodooFromVx (V.Fold { V.foldop, V.fgroups, V.fdata}) =
-  do arg1 <- voodooFromVexp fgroups
-     arg2 <- voodooFromVexp fdata
+voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
+  do (s', arg1) <- voodooFromVexpMemo s fgroups
+     (s'', arg2) <- voodooFromVexpMemo s' fdata
      let op = case foldop of
                V.FSum -> FoldSum
                V.FMax -> FoldMax
                V.FMin -> FoldMin
                V.FSel -> FoldSelect
-     return $ Binary { op, arg1=W arg1, arg2=W arg2 }
+     return $ (s'', Binary { op, arg1=W arg1, arg2=W arg2 })
 
-voodooFromVx (V.Partition {V.pdata, V.pivots}) =
-  do arg1 <- voodooFromVexp pdata
-     arg2 <- voodooFromVexp pivots
-     return $ Binary {op=Partition, arg1=W arg1, arg2=W arg2 }
-
-voodooFromVx s_ = Left $ "implement me: " ++ show s_
+voodooFromVxNoMemo s (V.Partition {V.pdata, V.pivots}) =
+  do (s', arg1) <- voodooFromVexpMemo s pdata
+     (s'', arg2) <- voodooFromVexpMemo s' pivots
+     return $ (s'', Binary {op=Partition, arg1=W arg1, arg2=W arg2 })
 
 voodoosFromVexps :: [V.Vexp] -> Either String [Voodoo]
-
-voodoosFromVexps vexps = mapM voodooFromVexp vexps
+voodoosFromVexps vexps =
+  do let solve (s, res) v = do (s', v') <- voodooFromVexpMemo s v
+                               return (s', v':res)
+     (_, res) <- foldM solve (Map.empty,[]) vexps
+     return $ res
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =
