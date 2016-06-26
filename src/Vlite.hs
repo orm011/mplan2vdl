@@ -29,18 +29,32 @@ import Data.List.NonEmpty(NonEmpty(..))
 import Text.Printf
 import Control.Exception.Base hiding (mask)
 import qualified Data.Map.Strict as Map
-import Data.Ord()
+import Data.Hashable
+--import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
+import Sha
+
 
 --type Map = Map.Map
 type NameTable = NameTable.NameTable
 
 data ShOp = Gather | Scatter
-  deriving (Eq, Show, Generic,Ord)
+  deriving (Eq, Show, Generic)
 instance NFData ShOp
+instance Hashable ShOp
 
 data FoldOp = FSum | FMax | FMin | FSel
-  deriving (Eq, Show, Generic, Ord)
+  deriving (Eq, Show, Generic)
 instance NFData FoldOp
+instance Hashable FoldOp
+
+
+-- a hacky implementation of sha1 for Vx variants
+sha1vx :: Vx -> SHA1 -- trying to not be as weak as the plain hash
+--  variants with no recursion can be sha1'd easily:
+sha1vx vx@(Load _) = sha1 $ C.pack (show vx)
+sha1vx vx@(RangeC {}) = sha1 $ C.pack (show vx)
+sha1vx vx = sha1hack vx
 
 data Vx =
   Load Name
@@ -50,23 +64,29 @@ data Vx =
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
-  deriving (Eq,Ord,Show,Generic)
+  deriving (Eq,Show,Generic)
 instance NFData Vx
+instance Hashable Vx
 
-data UniqueSpec = Unique | Any deriving (Eq,Show,Generic)
+data UniqueSpec = Unique | Any deriving (Show,Generic)
 instance NFData UniqueSpec
 
-data Lineage = Pure {col::Name, mask::Vexp, quant::UniqueSpec} | None  deriving (Eq,Show,Generic)
+data Lineage = Pure {col::Name, mask::Vexp, quant::UniqueSpec} | None  deriving (Show,Generic)
 instance NFData Lineage
 
 data Vexp = Vexp { vx::Vx
                  , info::ColInfo
                  , lineage::Lineage
-                 , name::Maybe Name } deriving (Eq,Show,Generic)
+                 , name::Maybe Name
+                 , memoized_hash::SHA1
+                 } deriving (Show,Generic)
 
-instance Ord Vexp where -- ignore metadata
-  compare (Vexp{vx=vx1}) (Vexp{vx=vx2}) = compare vx1 vx2
+instance Hashable Vexp where
+  hashWithSalt s (Vexp{memoized_hash}) = hashWithSalt s (show memoized_hash)
 
+instance Eq Vexp where
+  -- hope for the best that the hashing im doing is good enough
+  (==) Vexp{memoized_hash=hs1} Vexp{memoized_hash=hs2} = hs1 == hs2
 
 -- if lineage is set to somthing, it means the
 -- column values all come untouched from an actual table column (as opposed to being derivative)
@@ -147,7 +167,8 @@ complete :: Vx -> Vexp
 complete vx =
   let info = checkColInfo $ inferMetadata vx
       lineage = checkLineage $ inferLineage vx
-  in Vexp { vx, info, lineage, name=Nothing }
+      memoized_hash = sha1vx vx
+  in Vexp { vx, info, lineage, name=Nothing, memoized_hash }
 
 checkLineage :: Lineage -> Lineage
 checkLineage l =
@@ -360,7 +381,7 @@ solve' config M.Table { M.tablename=_
                        let alias = Just $ decideAlias col
                        return $ (do (_,info) <- NameTable.lookup colnam (colinfo config)  -- either monad
                                     let vx=Load colnam
-                                    let partial=Vexp {vx, info, lineage=None, name=Nothing} -- this is just for type compatiblity.
+                                    let partial=Vexp {vx, info, lineage=None, name=Nothing, memoized_hash=sha1vx vx} -- this is just for type compatiblity.
                                     let lineage=Pure{col=colnam, mask=pos_ partial, quant=Unique} -- TODO: use a single vector for lineage range (eg primary key)
                                     let completed = partial {lineage=lineage, name=alias}
                                     return $ completed))
@@ -714,11 +735,13 @@ data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 
 deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
 deduceMasks config fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
-  seq fprime_fact_idx $ seq dimprime_dim_idx $ seq fact_dim_idx_name $
-  let fact_dim_idx = Vexp { vx = Load fact_dim_idx_name
-                          , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
-                          , lineage = None
-                          , name =  Nothing }
+  let fact_dim_idx = let vx = Load fact_dim_idx_name
+                     in Vexp { vx
+                             , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
+                             , lineage = None
+                             , name =  Nothing
+                             , memoized_hash = sha1vx vx
+                             }
       fprime_dim_idx = complete $ Shuffle { shop=Gather
                                           , shpos=fprime_fact_idx
                                           , shsource=fact_dim_idx }

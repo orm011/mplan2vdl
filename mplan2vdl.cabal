@@ -30,6 +30,7 @@ library
                      , SchemaParser
   other-modules:       Dict
                        Error
+                       Sha
   build-depends:       base >= 4.7 && <5
                      , MissingH
                      , containers
@@ -46,6 +47,9 @@ library
                      , cmdargs
                      , cassava
                      , vector
+                     , hashable
+                     , unordered-containers
+                     , cryptonite
   hs-source-dirs:      src
   default-language:    Haskell2010
   default-extensions:  NamedFieldPuns DeriveGeneric DeriveDataTypeable OverloadedStrings ScopedTypeVariables

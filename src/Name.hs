@@ -14,6 +14,7 @@ import Text.Printf
 import Prelude hiding (lookup)
 import Control.DeepSeq(NFData)
 import Data.Data
+import Data.Hashable
 import qualified Data.ByteString.Lazy as B
 --import qualified Data.ByteString.Builder as Bld
 
@@ -41,6 +42,7 @@ We assume all lookups are either successful, or there was an error.
 -}
 
 data Name = Name [B.ByteString] deriving (Eq, Generic, Ord, Data, Show)
+instance Hashable Name
 
 type Map = Map.Map
 

@@ -14,6 +14,7 @@ import Name(Name(..),TypeSpec(..))
 import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
+import Data.Hashable
 --import Data.Int
 --import Data.Monoid(mappend)
 --import Debug.Trace
@@ -93,9 +94,9 @@ data BinaryOp =
   | Eq | Neq {- comp -}
   | LogAnd | LogOr {- logical -}
   | Sub | Add | Div | Mul | Mod | BitAnd | BitOr | Min | Max | BitShift  {- arith -}
-  deriving (Eq, Show, Generic, Ord, Data)
+  deriving (Eq, Show, Generic,Data)
 instance NFData BinaryOp
-
+instance Hashable BinaryOp
 
 resolveInfix :: B.ByteString -> Either String BinaryOp
 resolveInfix str =
