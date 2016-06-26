@@ -16,6 +16,7 @@ import Control.DeepSeq(NFData)
 import Data.Data
 import Data.Hashable
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
 --import qualified Data.ByteString.Builder as Bld
 
 {- eg decimal(15,2) , or smallint  -}
@@ -40,15 +41,12 @@ We assume all lookups are either successful, or there was an error.
 (because we know our application should always insert the value before querying)
 
 -}
-
-data Name = Name [B.ByteString] deriving (Eq, Generic, Ord, Data, Show)
+data Name = Name [B.ByteString] deriving (Eq, Generic, Ord, Data)
 instance Hashable Name
+instance Show Name where
+  show (Name lst) = C.unpack (C.intercalate "." lst)
 
 type Map = Map.Map
-
--- instance Show Name where
---   show (Name lst) 
-
 instance NFData Name
 
 data NameTable v = NameTable (Map [B.ByteString] v)
