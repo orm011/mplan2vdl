@@ -297,6 +297,21 @@ inferLineage Shuffle { shop=Scatter --- note: we are assuming the scatter covers
                                      }
            , quant }  -- scatter does not duplicate values
 
+
+-- gather of foldsel preserves quant.
+inferLineage Shuffle { shop=Gather
+                     , shsource=Vexp {lineage}
+                     , shpos=shpos@Vexp {vx=Fold { foldop=FSel }}
+                     }
+  | Pure {col, mask=lineagev, quant} <- lineage  =
+      Pure { col
+           , mask=complete $ Shuffle { shop=Gather
+                                     , shsource=lineagev
+                                     , shpos
+                                     }
+           , quant=quant }
+
+-- general gather can duplicate values.
 inferLineage Shuffle { shop=Gather
                      , shsource=Vexp {lineage}
                      , shpos }
@@ -306,7 +321,7 @@ inferLineage Shuffle { shop=Gather
                                      , shsource=lineagev
                                      , shpos
                                      }
-           , quant=Any } -- gather can duplicate values.
+           , quant=Any }
 
 inferLineage Fold { foldop
                    , fgroups
