@@ -805,6 +805,9 @@ fact'                                     dim'
 fact -----------------------------------> dim
          (fact_dim_idx provided by db)
 
+for self joins:
+eg. fact' join fact. => use fprime_fact_idx as gather positions.
+
  idx1  idx2
 a---->b---->c
 means we can use Gather {gatherpos=idx1, gatherdata=idx2}
@@ -819,5 +822,3 @@ Scatter {scatterpos=idx, scatterpos=pos } to get a gather revidx such that
 (filtered a valid) -----> a' is valid.
 
 -}
-
-
