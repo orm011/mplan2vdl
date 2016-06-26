@@ -1,2 +1,6 @@
 #! /bin/bash
-(./mplan2vdl --dot -b ./tests/bounds_file.csv -s ./tests/tpch001.schema $1  | dot -Tpdf > /tmp/$(basename $1).pdf)  && evince /tmp/$(basename $1).pdf
+set -e # stop on first error
+
+./mplan2vdl --dot -b ./tests/bounds_file.csv -s ./tests/tpch001.schema $1 > /tmp/$(basename $1).dot
+dot -Tpdf /tmp/$(basename $1).dot > /tmp/$(basename $1).pdf
+evince /tmp/$(basename $1).pdf
