@@ -798,7 +798,6 @@ deduceMasks config rel fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
       in JoinIdx{selectmask, gathermask=cleaned_fprime_dimprime_pos}
          -- remember: select mask is used to filter out the missing entries
          -- the left argument is used to gather from the cleaned fact side to the dim
-    Vexp {lineage=None} -> error $ "the dimension column has no lineage\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
     Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
 
 
