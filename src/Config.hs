@@ -14,12 +14,13 @@ import Control.DeepSeq(NFData)
 import GHC.Generics
 import Control.Exception.Base
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as N
 import qualified Data.ByteString.Lazy as B
 --import qualified Data.ByteString.Char8 as C
 type Map = Map.Map
-
+type Set = Set.Set
 
 -- we use integer in the rec so that strings get
 -- parsed to Integer.
@@ -46,7 +47,6 @@ instance NFData ColInfo
 checkColInfo :: ColInfo -> ColInfo
 checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
 
-
 addEntry :: NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
 addEntry nametab (tab,col,colmin,colmax,colcount) =
   let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount }
@@ -56,10 +56,17 @@ makeConfig :: Integer -> V.Vector BoundsRec -> [Table] -> Either String Config
 makeConfig grainsizelg boundslist tables =
   do colinfo <- foldM addEntry NameTable.empty boundslist
      let allrefs = foldMap makeFKEntries tables
-     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs }
+     let allpkeys = foldMap makePKeys tables
+     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Set.fromList allpkeys }
 
 concatName :: Name -> Name -> Name
 concatName (Name a) (Name b) = Name (a ++ b)
+
+makePKeys :: Table -> [Name]
+makePKeys Table { pkey=FKey {} }  = error "fkey in place of pkey"
+makePKeys Table { name, pkey=PKey { pkcols=c0 :| [], pkconstraint=_ } } = [ concatName name c0 ]
+
+makePKeys Table { pkey=PKey{ pkcols=_ :| (_:_), pkconstraint=_ }} = []
 
 makeFKEntries :: Table -> [(NonEmpty (Name, Name), (NonEmpty (Name, Name), Name))]
 makeFKEntries Table { name, fkeys } =
@@ -83,6 +90,7 @@ data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
                        , fkrefs :: Map (NonEmpty (Name,Name)) (NonEmpty(Name,Name),Name)
                                    -- shows the fact -> dimension direction of the dependence
+                       , pkeys :: Set Name
                                    -- fully qualifed column mames
                        }
 

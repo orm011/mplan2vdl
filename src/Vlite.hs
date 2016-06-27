@@ -30,6 +30,8 @@ import Data.List.NonEmpty(NonEmpty(..))
 import Text.Printf
 import Control.Exception.Base hiding (mask)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+
 import Data.Hashable
 --import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -72,7 +74,7 @@ instance Hashable Vx
 data UniqueSpec = Unique | Any deriving (Show,Generic)
 instance NFData UniqueSpec
 
-data Lineage = Pure {quant::UniqueSpec, col::Name, mask::Vexp} | None  deriving (Show,Generic)
+data Lineage = Pure {col::Name, mask::Vexp} | None  deriving (Show,Generic)
 instance NFData Lineage
 
 data Vexp = Vexp { vx::Vx
@@ -80,6 +82,7 @@ data Vexp = Vexp { vx::Vx
                  , lineage::Lineage
                  , name::Maybe Name
                  , memoized_hash::SHA1
+                 , quant::UniqueSpec
                  } deriving (Show,Generic)
 
 instance Hashable Vexp where
@@ -167,15 +170,16 @@ cond ?. (a,b) =  let  ones = ones_ cond
 complete :: Vx -> Vexp
 complete vx =
   let info = checkColInfo $ inferMetadata vx
-      lineage = checkLineage $ inferLineage vx
+      lineage= checkLineage $ inferLineage vx
+      quant = inferUniqueness vx
       memoized_hash = sha1vx vx
-  in Vexp { vx, info, lineage, name=Nothing, memoized_hash }
+  in Vexp { vx, info, lineage, name=Nothing, memoized_hash, quant }
 
 checkLineage :: Lineage -> Lineage
 checkLineage l =
   case l of
     None -> None
-    Pure _  _ Vexp {lineage, name} ->
+    Pure _ Vexp {lineage, name} ->
       case (lineage,name) of
         (None, Nothing) -> l
         _ -> error "lineage vector should not itself have lineage or name"
@@ -237,7 +241,6 @@ inferMetadata Partition
   , pdata=Vexp { info=ColInfo {count=datacount} }
   } = ColInfo {bounds=(0,pivotcount-1), count=datacount}
 
-
 inferMetadata Binop
   { binop
   , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 } }
@@ -287,65 +290,53 @@ inferMetadata Binop
 
 inferLineage :: Vx -> Lineage
 
-inferLineage Shuffle { shop=Scatter --- note: we are assuming the scatter covers everything.
-                     , shsource=Vexp {lineage}
-                     , shpos }
- | Pure {col, mask=lineagev, quant} <- lineage  =
-     Pure  {col
-           , mask=complete $ Shuffle { shop=Scatter
-                                     , shsource=lineagev
-                                     , shpos
-                                     }
-           , quant }  -- scatter does not duplicate values
+-- note: we are assuming the scatter covers everything.
+-- gather and scatter preserve lineage.
+inferLineage Shuffle { shop
+                     , shsource=Vexp {lineage=Pure{col, mask=lineagev}}
+                     , shpos } =
+  Pure  { col
+        , mask=complete $ Shuffle { shop
+                                  , shsource=lineagev
+                                  , shpos
+                                  }
+        }
 
-
--- gather of foldsel preserves quant.
-inferLineage Shuffle { shop=Gather
-                     , shsource=Vexp {lineage}
-                     , shpos=shpos@Vexp {vx=Fold { foldop=FSel }}
-                     }
-  | Pure {col, mask=lineagev, quant} <- lineage  =
-      Pure { col
-           , mask=complete $ Shuffle { shop=Gather
-                                     , shsource=lineagev
-                                     , shpos
-                                     }
-           , quant=quant }
-
--- gather where pos is itself unique preserves quant
-inferLineage Shuffle { shop=Gather
-                     , shsource=Vexp{lineage=Pure{col, mask=lineagev, quant}}
-                     , shpos=shpos@Vexp{lineage=Pure{quant=Unique}} } =
-      Pure { col
-           , mask=complete $ Shuffle { shop=Gather
-                                     , shsource=lineagev
-                                     , shpos
-                                     }
-           , quant }
-
--- general gather can duplicate values.
-inferLineage Shuffle { shop=Gather
-                     , shsource=Vexp {lineage}
-                     , shpos }
-  | Pure {col, mask=lineagev} <- lineage  =
-      Pure { col
-           , mask=complete $ Shuffle { shop=Gather
-                                     , shsource=lineagev
-                                     , shpos
-                                     }
-           , quant=Any }
-
+-- Foldmin, Foldmax preserve lineage
 inferLineage Fold { foldop
-                   , fgroups
-                   , fdata = Vexp { lineage }
-                   }
-  | (foldop == FMin) || (foldop == FMax)
-  , Pure  {col, mask=lineagev, quant} <- lineage =
-      Pure {col, mask=complete $ Fold {foldop, fgroups, fdata=lineagev}, quant}
-       --Foldmin, max also preserve
+                  , fgroups
+                  , fdata = Vexp { lineage = Pure {col, mask=lineagev} }
+                  }
+  | (foldop == FMin) || (foldop == FMax) =
+      Pure {col, mask=complete $ Fold {foldop, fgroups, fdata=lineagev} }
 
 inferLineage _ = None
 
+inferUniqueness :: Vx -> UniqueSpec
+
+-- TODO: if scatter does not cover everything then this is wrong.
+inferUniqueness Shuffle { shop=Scatter
+                        , shsource=Vexp {quant}
+                        } = quant
+
+inferUniqueness Shuffle { shop=Gather
+                        , shsource=Vexp{quant}
+                        , shpos=Vexp{quant=Unique}
+                        } = quant
+
+inferUniqueness Partition { } = Unique
+
+-- strictly unique
+inferUniqueness RangeV {rstep}
+  | rstep /= 0 = Unique
+
+inferUniqueness RangeC {rstep}
+  | rstep /= 0 = Unique
+
+inferUniqueness Fold { foldop=FSel } = Unique
+
+--inferUniqueness (Load _) -- would need to pass config for ths
+inferUniqueness _ = Any
 
 vexpsFromMplan :: M.RelExpr -> Config -> Either String [Vexp]
 vexpsFromMplan r c  = solve' c r
@@ -407,9 +398,10 @@ solve' config M.Table { M.tablename=_
         sequence $ (do col@(colnam, _) <- nontid -- list monad
                        let alias = Just $ decideAlias col
                        return $ (do (_,info) <- NameTable.lookup colnam (colinfo config)  -- either monad
+                                    let quant = if Set.member colnam (pkeys config) then Unique else Any
                                     let vx=Load colnam
-                                    let partial=Vexp {vx, info, lineage=None, name=Nothing, memoized_hash=sha1vx vx} -- this is just for type compatiblity.
-                                    let lineage=Pure{col=colnam, mask=pos_ partial, quant=Unique} -- TODO: use a single vector for lineage range (eg primary key)
+                                    let partial=Vexp {vx, info, lineage=None, name=Nothing, memoized_hash=sha1vx vx, quant} -- this is just for type compatiblity.
+                                    let lineage=Pure{col=colnam, mask=pos_ partial} -- TODO: use a single vector for lineage range (eg primary key)
                                     let completed = partial {lineage=lineage, name=alias}
                                     return $ completed))
   in do snontids@(refv@Vexp { }: _)  <- nontidloads --either
@@ -417,8 +409,8 @@ solve' config M.Table { M.tablename=_
           [] -> return $ snontids
           [tidcol@(orig,_)] ->
             let anon = pos_ refv
-                lineage = Pure {col=orig, mask=pos_ refv, quant=Unique} -- lineage of itself.
-                named = anon { lineage, name=Just $ decideAlias tidcol }
+                lineage = Pure {col=orig, mask=pos_ refv} -- lineage of itself.
+                named = anon { lineage, name=Just $ decideAlias tidcol, quant=Unique }
             in return $ named : snontids
           _ -> Left $ E.unexpected "multiple tidcols defined in table" tidcols
   where decideAlias (orig, Nothing) = orig
@@ -480,16 +472,16 @@ solve' config M.GroupBy { M.child,
      let gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } = makeCompositeKey gbkeys
      assert (gmin == 0) $
        sequence $ (do pr@(agg, _) <- outputaggs -- list monad
-                      return ( do anon@Vexp{ lineage=orig_lineage }  <- solveAgg config env gkey agg
+                      return ( do anon@Vexp{ quant=orig_uniqueness }  <- solveAgg config env gkey agg
                                   let outalias = case pr of
                                         (M.GDominated n, Nothing) -> Just n
                                         (_, alias) -> alias
                                         _ -> Nothing
-                                  let out_lineage = case (inputkeys, pr, orig_lineage) of
-                                        ([gbk], (M.GDominated n, _), Pure _ col mask) -- if there is a single gb key the output version of that col is unique
-                                           | n == gbk -> Pure {col, mask, quant=Unique} -- right now, we only do this when the input key has a lineage. but it neednt.
-                                        _ -> orig_lineage
-                                  return $ anon {name=outalias, lineage=out_lineage }))
+                                  let out_uniqueness = case (inputkeys, pr) of
+                                        ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
+                                           | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
+                                        _ -> orig_uniqueness
+                                  return $ anon {name=outalias, quant=out_uniqueness }))
 
 solve' config rel@M.EquiJoin { M.leftch
                              , M.rightch
@@ -767,15 +759,16 @@ deduceMasks config rel fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx
                              , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
-                             , lineage = None
+                             , lineage = None -- should this be none, or itself.
                              , name =  Nothing
                              , memoized_hash = sha1vx vx
+                             , quant=Any
                              }
       fprime_dim_idx = complete $ Shuffle { shop=Gather
                                           , shpos=fprime_fact_idx
                                           , shsource=fact_dim_idx }
   in case dimprime_dim_idx of
-    Vexp { lineage=Pure {quant=Unique} } ->
+    Vexp { quant=Unique } ->
       let ones = ones_ dimprime_dim_idx
           pos = pos_ dimprime_dim_idx
           dim_dimprime_valid = complete $ Shuffle { shop=Scatter
@@ -806,7 +799,7 @@ deduceMasks config rel fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
          -- remember: select mask is used to filter out the missing entries
          -- the left argument is used to gather from the cleaned fact side to the dim
     Vexp {lineage=None} -> error $ "the dimension column has no lineage\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
-    Vexp {lineage=Pure{quant=Any}} -> error $ "the dimension column is not known to be unique\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
+    Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
 
 
 {-

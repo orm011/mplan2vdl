@@ -154,7 +154,7 @@ a !=. b = (const_ 1 a) -. (a ==. b)
 type MemoTable = HMap.HashMap V.Vexp Voodoo
 
 voodooFromVexpMemo :: MemoTable -> V.Vexp -> Either String (MemoTable, Voodoo)
-voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _) =
+voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _) =
   case HMap.lookup vexp s of
     Nothing -> do (s',r) <- voodooFromVxNoMemo s vx
                   let s'' = HMap.insert vexp r s'
