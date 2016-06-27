@@ -67,14 +67,26 @@ data Vx =
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Generic)
 instance NFData Vx
 instance Hashable Vx
+instance Show Vx where
+  show (Load n) = "Load " ++ show n
+  show RangeC {} = "RangeC {...}"
+  show Binop {binop} = "Binop { binop = " ++ show binop ++ " left=..., right=... }"
+  show RangeV {rmin, rstep} = "RangeV { rmin=" ++ show rmin ++ ", rstep=" ++ show rstep ++ "rref=... }"
+  show Shuffle {shop} = "Shuffle { shop = " ++ show shop ++ ", shsource=..., shpos=... }"
+  show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
+  show Partition {} = "Partition {pivots=..., pdata=...}"
 
 data UniqueSpec = Unique | Any deriving (Show,Generic)
 instance NFData UniqueSpec
 
-data Lineage = Pure {col::Name, mask::Vexp} | None  deriving (Show,Generic)
+data Lineage = Pure {col::Name, mask::Vexp} | None  deriving (Generic)
+instance Show Lineage where
+  show None = "None"
+  show Pure {col} = "Pure { col = " ++ show col ++ ", mask=... }"
+
 instance NFData Lineage
 
 data Vexp = Vexp { vx::Vx
