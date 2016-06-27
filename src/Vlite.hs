@@ -3,7 +3,8 @@ module Vlite( vexpsFromMplan
             , Vx(..)
             , BinaryOp(..)
             , ShOp(..)
-            , FoldOp(..)) where
+            , FoldOp(..)
+            , Lineage(..)) where
 
 import Config
 import qualified Mplan as M
@@ -71,7 +72,7 @@ instance Hashable Vx
 data UniqueSpec = Unique | Any deriving (Show,Generic)
 instance NFData UniqueSpec
 
-data Lineage = Pure {col::Name, mask::Vexp, quant::UniqueSpec} | None  deriving (Show,Generic)
+data Lineage = Pure {quant::UniqueSpec, col::Name, mask::Vexp} | None  deriving (Show,Generic)
 instance NFData Lineage
 
 data Vexp = Vexp { vx::Vx
@@ -174,7 +175,7 @@ checkLineage :: Lineage -> Lineage
 checkLineage l =
   case l of
     None -> None
-    Pure  _ Vexp {lineage, name} _ ->
+    Pure _  _ Vexp {lineage, name} ->
       case (lineage,name) of
         (None, Nothing) -> l
         _ -> error "lineage vector should not itself have lineage or name"
@@ -310,6 +311,17 @@ inferLineage Shuffle { shop=Gather
                                      , shpos
                                      }
            , quant=quant }
+
+-- gather where pos is itself unique preserves quant
+inferLineage Shuffle { shop=Gather
+                     , shsource=Vexp{lineage=Pure{col, mask=lineagev, quant}}
+                     , shpos=shpos@Vexp{lineage=Pure{quant=Unique}} } =
+      Pure { col
+           , mask=complete $ Shuffle { shop=Gather
+                                     , shsource=lineagev
+                                     , shpos
+                                     }
+           , quant }
 
 -- general gather can duplicate values.
 inferLineage Shuffle { shop=Gather
@@ -468,18 +480,21 @@ solve' config M.GroupBy { M.child,
      let gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } = makeCompositeKey gbkeys
      assert (gmin == 0) $
        sequence $ (do pr@(agg, _) <- outputaggs -- list monad
-                      return ( do anon  <- solveAgg config env gkey agg
+                      return ( do anon@Vexp{ lineage=orig_lineage }  <- solveAgg config env gkey agg
                                   let outalias = case pr of
                                         (M.GDominated n, Nothing) -> Just n
                                         (_, alias) -> alias
                                         _ -> Nothing
-                                  return $ anon {name=outalias}))
+                                  let out_lineage = case (inputkeys, pr, orig_lineage) of
+                                        ([gbk], (M.GDominated n, _), Pure _ col mask) -- if there is a single gb key the output version of that col is unique
+                                           | n == gbk -> Pure {col, mask, quant=Unique} -- right now, we only do this when the input key has a lineage. but it neednt.
+                                        _ -> orig_lineage
+                                  return $ anon {name=outalias, lineage=out_lineage }))
 
-
-solve' config M.EquiJoin { M.leftch
-                         , M.rightch
-                         , M.cond=(key1, key2)
-                         } =
+solve' config rel@M.EquiJoin { M.leftch
+                             , M.rightch
+                             , M.cond=(key1, key2)
+                             } =
   do Env leftcols leftenv  <- solve config leftch
      Env rightcols rightenv <- solve config rightch
      --- find the keys in the subrelations. the order is not well defined,
@@ -506,16 +521,16 @@ solve' config M.EquiJoin { M.leftch
            then case (idx2,idx1) of -- TODO handle case where both have been changed.
              (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2, JoinIdx{gathermask=idx1,
                                                                                selectmask=ones_ idx1}) -- use the idx1 as gather mask against cols2
-             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1,JoinIdx{gathermask=idx2,
+             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1, JoinIdx{gathermask=idx2,
                                                                               selectmask=ones_ idx2})
              (_,_) -> error $ "both children of this self join have been modified.\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch)
            else case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
                       Nothing -> error "no fk constraint available for join"
                       Just ((fact_cname, dim_cname) :| [], fkidx)
                         | (fact_cname == colname1) && (dim_cname == colname2)
-                          -> (cols1, cols2, deduceMasks config skey1 skey2 fkidx)
+                          -> (cols1, cols2, deduceMasks config rel skey1 skey2 fkidx)
                         | (fact_cname == colname2) && (dim_cname == colname1)
-                          -> (cols2, cols1, deduceMasks config skey2 skey1 fkidx)
+                          -> (cols2, cols1, deduceMasks config rel skey2 skey1 fkidx)
                       _ -> error "multiple fk columns?")
      let cleaned_factcols = (do factcol@Vexp {name } <- factcols
                                 let out_anon = complete $ Shuffle { shop=Gather
@@ -747,9 +762,8 @@ make2LevelFold config foldop fgroups fdata =
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 -- select is a positions list
 -- gathermask is only valid whenapplied to a clumn after select.
-
-deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
-deduceMasks config fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
+deduceMasks :: Config -> M.RelExpr -> Vexp -> Vexp -> Name -> JoinIdx
+deduceMasks config rel fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx
                              , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
@@ -791,7 +805,8 @@ deduceMasks config fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
       in JoinIdx{selectmask, gathermask=cleaned_fprime_dimprime_pos}
          -- remember: select mask is used to filter out the missing entries
          -- the left argument is used to gather from the cleaned fact side to the dim
-    _ -> error $ "the dimension column has been modified:" -- ++ (show dimprime_dim_idx)
+    Vexp {lineage=None} -> error $ "the dimension column has no lineage\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
+    Vexp {lineage=Pure{quant=Any}} -> error $ "the dimension column is not known to be unique\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
 
 
 {-
