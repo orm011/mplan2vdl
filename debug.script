@@ -1,4 +1,4 @@
-:set args ["-b","tests/bounds_file.csv","-s","tests/tpch001.schema","tests/tpchnoorder/07.sql.mplan"]
+:set args ["-b","tests/bounds_file.csv","-s","tests/tpch001.schema","tests/tpchnoorder/18.sql.mplan"]
 :set -fbreak-on-error
 :set -fbreak-on-exception
 :module -Main
