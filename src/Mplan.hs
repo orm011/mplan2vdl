@@ -60,21 +60,21 @@ isJoinIdx _ = []
 getJoinIdx :: [P.Attr] -> [Name]
 getJoinIdx attrs = foldl' (++) [] (map isJoinIdx attrs)
 
-resolveTypeSpec :: TypeSpec -> Either String MType
+resolveTypeSpec :: TypeSpec -> MType
 resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
-  where f "int" [] = Right MInt
-        f "tinyint" [] = Right MTinyint
-        f "smallint" [] = Right MSmallint
-        f "bigint" [] = Right MBigInt
-        f "date" []  = Right MDate
-        f "char" _ = Right MChar -- ignoring length fields
-        f "varchar" [_] = Right MChar --ignore length fields
-        f "decimal" [a,b] = Right $ MDecimal a b
-        f "sec_interval" [_] = Right MMillisec -- they use millisecs to express their seconds
-        f "month_interval" [] = Right MMonth
-        f "double" [] = Right MDouble -- used for averages even if columns arent doubles
-        f "boolean" [] = Right MBoolean
-        f name _ = Left $ E.unexpected  "unsupported typespec" name
+  where f "int" [] = MInt
+        f "tinyint" [] = MTinyint
+        f "smallint" [] = MSmallint
+        f "bigint" [] = MBigInt
+        f "date" []  = MDate
+        f "char" _ =  MChar -- ignoring length fields
+        f "varchar" [_] =  MChar --ignore length fields
+        f "decimal" [a,b] = MDecimal a b
+        f "sec_interval" [_] = MMillisec -- they use millisecs to express their seconds
+        f "month_interval" [] = MMonth
+        f "double" [] = MDouble -- used for averages even if columns arent doubles
+        f "boolean" [] = MBoolean
+        f name _ = error $ "unsupported typespec: " ++ show name
 
 resolveCharLiteral :: B.ByteString -> Either String Integer
 resolveCharLiteral ch = dictEncode (C.unpack ch)
@@ -399,12 +399,12 @@ sc P.Call { P.fname=Name ["ifthenelse"]
 sc P.Cast { P.tspec
           , P.value = P.Expr { P.expr = parg, P.alias = _  }
           } =
-  do mtype <- resolveTypeSpec tspec
+  do let mtype = resolveTypeSpec tspec
      arg <- sc parg
      return $ Cast { mtype, arg }
 
 sc arg@P.Literal { P.tspec, P.stringRep } =
-  do mtype <- resolveTypeSpec tspec
+  do let mtype = resolveTypeSpec tspec
      ret <- case mtype of
        MDate -> Right $ resolveDateString stringRep
        MChar -> resolveCharLiteral stringRep
