@@ -477,34 +477,38 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
 solve' config M.GroupBy { M.child,
                           M.inputkeys,
                           M.outputaggs } =
-  do env@(Env (refv:_) nt)  <- solve config child --either monad
+  do (Env list0@(refv:_) nt)  <- solve config child --either monad
      lookedup  <- (mapM (\n -> (NameTable.lookup n nt)) inputkeys)
      let keyvecs = map snd lookedup
      let gbkeys = case keyvecs of
            [] -> zeros_ refv :| []
            a : rest -> a :| rest
      let gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } = makeCompositeKey gbkeys
-     assert (gmin == 0) $
-       sequence $ (do pr <- outputaggs -- list monad
-                      return $ solveSingleAgg env gkey pr )
-       where solveSingleAgg env gkey pr@(agg, _) =
-               do anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage }  <- solveAgg config env gkey agg
-                  let outalias = case pr of
-                        (M.GDominated n, Nothing) -> Just n
-                        (_, alias) -> alias
-                        _ -> Nothing
-                  let out_uniqueness = case (inputkeys, pr) of
-                        ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
-                          | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
-                        _ -> orig_uniqueness
-                  let out_lineage = case orig_lineage of
-                        None -> None
-                        Pure { col, mask=orig_mask@Vexp{quant=mask_uniqueness}} ->
-                          let out_mask_quant = if out_uniqueness == Unique
-                                               then Unique
-                                               else mask_uniqueness
-                          in Pure {col, mask=orig_mask {quant=out_mask_quant}}
-                  return $ anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }
+     let solveSingleAgg env pr@(agg, _) =
+           do anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage }  <- solveAgg config env gkey agg
+              let outalias = case pr of
+                    (M.GDominated n, Nothing) -> Just n
+                    (_, alias) -> alias
+                    _ -> Nothing
+              let out_uniqueness = case (inputkeys, pr) of
+                    ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
+                      | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
+                    _ -> orig_uniqueness
+              let out_lineage = case orig_lineage of
+                    None -> None
+                    Pure { col, mask=orig_mask@Vexp{quant=mask_uniqueness}} ->
+                      let out_mask_quant = if out_uniqueness == Unique
+                                           then Unique
+                                           else mask_uniqueness
+                      in Pure {col, mask=orig_mask {quant=out_mask_quant}}
+              return $ anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }
+     let addEntry (x, acclist) tup = (x, tup : acclist) -- adds output to acclist
+     let foldFun lsts@(x, acclist) arg =
+           do let asenv = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
+              ans <- solveSingleAgg asenv arg --either monad
+              return $ addEntry lsts $ ans
+     (_, final) <- assert (gmin == 0) $ foldM  foldFun (list0,[]) outputaggs
+     return $ final
 
 
 solve' config M.Join { M.leftch
