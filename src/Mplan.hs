@@ -190,6 +190,7 @@ solveGroupOutput P.Expr
        case fname of
          Name ["sum"] -> Right $ (GFold FSum inner, alias)
          Name ["avg"] -> Right $ (GAvg inner, alias)
+         Name ["max"] -> Right $ (GFold FMax inner, alias)
          _ -> Left $ E.unexpected  "unary aggregate" fname
 
 solveGroupOutput  s_ = Left $ E.unexpected "group_by output expression" s_
