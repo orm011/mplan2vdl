@@ -484,16 +484,23 @@ solve' config M.GroupBy { M.child,
      let gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } = makeCompositeKey gbkeys
      assert (gmin == 0) $
        sequence $ (do pr@(agg, _) <- outputaggs -- list monad
-                      return ( do anon@Vexp{ quant=orig_uniqueness }  <- solveAgg config env gkey agg
+                      return ( do anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage }  <- solveAgg config env gkey agg
                                   let outalias = case pr of
                                         (M.GDominated n, Nothing) -> Just n
                                         (_, alias) -> alias
                                         _ -> Nothing
                                   let out_uniqueness = case (inputkeys, pr) of
                                         ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
-                                           | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
+                                          | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
                                         _ -> orig_uniqueness
-                                  return $ anon {name=outalias, quant=out_uniqueness }))
+                                  let out_lineage = case orig_lineage of
+                                        None -> None
+                                        Pure { col, mask=orig_mask@Vexp{quant=mask_uniqueness}} ->
+                                          let out_mask_quant = if out_uniqueness == Unique
+                                                               then Unique
+                                                               else mask_uniqueness
+                                          in Pure {col, mask=orig_mask {quant=out_mask_quant}}
+                                  return $ anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }))
 
 solve' config rel@M.EquiJoin { M.leftch
                              , M.rightch
