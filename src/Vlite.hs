@@ -530,6 +530,27 @@ solve' config M.Join { M.leftch
              -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx
          _ -> error "multiple fk columns?"
 
+
+solve' config M.Join { M.leftch
+                     , M.rightch
+                     , M.conds=M.Binop{ M.binop
+                                      , M.left=M.Ref key1
+                                      , M.right=M.Ref key2 } :| []
+                     } = -- TODO: we are skipping returning the column that was selected...
+  do ((keycol1, Env cols1 _), (keycol2, Env cols2 _)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+     return $ case ((count $ info keycol1, cols1),  (count $ info keycol2, cols2)) of --single column, single element.
+       ( (1, [_]) , _) -> let broadcastcol1 = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol2, shsource=keycol1 } -- left is val
+                              boolean = complete $ Binop {binop, left=broadcastcol1, right=keycol2}
+                              gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
+                          in gatherAll cols2 gathermask
+       (_ , (1, [_]) ) -> let broadcastcol2 = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol1, shsource=keycol2 } -- right is val
+                              boolean = complete $ Binop {binop, left=keycol1, right=broadcastcol2}
+                              gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
+                          in gatherAll cols1 gathermask
+       (_,_) -> error "this join requires product?"
+
+
+
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
                        } =
