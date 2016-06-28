@@ -73,9 +73,9 @@ instance Hashable Vx
 instance Show Vx where
   show (Load n) = "Load " ++ show n
   show RangeC {} = "RangeC {...}"
-  show Binop {binop} = "Binop { binop = " ++ show binop ++ " left=..., right=... }"
-  show RangeV {rmin, rstep} = "RangeV { rmin=" ++ show rmin ++ ", rstep=" ++ show rstep ++ "rref=... }"
-  show Shuffle {shop} = "Shuffle { shop = " ++ show shop ++ ", shsource=..., shpos=... }"
+  show Binop {binop} = "Binop { binop=" ++ show binop ++ " left=..., right=... }"
+  show RangeV {rmin, rstep} = "RangeV { rmin=" ++ show rmin ++ ", rstep=" ++ show rstep ++ ", rref=... }"
+  show Shuffle {shop} = "Shuffle { shop=" ++ show shop ++ ", shsource=..., shpos=... }"
   show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
 
@@ -469,7 +469,6 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
                  -- allow collisions b/c they do happen .
                 anon  <- fromScalar asenv expr --either monad
                 return $ addEntry lsts $ anon {name=outputName arg}
-
 
 -- problem:
 -- n2.n_name as all_nations.nation defined then directly uesd in a subsequent expression. not found.
