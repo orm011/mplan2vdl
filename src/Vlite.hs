@@ -683,7 +683,7 @@ solveAgg config env gkeyvec (M.GFold op expr) =
 -- scatter mask for a group by
 getScatterMask :: Vexp -> Either String Vexp
 getScatterMask pdata@Vexp { info=ColInfo {bounds=(pdatamin, pdatamax)} } =
-  if pdatamax == pdatamin 
+  if pdatamax == pdatamin
   then return $ pos_ pdata -- pivots would be empty. unclear semantics.
   else let pivots = complete $ RangeC { rmin=pdatamin
                                  , rstep=1
