@@ -506,25 +506,12 @@ solve' config rel@M.EquiJoin { M.leftch
                              , M.rightch
                              , M.cond=(key1, key2)
                              } =
-  do Env leftcols leftenv  <- solve config leftch
-     Env rightcols rightenv <- solve config rightch
-     --- find the keys in the subrelations. the order is not well defined,
-     --- so, try both and check if there was ambiguity.
-     let tryOne =
-           errzip (NameTable.lookup key1 leftenv) (NameTable.lookup key2 rightenv)
-     let tryTwo =
-           errzip (NameTable.lookup key1 rightenv) (NameTable.lookup key2 leftenv)
-     ((skey1,cols1), (skey2,cols2)) <- case (tryOne,tryTwo) of
-       (Left _, Left _) -> Left "failed join lookup"
-       (Right ((_,key1m),(_,key2m)), Left _) -> Right ((key1m, leftcols), (key2m, rightcols))
-       (Left _, Right ((_,key1m),(_,key2m))) -> Right ((key1m, rightcols), (key2m, leftcols))
-       (Right _, Right _) -> Left "ambiguous key lookup"
-     --- check which way the reference goes
-     let (colname1, idx1) = case skey1 of
-           Vexp { lineage=Pure {col=a, mask=b} } -> (a,b)
+  do ((keycol1,Env cols1 _), (keycol2, Env cols2 _)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+     let col1info@(colname1, idx1, _) = case keycol1 of
+           Vexp { lineage=Pure {col=c, mask=m}, quant=q } -> (c,m,q)
            Vexp { lineage=None } -> error "no lineage available for join"
-     let (colname2,idx2) = case skey2 of
-           Vexp { lineage=Pure {col=a,mask=b}  } -> (a,b)
+     let col2info@(colname2,idx2, _) = case keycol2 of
+           Vexp { lineage=Pure {col=c,mask=m}, quant=q  } -> (c,m,q)
            Vexp { lineage=None } -> error "no lineage available for join"
      let (factcols, dimcols, JoinIdx {selectmask=selectidx, gathermask=gatheridx}) = ( -- select idx is a list of positions. --gatheridx is a mask that can be applied to cols after select
            if (colname1 == colname2)
@@ -539,9 +526,9 @@ solve' config rel@M.EquiJoin { M.leftch
                       Nothing -> error "no fk constraint available for join"
                       Just ((fact_cname, dim_cname) :| [], fkidx)
                         | (fact_cname == colname1) && (dim_cname == colname2)
-                          -> (cols1, cols2, deduceMasks config rel skey1 skey2 fkidx)
+                          -> (cols1, cols2, deduceMasks config rel col1info col2info fkidx)
                         | (fact_cname == colname2) && (dim_cname == colname1)
-                          -> (cols2, cols1, deduceMasks config rel skey2 skey1 fkidx)
+                          -> (cols2, cols1, deduceMasks config rel col2info col1info fkidx)
                       _ -> error "multiple fk columns?")
      let cleaned_factcols = (do factcol@Vexp {name } <- factcols
                                 let out_anon = complete $ Shuffle { shop=Gather
@@ -773,8 +760,27 @@ make2LevelFold config foldop fgroups fdata =
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 -- select is a positions list
 -- gathermask is only valid whenapplied to a clumn after select.
-deduceMasks :: Config -> M.RelExpr -> Vexp -> Vexp -> Name -> JoinIdx
-deduceMasks config rel fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
+
+-- figures out which name belongs to which expr.
+matchcols :: Config -> Name -> Name -> M.RelExpr -> M.RelExpr -> Either String ((Vexp, Env),(Vexp,Env))
+matchcols config key1 key2 leftch rightch = do
+  left@(Env _ leftenv)  <- solve config leftch
+  right@(Env _ rightenv) <- solve config rightch
+  --- find the keys in the subrelations. the order is not well defined,
+  --- so, try both and check if there was ambiguity.
+  let tryOne =
+        errzip (NameTable.lookup key1 leftenv) (NameTable.lookup key2 rightenv)
+  let tryTwo =
+        errzip (NameTable.lookup key1 rightenv) (NameTable.lookup key2 leftenv)
+  case (tryOne,tryTwo) of
+    (Left _, Left _) -> Left "failed join lookup"
+    (Right ((_,key1m),(_,key2m)), Left _) -> Right ((key1m, left), (key2m, right))
+    (Left _, Right ((_,key1m),(_,key2m))) -> Right ((key1m, right), (key2m, left))
+    (Right _, Right _) -> Left "ambiguous key lookup"
+
+
+deduceMasks :: Config -> M.RelExpr -> (Name,Vexp,UniqueSpec) -> (Name,Vexp,UniqueSpec) -> Name -> JoinIdx
+deduceMasks config rel (_,fprime_fact_idx,quantf) (_,dimprime_dim_idx,_) fact_dim_idx_name =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx
                              , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
@@ -783,11 +789,17 @@ deduceMasks config rel fprime_fact_idx dimprime_dim_idx fact_dim_idx_name =
                              , memoized_hash = sha1vx vx
                              , quant=Any
                              }
-      fprime_dim_idx = complete $ Shuffle { shop=Gather
-                                          , shpos=fprime_fact_idx
-                                          , shsource=fact_dim_idx }
+      -- fprime col tracks some fk col FK.
+      -- FK is in one to one correspondance with the fact_dim_idx_name,
+      -- so if we have a unique subset of FK, then it maps to a unique subset of fact_dim_idx_name
+      -- so we use that information here, to label fprime_dim_idx accordingly.
+      -- Query 18 makes this reasoning necessary.
+      prelim_fprime_dim_idx = complete $ Shuffle { shop=Gather
+                                                 , shpos=fprime_fact_idx
+                                                 , shsource=fact_dim_idx }
+      fprime_dim_idx = prelim_fprime_dim_idx {quant=quantf}
   in case dimprime_dim_idx of
-    Vexp { quant=Unique } ->
+    Vexp { quant=Unique } -> -- scattering back only works for columns with unique entries
       let ones = ones_ dimprime_dim_idx
           pos = pos_ dimprime_dim_idx
           dim_dimprime_valid = complete $ Shuffle { shop=Scatter
