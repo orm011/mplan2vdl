@@ -79,7 +79,7 @@ instance Show Vx where
   show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
 
-data UniqueSpec = Unique | Any deriving (Show,Generic)
+data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
 
 data Lineage = Pure {col::Name, mask::Vexp} | None  deriving (Generic)
