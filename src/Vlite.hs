@@ -510,34 +510,33 @@ solve' config M.Join { M.leftch
                      , M.conds=M.Binop{ M.binop=M.Eq
                                       , M.left=M.Ref key1
                                       , M.right=M.Ref key2 } :| []
-                     } =
-  do ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
-     let colname1 = case keycol1 of
-           Vexp { lineage=Pure {col}} -> col
-           Vexp { lineage=None } -> error "no lineage available for join"
-     let colname2 = case keycol2 of
-           Vexp { lineage=Pure {col}} ->  col
-           Vexp { lineage=None } -> error "no lineage available for join"
-     if (colname1 == colname2 && Set.member colname1 (pkeys config))
-       then handleSelfJoin config (keycol1, env1) (keycol2,env2)
-       else
-       case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
-         Nothing -> error "no fk constraint available for join"
-         Just ((fact_cname, dim_cname) :| [], fkidx)
-           | (fact_cname == colname1) && (dim_cname == colname2)
-             -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx
-           | (fact_cname == colname2) && (dim_cname == colname1)
-             -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx
-         _ -> error "multiple fk columns?"
+                     }
+  | Right ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+  , Vexp { lineage=Pure {col=colname1}} <- keycol1
+  , Vexp { lineage=Pure {col=colname2}} <- keycol2 =
+      if (colname1 == colname2 && Set.member colname1 (pkeys config))
+      then handleSelfJoin config (keycol1, env1) (keycol2,env2)
+      else
+        case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
+          Nothing -> error "no fk constraint available for join"
+          Just ((fact_cname, dim_cname) :| [], fkidx)
+            | (fact_cname == colname1) && (dim_cname == colname2)
+              -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx
+            | (fact_cname == colname2) && (dim_cname == colname1)
+              -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx
+          _ -> error "multiple fk columns?"
 
 
 solve' config M.Join { M.leftch
                      , M.rightch
-                     , M.conds=M.Binop{ M.binop
-                                      , M.left=M.Ref key1
-                                      , M.right=M.Ref key2 } :| []
+                     , M.conds=conds@M.Binop{ M.binop
+                                            , M.left=leftexpr
+                                            , M.right=rightexpr } :| []
                      } = -- TODO: we are skipping returning the column that was selected...
-  do ((keycol1, Env cols1 _), (keycol2, Env cols2 _)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+  do env1@(Env cols1 _) <- solve config leftch  --- assume that left expr is solvable in env1, and right expr is solvable in env2 for now.
+     env2@(Env cols2 _) <- solve config rightch
+     keycol1 <- sc env1 leftexpr
+     keycol2 <- sc env2 rightexpr
      return $ case ((count $ info keycol1, cols1),  (count $ info keycol2, cols2)) of --single column, single element.
        ( (1, [_]) , _) -> let broadcastcol1 = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol2, shsource=keycol1 } -- left is val
                               boolean = complete $ Binop {binop, left=broadcastcol1, right=keycol2}
@@ -547,7 +546,7 @@ solve' config M.Join { M.leftch
                               boolean = complete $ Binop {binop, left=keycol1, right=broadcastcol2}
                               gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
                           in gatherAll cols1 gathermask
-       (_,_) -> error "this join requires product?"
+       (_,_) -> error $ "this join requires product?\n" ++ show keycol1 ++ "\n" ++ show keycol2 ++ "\n" ++ show conds
 
 
 
