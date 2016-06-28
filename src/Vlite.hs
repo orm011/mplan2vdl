@@ -502,50 +502,30 @@ solve' config M.GroupBy { M.child,
                                           in Pure {col, mask=orig_mask {quant=out_mask_quant}}
                                   return $ anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }))
 
-solve' config rel@M.Join { M.leftch
-                         , M.rightch
-                         , M.conds=M.Binop{ M.binop=M.Eq
-                                          , M.left=M.Ref key1
-                                          , M.right=M.Ref key2 } :| []
-                         } =
-  do ((keycol1,Env cols1 _), (keycol2, Env cols2 _)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
-     let col1info@(colname1, idx1, _) = case keycol1 of
-           Vexp { lineage=Pure {col=c, mask=m}, quant=q } -> (c,m,q)
+solve' config M.Join { M.leftch
+                     , M.rightch
+                     , M.conds=M.Binop{ M.binop=M.Eq
+                                      , M.left=M.Ref key1
+                                      , M.right=M.Ref key2 } :| []
+                     } =
+  do ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+     let colname1 = case keycol1 of
+           Vexp { lineage=Pure {col}} -> col
            Vexp { lineage=None } -> error "no lineage available for join"
-     let col2info@(colname2,idx2, _) = case keycol2 of
-           Vexp { lineage=Pure {col=c,mask=m}, quant=q  } -> (c,m,q)
+     let colname2 = case keycol2 of
+           Vexp { lineage=Pure {col}} ->  col
            Vexp { lineage=None } -> error "no lineage available for join"
-     let (factcols, dimcols, JoinIdx {selectmask=selectidx, gathermask=gatheridx}) = ( -- select idx is a list of positions. --gatheridx is a mask that can be applied to cols after select
-           if (colname1 == colname2)
-              -- self join. look for version of table that is intact
-           then case (idx2,idx1) of -- TODO handle case where both have been changed.
-             (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2, JoinIdx{gathermask=idx1,
-                                                                               selectmask=ones_ idx1}) -- use the idx1 as gather mask against cols2
-             (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1, JoinIdx{gathermask=idx2,
-                                                                              selectmask=ones_ idx2})
-             (_,_) -> error $ "both children of this self join have been modified.\n" ++ (take 50 $ show leftch) ++ "\n" ++ (take 50 $ show rightch)
-           else case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
-                      Nothing -> error "no fk constraint available for join"
-                      Just ((fact_cname, dim_cname) :| [], fkidx)
-                        | (fact_cname == colname1) && (dim_cname == colname2)
-                          -> (cols1, cols2, deduceMasks config rel col1info col2info fkidx)
-                        | (fact_cname == colname2) && (dim_cname == colname1)
-                          -> (cols2, cols1, deduceMasks config rel col2info col1info fkidx)
-                      _ -> error "multiple fk columns?")
-     let cleaned_factcols = (do factcol@Vexp {name } <- factcols
-                                let out_anon = complete $ Shuffle { shop=Gather
-                                                                  , shsource=factcol
-                                                                  , shpos=selectidx
-                                                                  }
-                                return $ out_anon {name=name}
-                            )
-     let joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
-                               let joined_anon = complete $ Shuffle { shop=Gather
-                                                                    , shsource=dimcol
-                                                                    , shpos=gatheridx }
-                               return $ joined_anon { name=name }
-                           ) -- preserve the names
-     return $ cleaned_factcols ++ joined_dimcols
+     if (colname1 == colname2 && Set.member colname1 (pkeys config))
+       then handleSelfJoin config (keycol1, env1) (keycol2,env2)
+       else
+       case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
+         Nothing -> error "no fk constraint available for join"
+         Just ((fact_cname, dim_cname) :| [], fkidx)
+           | (fact_cname == colname1) && (dim_cname == colname2)
+             -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx
+           | (fact_cname == colname2) && (dim_cname == colname1)
+             -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx
+         _ -> error "multiple fk columns?"
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
@@ -781,8 +761,58 @@ matchcols config key1 key2 leftch rightch = do
     (Right _, Right _) -> Left "ambiguous key lookup"
 
 
-deduceMasks :: Config -> M.RelExpr -> (Name,Vexp,UniqueSpec) -> (Name,Vexp,UniqueSpec) -> Name -> JoinIdx
-deduceMasks config rel (_,fprime_fact_idx,quantf) (_,dimprime_dim_idx,_) fact_dim_idx_name =
+handleSelfJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Either String [Vexp]
+handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineage=Pure {mask=idx2}} , Env cols2 _) =
+  let (factcols, dimcols, JoinIdx {selectmask=selectidx, gathermask=gatheridx}) =
+        case (idx2,idx1) of  --- idx2 modified -> use it as facttable. TODO: check here.
+          (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2, JoinIdx{gathermask=idx1,
+                                                                            selectmask=ones_ idx1}) -- use the idx1 as gather mask against cols2
+          (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1, JoinIdx{gathermask=idx2,
+                                                                            selectmask=ones_ idx2})
+          (_,_) -> error $ "both children of this self join have been modified.\n"
+      cleaned_factcols = (do factcol@Vexp {name } <- factcols
+                             let out_anon = complete $ Shuffle { shop=Gather
+                                                               , shsource=factcol
+                                                               , shpos=selectidx
+                                                               }
+                             return $ out_anon {name=name}
+                         )
+      joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
+                            let joined_anon = complete $ Shuffle { shop=Gather
+                                                                 , shsource=dimcol
+                                                                 , shpos=gatheridx }
+                            return $ joined_anon { name=name }
+                        ) -- preserve the names
+  in return $ cleaned_factcols ++ joined_dimcols
+
+handleSelfJoin _ _ _ = error "only self join of pure handled right now"
+
+--- assumes the non-empty list of names is defined in the env.
+handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> Either String [Vexp]
+handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx =
+  let JoinIdx {selectmask, gathermask} = deduceMasks config factkey dimkey fkidx
+      cleaned_factcols = (do factcol@Vexp {name } <- factcols
+                             let out_anon = complete $ Shuffle { shop=Gather
+                                                               , shsource=factcol
+                                                               , shpos=selectmask
+                                                               }
+                             return $ out_anon {name=name}
+                         )
+      joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
+                            let joined_anon = complete $ Shuffle { shop=Gather
+                                                                 , shsource=dimcol
+                                                                 , shpos=gathermask }
+                            return $ joined_anon { name=name }
+                        ) -- preserve the names
+  in return $ cleaned_factcols ++ joined_dimcols
+
+
+-- assumes
+deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
+deduceMasks config
+  (Vexp{ lineage=Pure {mask=fprime_fact_idx}, quant=quantf})
+  (Vexp{ lineage=Pure {mask=dimprime_dim_idx} })
+  fact_dim_idx_name =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx
                              , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
@@ -831,9 +861,10 @@ deduceMasks config rel (_,fprime_fact_idx,quantf) (_,dimprime_dim_idx,_) fact_di
       in JoinIdx{selectmask, gathermask=cleaned_fprime_dimprime_pos}
          -- remember: select mask is used to filter out the missing entries
          -- the left argument is used to gather from the cleaned fact side to the dim
-    Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n" ++ (take 400 $ show rel) ++ "\ndimprime:\n" ++ (take 300 $ show dimprime_dim_idx) ++ "\nfprime:\n" ++ (take 300 $ show fprime_fact_idx)
+    Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n"
 
 
+deduceMasks _ _ _ _  = error "non pure columns in fk join"
 {-
 Diagram to understand the join deduce masks code:
 
