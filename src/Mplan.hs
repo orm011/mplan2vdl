@@ -32,7 +32,8 @@ import Error(check)
 import Data.List(foldl')
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
-
+--import qualified Data.List.NonEmpty as N
+import Data.List.NonEmpty(NonEmpty(..))
 
 --type Map = Map.Map
 
@@ -209,10 +210,10 @@ data RelExpr =
               , inputkeys :: [Name]
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
-  | EquiJoin    { leftch :: RelExpr -- we will figure out if there is an fk later.
-                , rightch :: RelExpr
-                , cond :: (Name, Name)
-              }
+  | Join    { leftch :: RelExpr -- we will figure out if there is an fk  join later.
+            , rightch :: RelExpr
+            , conds :: NonEmpty ScalarExpr
+            }
   | TopN      { child :: RelExpr
               , n :: Integer
               }
@@ -313,30 +314,17 @@ done via  a foreign key -}
 solve P.Node { P.relop
              , P.children = [l, r]
              , P.arg_lists =
-               [ P.Expr
-                 { P.expr=P.Infix
-                   { P.infixop = "="
-                   , P.left = P.Expr (P.Ref left  _) Nothing
-                   , P.right = P.Expr (P.Ref right _) Nothing
-                   }
-                 , P.alias = _}]:[] {-only one condition-}
+               conditions:[]
+               {- remember : its a list of lists -}
              }
   | ("semijoin" == relop || "join" == relop) =
     do leftch  <- solve l
        rightch <- solve r
-       return $ EquiJoin { leftch, rightch, cond=(left, right) }
-
-solve P.Node { P.relop
-             , P.children= [_,_]
-             , P.arg_lists = (_:cond2:_):_   }
-  | (relop == "join" || relop == "semijoin") =
-      Left $ E.unexpected  ((C.unpack relop) ++ " condition has a second predicate: ") cond2
-
-solve P.Node { P.relop
-             , P.children= [_,_]
-             , P.arg_lists =[arg]:[]  }
-  | (relop == "join" || relop == "semijoin")
-   =  Left $ E.unexpected ((C.unpack relop) ++ " condition is not an equality: ") arg
+       prelim_conds <- mapM ( sc . P.expr) conditions
+       let conds = case prelim_conds of
+             [] -> error " empty join condition list is invalid "
+             first : rest -> first :| rest
+       return $ Join { leftch, rightch, conds }
 
 solve P.Node { P.relop = "top N"
              , P.children = [ch]
@@ -506,25 +494,25 @@ pushFKJoins :: RelExpr -> RelExpr
 pushFKJoins = rewrite swap
   where -- pattern order matters in terms of which gets preferred
     --dimension table selects get pushed up as well, after fact table ones
-    swap EquiJoin { leftch
+    swap Join { leftch
                 , rightch = Select { child
                                    , predicate }
-                , cond
+                , conds=cond :| []
                 } =
-      Just $ Select { child=EquiJoin { leftch
+      Just $ Select { child=Join { leftch
                                      , rightch = child
-                                     , cond }
+                                     , conds=cond :| [] }
                     , predicate }
     -- fact table selects get pushed up as well, after dim table
     -- NOTE: the predicate merge step is meant to map bottommost to leftmost
-    swap EquiJoin { leftch = Select { child=selectchild -- push left select
+    swap Join { leftch = Select { child=selectchild -- push left select
                                    , predicate }
                   , rightch
-                  , cond
+                  , conds=cond :| []
                   } =
-      Just $ Select { child=EquiJoin { leftch = selectchild
+      Just $ Select { child=Join { leftch = selectchild
                                      , rightch
-                                     , cond }
+                                     , conds=cond :| [] }
                     , predicate }
     swap _ = Nothing
 

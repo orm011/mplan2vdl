@@ -502,10 +502,12 @@ solve' config M.GroupBy { M.child,
                                           in Pure {col, mask=orig_mask {quant=out_mask_quant}}
                                   return $ anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }))
 
-solve' config rel@M.EquiJoin { M.leftch
-                             , M.rightch
-                             , M.cond=(key1, key2)
-                             } =
+solve' config rel@M.Join { M.leftch
+                         , M.rightch
+                         , M.conds=M.Binop{ M.binop=M.Eq
+                                          , M.left=M.Ref key1
+                                          , M.right=M.Ref key2 } :| []
+                         } =
   do ((keycol1,Env cols1 _), (keycol2, Env cols2 _)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
      let col1info@(colname1, idx1, _) = case keycol1 of
            Vexp { lineage=Pure {col=c, mask=m}, quant=q } -> (c,m,q)
