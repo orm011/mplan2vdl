@@ -232,18 +232,19 @@ inferMetadata Fold { foldop=FSel
   = ColInfo {bounds=(0, count-1), count} -- coefficients
 
 inferMetadata Fold { foldop
-                   , fgroups = Vexp { info=ColInfo {count=gcount} }
+                   , fgroups = Vexp { info=ColInfo {bounds=(glower,gupper), count=gcount} }
                    , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount} }
                    } =
   -- "suspicious: group and data count bounds dont match"
   assert (gcount == dcount) $
-  case foldop of
+  let count_bound = min (gupper - glower + 1) dcount -- cannot be more outputs than distinct group values or distinct data items.
+  in case foldop of
     FSum -> let extremes = [dlower, dlower*dcount, dupper, dupper*dcount]
                   -- for positive dlower, dlower is the minimum.
                   -- for negative dlower, dlower*dcount is the minimum, and so on.
-            in ColInfo (minimum extremes, maximum extremes) dcount
-    FMax -> ColInfo (dlower, dupper) dcount
-    FMin -> ColInfo (dlower, dupper) dcount
+            in ColInfo (minimum extremes, maximum extremes) count_bound
+    FMax -> ColInfo (dlower, dupper) count_bound
+    FMin -> ColInfo (dlower, dupper) count_bound
     FSel -> error "use different handler for select"
 
 -- the result of partition is a list of indices that, for each pdata
