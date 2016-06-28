@@ -185,7 +185,10 @@ complete vx =
       lineage= checkLineage $ inferLineage vx
       quant = inferUniqueness vx
       memoized_hash = sha1vx vx
-  in Vexp { vx, info, lineage, name=Nothing, memoized_hash, quant }
+      name = case vx of
+        Shuffle {shsource=Vexp{name=orig_name}} -> orig_name -- preserve name for scatter and gather.
+        _ -> Nothing
+  in Vexp { vx, info, lineage, name, memoized_hash, quant }
 
 checkLineage :: Lineage -> Lineage
 checkLineage l =
@@ -770,19 +773,8 @@ handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineag
           (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1, JoinIdx{gathermask=idx2,
                                                                             selectmask=ones_ idx2})
           (_,_) -> error $ "both children of this self join have been modified.\n"
-      cleaned_factcols = (do factcol@Vexp {name } <- factcols
-                             let out_anon = complete $ Shuffle { shop=Gather
-                                                               , shsource=factcol
-                                                               , shpos=selectidx
-                                                               }
-                             return $ out_anon {name=name}
-                         )
-      joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
-                            let joined_anon = complete $ Shuffle { shop=Gather
-                                                                 , shsource=dimcol
-                                                                 , shpos=gatheridx }
-                            return $ joined_anon { name=name }
-                        ) -- preserve the names
+      cleaned_factcols = gatherAll factcols selectidx
+      joined_dimcols  = gatherAll dimcols gatheridx
   in return $ cleaned_factcols ++ joined_dimcols
 
 handleSelfJoin _ _ _ = error "only self join of pure handled right now"
@@ -791,21 +783,9 @@ handleSelfJoin _ _ _ = error "only self join of pure handled right now"
 handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> Either String [Vexp]
 handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx =
   let JoinIdx {selectmask, gathermask} = deduceMasks config factkey dimkey fkidx
-      cleaned_factcols = (do factcol@Vexp {name } <- factcols
-                             let out_anon = complete $ Shuffle { shop=Gather
-                                                               , shsource=factcol
-                                                               , shpos=selectmask
-                                                               }
-                             return $ out_anon {name=name}
-                         )
-      joined_dimcols  = (do dimcol@Vexp { name } <- dimcols -- list monad
-                            let joined_anon = complete $ Shuffle { shop=Gather
-                                                                 , shsource=dimcol
-                                                                 , shpos=gathermask }
-                            return $ joined_anon { name=name }
-                        ) -- preserve the names
+      cleaned_factcols = gatherAll factcols selectmask
+      joined_dimcols  = gatherAll dimcols gathermask
   in return $ cleaned_factcols ++ joined_dimcols
-
 
 -- assumes
 deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
@@ -863,8 +843,17 @@ deduceMasks config
          -- the left argument is used to gather from the cleaned fact side to the dim
     Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n"
 
-
 deduceMasks _ _ _ _  = error "non pure columns in fk join"
+
+-- applies a gather to a group while preserving names
+gatherAll :: [Vexp] -> Vexp -> [Vexp]
+gatherAll cols shpos =
+  do shsource <- cols
+     return $ complete $ Shuffle { shop=Gather
+                                 , shsource
+                                 , shpos
+                                 }
+
 {-
 Diagram to understand the join deduce masks code:
 
