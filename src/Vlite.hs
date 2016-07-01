@@ -236,8 +236,8 @@ inferMetadata Fold { foldop
                    , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount} }
                    } =
   -- "suspicious: group and data count bounds dont match"
-  assert (gcount == dcount) $
-  let count_bound = min (gupper - glower + 1) dcount -- cannot be more outputs than distinct group values or distinct data items.
+  --assert (gcount == dcount) $ -- TODO is this assert correct?
+  let count_bound = min (gupper - glower + 1) gcount -- cannot be more outputs than distinct group values
   in case foldop of
     FSum -> let extremes = [dlower, dlower*dcount, dupper, dupper*dcount]
                   -- for positive dlower, dlower is the minimum.
@@ -392,7 +392,12 @@ whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
 solve :: Config -> M.RelExpr -> Either String Env
-solve config relexp = (solve' config relexp) >>= makeEnv
+solve config relexp = (solve' config relexp) >>= (makeEnv . checkVecs)
+  where checkVecs vexplist =
+          let sizes = map (count . info) vexplist
+              minsize = minimum sizes
+              maxsize = maximum sizes
+          in assert (minsize == maxsize) vexplist
 
 solve' :: Config -> M.RelExpr -> Either String [Vexp]
 
@@ -482,9 +487,12 @@ solve' config M.GroupBy { M.child,
      lookedup  <- (mapM (\n -> (NameTable.lookup n nt)) inputkeys)
      let keyvecs = map snd lookedup
      let gbkeys = case keyvecs of
-           [] -> zeros_ refv :| []
+           [] -> let z@(Vexp {info=ColInfo{bounds}}) = zeros_ refv
+                 in assert (bounds == (0,0)) $ z :| []
            a : rest -> a :| rest
-     let gkey@Vexp { info=ColInfo {bounds=(gmin, _) } } = makeCompositeKey gbkeys
+     let gkey@Vexp { info=ColInfo {bounds=(gmin, _)} } =
+           let ans@Vexp {info=ColInfo{bounds}} = makeCompositeKey gbkeys
+           in assert (inputkeys /= [] || bounds == (0,0) ) ans
      let solveSingleAgg env pr@(agg, _) =
            do anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage }  <- solveAgg config env gkey agg
               let outalias = case pr of
@@ -506,8 +514,8 @@ solve' config M.GroupBy { M.child,
      let addEntry (x, acclist) tup = (x, tup : acclist) -- adds output to acclist
      let foldFun lsts@(x, acclist) arg =
            do let asenv = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
-              ans <- solveSingleAgg asenv arg --either monad
-              return $ addEntry lsts $ ans
+              ans@Vexp {info=ColInfo{count} } <- solveSingleAgg asenv arg --either monad
+              return $ addEntry lsts $ assert (inputkeys /= [] || count == 1) $  ans
      (_, final) <- assert (gmin == 0) $ foldM  foldFun (list0,[]) outputaggs
      return $ final
 
