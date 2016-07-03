@@ -67,6 +67,7 @@ data Vx =
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
+  | Like { ldata::Vexp, lpattern::C.ByteString }
   deriving (Eq,Generic)
 instance NFData Vx
 instance Hashable Vx
@@ -78,6 +79,7 @@ instance Show Vx where
   show Shuffle {shop} = "Shuffle { shop=" ++ show shop ++ ", shsource=..., shpos=... }"
   show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
+  show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
@@ -202,6 +204,9 @@ checkLineage l =
 inferMetadata :: Vx -> ColInfo
 
 inferMetadata (Load _) = error "at the moment, should not be called with Load. TODO: need to pass config to address this case"
+
+inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
+  = ColInfo { bounds=(0,1), count }
 
 inferMetadata RangeV {rmin=rstart,rstep,rref=Vexp {info=ColInfo {count}}}
   =  let extremes = [rstart, rstart + count*rstep]
@@ -666,7 +671,13 @@ sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
      else_ <- sc env melse_
      return $ if_ ?.(then_,else_)
 
-sc _ r = Left $ "(Vlite) unsupported M.scalar: " ++ (take 50  $ show  r)
+sc env (M.Like { M.ldata, M.lpattern }) =
+  do sldata@Vexp {lineage} <- sc env ldata
+     return $ case lineage of
+       Pure {} -> complete $ Like { ldata=sldata, lpattern }
+       None -> error "cannot apply like expressions without knowing lineage"
+
+sc _ _ = error "unhandled mplan scalar expression" -- clean this up. requires non empty list
 
 solveAgg :: Config -> Env -> Vexp -> M.GroupAgg -> Either String Vexp
 

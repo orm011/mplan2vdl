@@ -30,6 +30,7 @@ data Vd a =
   | RangeC {rmin::Integer, rstep::Integer, rcount::Integer }
   | Binary { op::Voodop, arg1::a, arg2::a  }
   | Scatter { scattersource::a, scatterfold::a, scatterpos::a }
+  | Like { ldata::a, ldict::a, lpattern::C.ByteString }
   deriving (Eq,Show,Generic)
 instance (NFData a) => NFData (Vd a)
 instance (Hashable a) => Hashable (Vd a)
@@ -153,6 +154,15 @@ a !=. b = (const_ 1 a) -. (a ==. b)
 
 type MemoTable = HMap.HashMap V.Vexp Voodoo
 
+makeload :: Name -> Voodoo
+makeload n =
+  let inname = (case n of
+                   Name (_:s:rest) -> Name $ s:rest
+                   _ -> error  "need longer keypath to be consistent with ./Driver keypaths")
+  in Project { outname=Name ["val"]
+             , inname
+             , vec = completeW $ Load n }
+
 voodooFromVexpMemo :: MemoTable -> V.Vexp -> Either String (MemoTable, Voodoo)
 voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _) =
   case HMap.lookup vexp s of
@@ -163,13 +173,7 @@ voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _) =
 
 voodooFromVxNoMemo :: MemoTable -> V.Vx -> Either String (MemoTable, Voodoo)
 
-voodooFromVxNoMemo st (V.Load n) =
-  do inname <- (case n of
-                   Name (_:s:rest) -> Right $ Name $ s:rest
-                   _ -> Left $ "need longer keypath to be consistent with ./Driver keypaths)")
-     return $    (st, Project { outname=Name ["val"]
-                          , inname
-                          , vec = completeW $ Load n })
+voodooFromVxNoMemo st (V.Load n) = return $ (st, makeload n)
 
 voodooFromVxNoMemo s (V.RangeV {V.rmin, V.rstep, V.rref}) =
   do (s',v) <- voodooFromVexpMemo s rref
@@ -209,6 +213,14 @@ voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
                   V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
                   V.Scatter -> let scatterfold = completeW $ pos_ source
                                in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions })
+
+voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern })
+  | V.Vexp { V.lineage=V.Pure {V.col} } <- ldata =
+      do (s', newldata) <- voodooFromVexpMemo s ldata
+         let ldict = let Name ns = col in makeload $ Name (ns ++ ["dict"])
+         return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
+
+voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
 
 voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
   do (s', arg1) <- voodooFromVexpMemo s fgroups
@@ -290,6 +302,11 @@ vrefFromVoodoo state (Binary { op, arg1=W (arg1,_) , arg2=W (arg2,_) }) =
      (state'', n2) <- memVrefFromVoodoo state' arg2
      return $ (state'', Binary { op, arg1=n1, arg2=n2})
 
+vrefFromVoodoo state (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
+  do (state', n1) <- memVrefFromVoodoo state ldata
+     (state'', n2) <- memVrefFromVoodoo state' ldict
+     return $ (state'', Like { ldata=n1, ldict=n2, lpattern})
+
 {- now a list of strings -}
 toList :: Vref -> [String]
 
@@ -321,6 +338,11 @@ toList (Scatter { scattersource, scatterfold, scatterpos } ) =
   where id1 = "Id " ++ show scattersource
         id2 = "Id " ++ show scatterfold
         id3 = "Id " ++ show scatterpos
+
+toList (Like { ldata, ldict, lpattern } ) =
+  ["Like", "val",id1, "val",id2,"character", C.unpack lpattern]
+  where id1 = "Id " ++ show ldata
+        id2 = "Id " ++ show ldict
 
 toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
 

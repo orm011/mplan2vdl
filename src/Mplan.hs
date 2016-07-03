@@ -152,6 +152,7 @@ data ScalarExpr =
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
   | Cast { mtype :: MType, arg::ScalarExpr }
   | In { left :: ScalarExpr, set :: [ScalarExpr]}
+  | Like {ldata::ScalarExpr, lpattern::C.ByteString}
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
@@ -461,6 +462,26 @@ sc P.In { P.arg = P.Expr { P.expr, P.alias = _}
      return $ In { left=sleft, set=sset }
 
 sc (P.Nested exprs) = conjunction exprs
+
+
+sc P.Filter { P.oper="like"
+            , P.arg=P.Expr {P.expr=arg}
+            , P.negated -- aka ! or nothing
+            , P.pattern=P.Expr { P.expr=P.Cast {
+                                   P.tspec = TypeSpec {tname="char", tparams=[]}
+                                   , P.value= P.Expr { P.expr=P.Literal {
+                                                         P.tspec=TypeSpec {tname="char", tparams=[_]}
+                                                         , P.stringRep=lpattern
+                                                         }
+                                                     } -- aka char [char($_) "$1"]
+                                   }
+                               , P.alias=Nothing }
+            , P.escape=P.Literal { P.tspec=TypeSpec { tname="char", tparams=[] }
+                                 , P.stringRep = "" } --aka char ""
+            }  =
+  do sarg <- sc arg
+     let like = Like { ldata=sarg, lpattern }
+     return $ if negated then Unary { unop=Neg, arg=like } else like
 
 sc P.Filter { P.oper } =
    Left $ E.unexpected "operator" oper
