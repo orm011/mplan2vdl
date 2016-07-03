@@ -709,6 +709,7 @@ solveAgg config env gkeyvec (M.GFold op expr) =
      let foldop = case op of
            M.FSum -> FSum
            M.FMax -> FMax
+           M.FMin -> FMin
      make2LevelFold config foldop sortedGroups sortedData
 
 -- scatter mask for a group by

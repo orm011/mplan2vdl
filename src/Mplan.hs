@@ -156,7 +156,7 @@ data ScalarExpr =
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
-data FoldOp = FSum | FMax deriving (Eq,Show,Generic,Data)
+data FoldOp = FSum | FMax | FMin deriving (Eq,Show,Generic,Data)
 instance NFData FoldOp
 
 data GroupAgg = GDominated Name |  GAvg ScalarExpr | GCount | GFold FoldOp ScalarExpr deriving (Eq,Show,Generic,Data)
@@ -192,6 +192,7 @@ solveGroupOutput P.Expr
          Name ["sum"] -> Right $ (GFold FSum inner, alias)
          Name ["avg"] -> Right $ (GAvg inner, alias)
          Name ["max"] -> Right $ (GFold FMax inner, alias)
+         Name ["min"] -> Right $ (GFold FMin inner, alias)
          _ -> Left $ E.unexpected  "unary aggregate" fname
 
 solveGroupOutput  s_ = Left $ E.unexpected "group_by output expression" s_
