@@ -359,6 +359,26 @@ sc P.Call { P.fname=Name ["identity"]
           } = -- rewrite into just inner expression
   sc expr
 
+
+-- one of two versions of like in the plans:
+sc P.Call { P.fname=Name ["like"]
+          , P.args = [ P.Expr { P.expr=likearg }
+                     , P.Expr { P.expr=P.Cast { P.value=P.Expr { P.expr=P.Literal { P.tspec=TypeSpec { tname="char"
+                                                                                                     , tparams=[_]
+                                                                                                     }
+                                                                                  , P.stringRep=likepattern
+                                                                                  }
+                                                               }
+                                              , P.tspec=TypeSpec { tname="char", tparams=[] }
+                                              }
+                              }
+                     ]
+          } =
+  do ldata <- sc likearg
+     return $ Like { ldata, lpattern=likepattern }
+
+sc P.Call { P.fname=Name ["like"] } = error "implement this 'like' case"
+
 {- for now, we are ignoring the aliases within calls -}
 sc P.Call { P.fname, P.args = [ P.Expr { P.expr = singlearg, P.alias = _ } ] } =
   do sub <- sc singlearg
@@ -393,6 +413,7 @@ sc P.Cast { P.tspec
   do let mtype = resolveTypeSpec tspec
      arg <- sc parg
      return $ Cast { mtype, arg }
+
 
 sc arg@P.Literal { P.tspec, P.stringRep } =
   do let mtype = resolveTypeSpec tspec
