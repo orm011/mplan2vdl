@@ -24,14 +24,14 @@ import Data.Bits
 import Text.Groom
 --import qualified Data.Map.Strict as Map
 --import Data.String.Utils(join)
-import Data.List.NonEmpty(NonEmpty(..))
+import Data.List.NonEmpty(NonEmpty(..),(<|))
 import qualified Data.List.NonEmpty as N
 --type Map = Map.Map
 --type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 import Text.Printf
 import Control.Exception.Base hiding (mask)
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
+--import qualified Data.Map.Strict as Map
+--import qualified Data.Set as Set
 
 import Data.Hashable
 --import qualified Data.ByteString.Lazy as B
@@ -425,7 +425,7 @@ solve' config M.Table { M.tablename=_
         sequence $ (do col@(colnam, _) <- nontid -- list monad
                        let alias = Just $ decideAlias col
                        return $ (do (_,info) <- NameTable.lookup colnam (colinfo config)  -- either monad
-                                    let quant = if Set.member colnam (pkeys config) then Unique else Any
+                                    let quant = if (isPkey config (colnam:|[]) /= Nothing) then Unique else Any
                                     let vx=Load colnam
                                     let partial=Vexp {vx, info, lineage=None, name=Nothing, memoized_hash=sha1vx vx, quant} -- this is just for type compatiblity.
                                     let lineage=Pure{col=colnam, mask=pos_ partial} -- TODO: use a single vector for lineage range (eg primary key)
@@ -536,22 +536,17 @@ solve' config M.Join { M.leftch
                      , M.joinvariant
                      }
   | Just ( nonEmptyPairList ) <- fkjoinConds conds
-  , Right ((keycol1 :| [], env1), (keycol2 :| [], env2)) <- matchcols config nonEmptyPairList leftch rightch --figure out which keys go with which child
-  , Vexp { lineage=Pure {col=colname1}} <- keycol1
-  , Vexp { lineage=Pure {col=colname2}} <- keycol2
-  , (joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
-    if (colname1 == colname2 && Set.member colname1 (pkeys config))
-    then handleSelfJoin config (keycol1, env1) (keycol2,env2)
-    else
-      case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
-        Nothing -> error "no fk constraint available for join"
-        Just ((fact_cname, dim_cname) :| [], fkidx)
-          | (fact_cname == colname1) && (dim_cname == colname2)
-            -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx joinvariant FactIsLeft
-          | (fact_cname == colname2) && (dim_cname == colname1)
-            -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx joinvariant DimIsLeft
-        _ -> error "multiple fk columns?"
-
+  , Right ((keycols1, env1), (keycols2, env2)) <- matchcols config nonEmptyPairList leftch rightch --figure out which keys go with which child
+  , Just (lineages1@LineageSpec{cols=colnames1}) <- pureCols keycols1
+  , Just (lineages2@LineageSpec{cols=colnames2}) <- pureCols keycols2
+  , ( joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
+    if (colnames1 == colnames2 && (isPkey config colnames1 /= Nothing))
+    then handleSelfJoin config (keycols1, env1) (keycols2, env2)
+    else assert (N.length colnames1 == N.length colnames2) $
+         case isFKRef config (N.zip colnames1 colnames2)   of
+           Just (FactIsLeft, fkidx) -> handleGatherJoin config (lineages1, env1) (lineages2, env2) fkidx joinvariant FactIsLeft
+           Just (DimIsLeft, fkidx) -> handleGatherJoin config (lineages2, env2) (lineages1, env1) fkidx joinvariant DimIsLeft
+           Nothing -> error "no fk constraint available for join"
 
 solve' config M.Join { M.leftch
                      , M.rightch
@@ -614,6 +609,27 @@ extractEqCond (M.Binop{ M.binop=M.Eq
                     , M.right=M.Ref key2 }) = (key1,key2)
 
 extractEqCond _ = error "this is not an equality comparison between two refs"
+
+-- all the names share the same mask
+-- the gquant reports if put together, each row of the resulting composite is unique
+-- (for now, the deduction of that property only works for trivial cases, used in query 18)
+data LineageSpec = LineageSpec {cols::NonEmpty Name, gmask::Vexp, gquant::UniqueSpec} deriving (Eq,Show)
+
+pureCols :: NonEmpty Vexp -> Maybe LineageSpec
+pureCols (Vexp{lineage=Pure{col=col0,mask=mask0}, quant=quant0} :| rest)  =
+  let mergeCol (LineageSpec{cols=acccols,gmask=accmask, gquant=accquant}) (Vexp{lineage,quant=newquant}) =
+        case lineage of
+          None -> Nothing
+          Pure {col=newcol,mask=newmask} ->
+            if newmask == accmask
+            then (let gquant = case newquant of
+                        Unique -> accquant
+                        Any -> Any
+                  in Just $ LineageSpec {cols=newcol<|acccols, gmask=accmask, gquant })
+            else Nothing
+  in foldM mergeCol (LineageSpec {cols=col0:|[], gmask=mask0, gquant=quant0}) rest
+
+pureCols _ = Nothing --initial is not pure.
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
@@ -848,8 +864,8 @@ matchcols config pairList leftch rightch = do
     (Left _, Right (leftvexps,rightvexps)) -> Right ((rightvexps, left), (leftvexps, right))
     (Right _, Right _) -> error "ambiguous key lookup. didn't expect this could happen"
 
-handleSelfJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Either String [Vexp]
-handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineage=Pure {mask=idx2}} , Env cols2 _) =
+handleSelfJoin :: Config -> (NonEmpty Vexp, Env) -> (NonEmpty Vexp, Env) -> Either String [Vexp]
+handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}}:|[] , Env cols1 _) (Vexp { lineage=Pure {mask=idx2}} :|[] , Env cols2 _) =
   let (factcols, dimcols, JoinIdx {selectmask=selectidx, gathermask=gatheridx}) =
         case (idx2,idx1) of  --- idx2 modified -> use it as facttable. TODO: check here.
           (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2, JoinIdx{gathermask=idx1,
@@ -861,14 +877,13 @@ handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineag
       joined_dimcols  = gatherAll dimcols gatheridx
   in return $ cleaned_factcols ++ joined_dimcols
 
-handleSelfJoin _ _ _ = error "only self join of pure handled right now"
+handleSelfJoin _ _ _ = error "only self join of single pure primary columns handled right now"
 
-data WhichIsLeft = FactIsLeft | DimIsLeft deriving (Show,Eq,Generic)
 
 --- assumes the non-empty list of names is defined in the env.
-handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> M.JoinVariant -> WhichIsLeft -> Either String [Vexp]
-handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx joinvariant whichisleft =
-  let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config factkey dimkey fkidx
+handleGatherJoin :: Config -> (LineageSpec, Env) -> (LineageSpec, Env) -> Name -> M.JoinVariant -> WhichIsLeft -> Either String [Vexp]
+handleGatherJoin config (factlineages, Env factcols _) (dimlineages, Env dimcols _) fkidx joinvariant whichisleft =
+  let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config factlineages dimlineages fkidx
       selectmask = complete $ Fold {foldop=FSel
                                    , fgroups=pos_ selectboolean
                                    , fdata= selectboolean
@@ -891,10 +906,10 @@ handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx 
                     in gatherAll factcols antigather
       DimIsLeft -> error "TODO implement anti for dimension table"
 -- assumes
-deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
+deduceMasks :: Config -> LineageSpec -> LineageSpec -> Name -> JoinIdx
 deduceMasks config
-  (Vexp{ lineage=Pure {mask=fprime_fact_idx}, quant=quantf})
-  (Vexp{ lineage=Pure {mask=dimprime_dim_idx} })
+  (LineageSpec {gmask=fprime_fact_idx, gquant=quantf})
+  (LineageSpec {gmask=dimprime_dim_idx})
   fact_dim_idx_name =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx

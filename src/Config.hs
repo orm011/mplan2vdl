@@ -2,7 +2,10 @@ module Config ( Config(..)
               , ColInfo(..)
               , checkColInfo
               , makeConfig
+              , isPkey
+              , isFKRef
               , BoundsRec
+              , WhichIsLeft(..)
               ) where
 
 import Name as NameTable
@@ -14,13 +17,13 @@ import Control.DeepSeq(NFData)
 import GHC.Generics
 import Control.Exception.Base
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
+--import qualified Data.Set as Set
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as N
 import qualified Data.ByteString.Lazy as B
 --import qualified Data.ByteString.Char8 as C
 type Map = Map.Map
-type Set = Set.Set
+--type Set = Set.Set
 
 -- we use integer in the rec so that strings get
 -- parsed to Integer.
@@ -56,43 +59,54 @@ makeConfig :: Integer -> V.Vector BoundsRec -> [Table] -> Either String Config
 makeConfig grainsizelg boundslist tables =
   do colinfo <- foldM addEntry NameTable.empty boundslist
      let allrefs = foldMap makeFKEntries tables
-     let allpkeys = foldMap makePKeys tables
-     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Set.fromList allpkeys }
+     let allpkeys = map makePKeys tables -- sort the non-empty lists
+     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys }
 
 concatName :: Name -> Name -> Name
 concatName (Name a) (Name b) = Name (a ++ b)
 
-makePKeys :: Table -> [Name]
+makePKeys :: Table -> (NonEmpty Name, Name)
 makePKeys Table { pkey=FKey {} }  = error "fkey in place of pkey"
-makePKeys Table { name, pkey=PKey { pkcols=c0 :| [], pkconstraint=_ } } = [ concatName name c0 ]
+makePKeys Table { name, pkey=PKey { pkcols, pkconstraint=_ } } = (N.sort (N.map (concatName name) pkcols), name)
 
-makePKeys Table { pkey=PKey{ pkcols=_ :| (_:_), pkconstraint=_ }} = []
+data WhichIsLeft = FactIsLeft | DimIsLeft deriving (Show,Eq,Generic)
 
-makeFKEntries :: Table -> [(NonEmpty (Name, Name), (NonEmpty (Name, Name), Name))]
+makeFKEntries :: Table -> [(NonEmpty (Name, Name), (WhichIsLeft, Name))]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
      let localcols = fmap (concatName name) local
      let remotecols = fmap (concatName references) remote
      let joinidx = concatName name fkconstraint
-     let implicit = N.zip localcols remotecols
-     let implicit_back = N.zip remotecols localcols
+     let implicit = N.sort (N.zip localcols remotecols) -- sort for canonical order
+     let implicit_back = N.sort (N.zip remotecols localcols)
      let tidname = concatName references (Name ["%TID%"])
      let explicit = ( joinidx
                     , tidname ) :|[]
      let explicit_back = (tidname, joinidx) :| []
-     [ (implicit, (implicit,joinidx))
-       , (implicit_back, (implicit,joinidx))
-       , (explicit, (explicit, joinidx))
-       , (explicit_back, (explicit, joinidx)) ]
+     [ (implicit, (FactIsLeft, joinidx))
+       , (implicit_back, (DimIsLeft, joinidx))
+       , (explicit, (FactIsLeft, joinidx))
+       , (explicit_back, (DimIsLeft, joinidx)) ]
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map (NonEmpty (Name,Name)) (NonEmpty(Name,Name),Name)
+                       , fkrefs :: Map (NonEmpty (Name,Name)) (WhichIsLeft,Name)
                                    -- shows the fact -> dimension direction of the dependence
-                       , pkeys :: Set Name
+                       , pkeys :: Map (NonEmpty Name) Name
                                    -- fully qualifed column mames
                        }
+
+-- if this list is a primary key, value is Just the table name, otherwise nothing
+isPkey :: Config -> (NonEmpty Name) -> Maybe Name
+isPkey conf nelist = let canon = N.sort nelist
+                     in Map.lookup canon (pkeys conf)
+
+-- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
+-- and what the name of the constraint is
+isFKRef :: Config -> (NonEmpty (Name,Name)) -> Maybe (WhichIsLeft, Name)
+isFKRef conf cols = let canon = N.sort cols
+                    in Map.lookup canon (fkrefs conf)
 
 --- which queries do we want.
 --- really: given colname
