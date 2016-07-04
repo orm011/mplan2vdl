@@ -547,9 +547,9 @@ solve' config M.Join { M.leftch
         Nothing -> error "no fk constraint available for join"
         Just ((fact_cname, dim_cname) :| [], fkidx)
           | (fact_cname == colname1) && (dim_cname == colname2)
-            -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx joinvariant
+            -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx joinvariant FactIsLeft
           | (fact_cname == colname2) && (dim_cname == colname1)
-            -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx joinvariant
+            -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx joinvariant DimIsLeft
         _ -> error "multiple fk columns?"
 
 
@@ -683,7 +683,11 @@ sc env (M.Like { M.ldata, M.lpattern }) =
        Pure {} -> complete $ Like { ldata=sldata, lpattern }
        None -> error "cannot apply like expressions without knowing lineage"
 
-sc _ _ = error "unhandled mplan scalar expression" -- clean this up. requires non empty list
+sc env (M.Unary { M.unop=M.Neg, M.arg }) =
+  do slarg <- sc env arg
+     return $ ones_ slarg -. slarg
+
+sc _ e = error $ "unhandled mplan scalar expression: " ++ show e -- clean this up. requires non empty list
 
 solveAgg :: Config -> Env -> Vexp -> M.GroupAgg -> Either String Vexp
 
@@ -800,6 +804,7 @@ data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 -- gathermask is only valid whenapplied to a clumn after select.
 
 -- figures out which name belongs to which expr.
+-- the left child is returned first
 matchcols :: Config -> Name -> Name -> M.RelExpr -> M.RelExpr -> Either String ((Vexp, Env),(Vexp,Env))
 matchcols config key1 key2 leftch rightch = do
   left@(Env _ leftenv)  <- solve config leftch
@@ -813,7 +818,7 @@ matchcols config key1 key2 leftch rightch = do
   case (tryOne,tryTwo) of
     (Left _, Left _) -> Left "failed join lookup"
     (Right ((_,key1m),(_,key2m)), Left _) -> Right ((key1m, left), (key2m, right))
-    (Left _, Right ((_,key1m),(_,key2m))) -> Right ((key1m, right), (key2m, left))
+    (Left _, Right ((_,key1m),(_,key2m))) -> Right ((key2m, left), (key1m, right))
     (Right _, Right _) -> Left "ambiguous key lookup"
 
 
@@ -832,9 +837,11 @@ handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineag
 
 handleSelfJoin _ _ _ = error "only self join of pure handled right now"
 
+data WhichIsLeft = FactIsLeft | DimIsLeft deriving (Show,Eq,Generic)
+
 --- assumes the non-empty list of names is defined in the env.
-handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> M.JoinVariant -> Either String [Vexp]
-handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx joinvariant=
+handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> M.JoinVariant -> WhichIsLeft -> Either String [Vexp]
+handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx joinvariant whichisleft =
   let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config factkey dimkey fkidx
       selectmask = complete $ Fold {foldop=FSel
                                    , fgroups=pos_ selectboolean
@@ -846,10 +853,17 @@ handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx 
       joined_dimcols = gatherAll dimcols clean_gathermask
   in return $ case joinvariant of
     M.Plain ->  cleaned_factcols ++ joined_dimcols
-    M.LeftSemi -> cleaned_factcols ++ joined_dimcols
+    M.LeftSemi -> case whichisleft of
+      FactIsLeft -> cleaned_factcols
+      DimIsLeft -> joined_dimcols
     M.LeftOuter -> error "TODO implement left outer"
-    M.LeftAnti -> error "TODO implement left anti"
-
+    M.LeftAnti -> case whichisleft of
+      FactIsLeft -> let antiboolean = ones_ selectmask -. selectmask
+                        antigather = complete $ Fold { foldop=FSel
+                                                     , fgroups=pos_ antiboolean
+                                                     , fdata=antiboolean}
+                    in gatherAll factcols antigather
+      DimIsLeft -> error "TODO implement anti for dimension table"
 -- assumes
 deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
 deduceMasks config
