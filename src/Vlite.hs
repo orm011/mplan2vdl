@@ -835,11 +835,17 @@ handleSelfJoin _ _ _ = error "only self join of pure handled right now"
 --- assumes the non-empty list of names is defined in the env.
 handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> M.JoinVariant -> Either String [Vexp]
 handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx joinvariant=
-  let JoinIdx {selectmask, gathermask} = deduceMasks config factkey dimkey fkidx
-      cleaned_factcols = gatherAll factcols selectmask
-      joined_dimcols  = gatherAll dimcols gathermask
+  let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config factkey dimkey fkidx
+      selectmask = complete $ Fold {foldop=FSel
+                                   , fgroups=pos_ selectboolean
+                                   , fdata= selectboolean
+                                   }
+      (clean_gathermask, cleaned_factcols) = case gatherAll (gathermask:factcols) selectmask of
+        a:b -> (a,b)
+        _ -> error "unexpected empty"
+      joined_dimcols = gatherAll dimcols clean_gathermask
   in return $ case joinvariant of
-    M.Plain -> cleaned_factcols ++ joined_dimcols
+    M.Plain ->  cleaned_factcols ++ joined_dimcols
     M.LeftSemi -> cleaned_factcols ++ joined_dimcols
     M.LeftOuter -> error "TODO implement left outer"
     M.LeftAnti -> error "TODO implement left anti"
@@ -887,17 +893,8 @@ deduceMasks config
                                                    , shsource=dim_dimprime_idx
                                                    , shpos=fprime_dim_idx
                                                    }
-          selectmask = complete $ Fold {foldop=FSel
-                                       ,fgroups=pos_ fprime_dimprime_valid
-                                       ,fdata=fprime_dimprime_valid
-                                       }
-          cleaned_fprime_dimprime_pos = complete $ Shuffle { shop=Gather
-                                                           , shpos=selectmask
-                                                           , shsource=fprime_dimprime_pos
-                                                           }
-      in JoinIdx{selectmask, gathermask=cleaned_fprime_dimprime_pos}
-         -- remember: select mask is used to filter out the missing entries
-         -- the left argument is used to gather from the cleaned fact side to the dim
+      in JoinIdx{selectmask=fprime_dimprime_valid, gathermask=fprime_dimprime_pos}
+
     Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n"
 
 deduceMasks _ _ _ _  = error "non pure columns in fk join"
