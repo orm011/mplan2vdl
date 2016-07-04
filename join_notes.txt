@@ -1,0 +1,56 @@
+Notes about stuff that is iffy:
+ -we are not controlling for what is null and what isnt.
+ -this matters in query 16, where we do a count(NAME) for some column.
+ -this also matters potentially for self outer joins.
+
+
+
+-------
+relation between the position of the
+join child, the order of the condition columns, and the
+direction of FK relation.
+
+
+falsifiable statements:
+
+if the join is between tables with an fk relation:
+*left side of condition is always fact side
+right side of condition is always dim side.
+--Exception found in query 20 join[9].
+
+if the join is between tables
+* left side of condition is for left child
+* right side of condition is for right side.
+--Exception is for query 22 antijoin[3].
+
+query 5:
+join[6]: (lineitem, orders')
+join[5]: (orders'', customer)
+join[4]: (lineitem', supplier) . plus extra condition. needs to be detected and applied separately?
+join[3]: (supplier'', nation)
+join[2]: (nation', region')
+
+query 16:
+antijoin[5]:(partsupp, supplier')
+join[4]:(partsupp', part')
+
+query 20:
+semijoin[10] (FACT, DIM). where DIM has been filtered. both fk and children agree with condition order.
+join[9](DIM', FACT') where pk for DIM' is 2 cols, and so is fk. fk order is right -> left. condition goes left -> right.
+semijoin[2] (DIM2, GROUPBY(FACT)). supplier on the left. partsupp on the right.
+join[1]: supplier,nation. nation has been filtered.
+
+query 21:
+join[8]:filtered Fact, filtered Dim. left condition side is both left child and fact.
+join[7]:filtered/joined fact, dim. left condition side is both left child and fact.
+join[6]: filtered/joined fact, filtered dim. left condition side is both left child and fact.
+semijon[4]: filterd fact. fact again.(self join). left condition side is the right child.
+   relation between left and right: l_orderkey must be equal. l_orderkey is an fk in the right child.
+   on the left side, it is just a normal column. (not a primary key of any sort).  There
+antijoin: requires same conditions as the semijoin... didn't examine closely though.
+
+query 22:
+semijoin[5]: left side is is a filetered table. right side is a single entry column. (derived from the same table, though that doesn't matter)
+antijon[3]: left side derived from a filtered customer table. right side is orders.
+fk goes orders->customer. condtion also matches orders->customer,
+even though we want only the customer side.
