@@ -25,6 +25,7 @@ import Text.Groom
 --import qualified Data.Map.Strict as Map
 --import Data.String.Utils(join)
 import Data.List.NonEmpty(NonEmpty(..))
+import qualified Data.List.NonEmpty as N
 --type Map = Map.Map
 --type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 import Text.Printf
@@ -534,8 +535,8 @@ solve' config M.Join { M.leftch
                      , M.conds
                      , M.joinvariant
                      }
-  | Just ( (key1,key2):|[] ) <- fkjoinConds conds
-  , Right ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+  | Just ( nonEmptyPairList ) <- fkjoinConds conds
+  , Right ((keycol1 :| [], env1), (keycol2 :| [], env2)) <- matchcols config nonEmptyPairList leftch rightch --figure out which keys go with which child
   , Vexp { lineage=Pure {col=colname1}} <- keycol1
   , Vexp { lineage=Pure {col=colname2}} <- keycol2
   , (joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
@@ -591,11 +592,28 @@ solve' config M.Select { M.child -- can be derived rel
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
 
 fkjoinConds :: NonEmpty M.ScalarExpr -> Maybe (NonEmpty (Name,Name))
-fkjoinConds (M.Binop{ M.binop=M.Eq
-                    , M.left=M.Ref key1
-                    , M.right=M.Ref key2 } :| []) = Just ((key1,key2) :| [])
+fkjoinConds ne =
+  let eqs = N.filter isRefEq ne
+      rest = N.filter (not . isRefEq) ne
+  in case (map extractEqCond eqs, rest) of
+    (_,_:_) -> Nothing -- list has things other than an eq. let search continue.
+    (a : r,[]) -> Just (a :| r)
+    ([],[]) -> error "this cannot happen if list is non empty"
 
 fkjoinConds _ = Nothing
+
+isRefEq :: M.ScalarExpr -> Bool
+isRefEq (M.Binop{ M.binop=M.Eq
+                    , M.left=M.Ref _
+                    , M.right=M.Ref _ }) =  True
+isRefEq _ = False
+
+extractEqCond :: M.ScalarExpr -> (Name, Name)
+extractEqCond (M.Binop{ M.binop=M.Eq
+                    , M.left=M.Ref key1
+                    , M.right=M.Ref key2 }) = (key1,key2)
+
+extractEqCond _ = error "this is not an equality comparison between two refs"
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
@@ -811,22 +829,24 @@ data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 
 -- figures out which name belongs to which expr.
 -- the left child is returned first
-matchcols :: Config -> Name -> Name -> M.RelExpr -> M.RelExpr -> Either String ((Vexp, Env),(Vexp,Env))
-matchcols config key1 key2 leftch rightch = do
+matchcols :: Config -> NonEmpty (Name,Name) -> M.RelExpr -> M.RelExpr -> Either String ((NonEmpty Vexp, Env),(NonEmpty Vexp,Env))
+matchcols config pairList leftch rightch = do
   left@(Env _ leftenv)  <- solve config leftch
   right@(Env _ rightenv) <- solve config rightch
+  let (leftsides, rightsides) = N.unzip pairList
+  let leftSidesLeftEnv = sequence $ N.map (\n -> NameTable.lookup n leftenv >>= (return . snd)) leftsides
+  let rightSidesRightEnv = sequence $ N.map (\n -> NameTable.lookup n rightenv >>= (return . snd)) rightsides
+  let rightSidesLeftEnv = sequence $ N.map (\n -> NameTable.lookup n leftenv >>= (return . snd)) rightsides
+  let leftSidesRightEnv = sequence $ N.map (\n -> NameTable.lookup n rightenv >>= (return . snd)) leftsides
   --- find the keys in the subrelations. the order is not well defined,
   --- so, try both and check if there was ambiguity.
-  let tryOne =
-        errzip (NameTable.lookup key1 leftenv) (NameTable.lookup key2 rightenv)
-  let tryTwo =
-        errzip (NameTable.lookup key1 rightenv) (NameTable.lookup key2 leftenv)
+  let tryOne = errzip leftSidesLeftEnv rightSidesRightEnv
+  let tryTwo = errzip rightSidesLeftEnv leftSidesRightEnv
   case (tryOne,tryTwo) of
-    (Left _, Left _) -> Left "failed join lookup"
-    (Right ((_,key1m),(_,key2m)), Left _) -> Right ((key1m, left), (key2m, right))
-    (Left _, Right ((_,key1m),(_,key2m))) -> Right ((key2m, left), (key1m, right))
-    (Right _, Right _) -> Left "ambiguous key lookup"
-
+    (Left _, Left _) -> error  "failed join lookup. it may be that equalities are not all in the same left to right order and this is the first time we see this"
+    (Right (leftvexps,rightvexps), Left _) -> Right ((leftvexps, left), (rightvexps, right))
+    (Left _, Right (leftvexps,rightvexps)) -> Right ((rightvexps, left), (leftvexps, right))
+    (Right _, Right _) -> error "ambiguous key lookup. didn't expect this could happen"
 
 handleSelfJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Either String [Vexp]
 handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineage=Pure {mask=idx2}} , Env cols2 _) =
