@@ -531,12 +531,11 @@ solve' config M.GroupBy { M.child,
 
 solve' config M.Join { M.leftch
                      , M.rightch
-                     , M.conds=M.Binop{ M.binop=M.Eq
-                                      , M.left=M.Ref key1
-                                      , M.right=M.Ref key2 } :| []
+                     , M.conds
                      , M.joinvariant
                      }
-  | Right ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
+  | Just ( (key1,key2):|[] ) <- fkjoinConds conds
+  , Right ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
   , Vexp { lineage=Pure {col=colname1}} <- keycol1
   , Vexp { lineage=Pure {col=colname2}} <- keycol2
   , (joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
@@ -590,6 +589,13 @@ solve' config M.Select { M.child -- can be derived rel
                           in ( sel {name=preserved} )
 
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
+
+fkjoinConds :: NonEmpty M.ScalarExpr -> Maybe (NonEmpty (Name,Name))
+fkjoinConds (M.Binop{ M.binop=M.Eq
+                    , M.left=M.Ref key1
+                    , M.right=M.Ref key2 } :| []) = Just ((key1,key2) :| [])
+
+fkjoinConds _ = Nothing
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
