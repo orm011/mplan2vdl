@@ -481,16 +481,20 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
                 anon  <- fromScalar asenv expr --either monad
                 return $ addEntry lsts $ anon {name=outputName arg}
 
--- problem:
--- n2.n_name as all_nations.nation defined then directly uesd in a subsequent expression. not found.
--- L2 as L2.L2 used to redefined L2.L2 from a sub-output (name clash on L2.L2) then not used
--- in the  same project list .
+
+-- important cases to consider:
+-- alias in the keyname: groupby [a as b][sum(a), b]
 solve' config M.GroupBy { M.child,
                           M.inputkeys,
                           M.outputaggs } =
   do (Env list0@(refv:_) nt)  <- solve config child --either monad
-     lookedup  <- (mapM (\n -> (NameTable.lookup n nt)) inputkeys)
-     let keyvecs = map snd lookedup
+     let (keys,aliases) = unzip inputkeys
+     let keyvecs  = map (\n -> snd $ (NameTable.lookup_err n nt)) keys
+     let keyaliases = do (v,malias) <- zip keyvecs aliases -- list monad
+                         case malias of
+                           Nothing -> []
+                           n -> [v { name=n }]
+     let list1 = list0 ++ keyaliases
      let gbkeys = case keyvecs of
            [] -> let z@(Vexp {info=ColInfo{bounds}}) = zeros_ refv
                  in assert (bounds == (0,0)) $ z :| []
@@ -504,7 +508,7 @@ solve' config M.GroupBy { M.child,
                     (M.GDominated n, Nothing) -> Just n
                     (_, alias) -> alias
                     _ -> Nothing
-              let out_uniqueness = case (inputkeys, pr) of
+              let out_uniqueness = case (keys, pr) of
                     ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
                       | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
                     _ -> orig_uniqueness
@@ -521,7 +525,7 @@ solve' config M.GroupBy { M.child,
            do let asenv = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
               ans@Vexp {info=ColInfo{count} } <- solveSingleAgg asenv arg --either monad
               return $ addEntry lsts $ assert (inputkeys /= [] || count == 1) $  ans
-     (_, final) <- assert (gmin == 0) $ foldM  foldFun (list0,[]) outputaggs
+     (_, final) <- assert (gmin == 0) $ foldM  foldFun (list1,[]) outputaggs
      return $ final
 
 
@@ -530,21 +534,23 @@ solve' config M.Join { M.leftch
                      , M.conds=M.Binop{ M.binop=M.Eq
                                       , M.left=M.Ref key1
                                       , M.right=M.Ref key2 } :| []
+                     , M.joinvariant
                      }
   | Right ((keycol1, env1), (keycol2, env2)) <- matchcols config key1 key2 leftch rightch --figure out which key goes with which child
   , Vexp { lineage=Pure {col=colname1}} <- keycol1
-  , Vexp { lineage=Pure {col=colname2}} <- keycol2 =
-      if (colname1 == colname2 && Set.member colname1 (pkeys config))
-      then handleSelfJoin config (keycol1, env1) (keycol2,env2)
-      else
-        case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
-          Nothing -> error "no fk constraint available for join"
-          Just ((fact_cname, dim_cname) :| [], fkidx)
-            | (fact_cname == colname1) && (dim_cname == colname2)
-              -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx
-            | (fact_cname == colname2) && (dim_cname == colname1)
-              -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx
-          _ -> error "multiple fk columns?"
+  , Vexp { lineage=Pure {col=colname2}} <- keycol2
+  , (joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
+    if (colname1 == colname2 && Set.member colname1 (pkeys config))
+    then handleSelfJoin config (keycol1, env1) (keycol2,env2)
+    else
+      case Map.lookup ((colname1,colname2):|[]) (fkrefs config) of
+        Nothing -> error "no fk constraint available for join"
+        Just ((fact_cname, dim_cname) :| [], fkidx)
+          | (fact_cname == colname1) && (dim_cname == colname2)
+            -> handleGatherJoin config (keycol1, env1) (keycol2, env2) fkidx joinvariant
+          | (fact_cname == colname2) && (dim_cname == colname1)
+            -> handleGatherJoin config (keycol2, env2) (keycol1, env1) fkidx joinvariant
+        _ -> error "multiple fk columns?"
 
 
 solve' config M.Join { M.leftch

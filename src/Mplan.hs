@@ -7,6 +7,7 @@ module Mplan( mplanFromParseTree
             , ScalarExpr(..)
             , GroupAgg(..)
             , FoldOp(..)
+            , JoinVariant(..)
             , MType(..)) where
 
 import qualified Parser as P
@@ -156,9 +157,11 @@ data ScalarExpr =
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
-data FoldOp = FSum | FMax | FMin deriving (Eq,Show,Generic,Data)
+
+data FoldOp = FSum | FMax | FMin  deriving (Eq,Show,Generic,Data)
 instance NFData FoldOp
 
+-- GCount is count(*) rows on a table
 data GroupAgg = GDominated Name |  GAvg ScalarExpr | GCount | GFold FoldOp ScalarExpr deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
@@ -172,6 +175,8 @@ solveGroupOutput P.Expr
           Just _ -> alias
     in Right $ (GDominated rname, outname)
 
+
+-- this is count(*). counts everything. equal to a sum of 1s.
 solveGroupOutput P.Expr
   { P.expr = P.Call { P.fname=Name ["count"]
                     , P.args=[] }
@@ -179,7 +184,7 @@ solveGroupOutput P.Expr
   = Right $ (GCount, alias)
 
 solveGroupOutput P.Expr
-  { P.expr = P.Call { P.fname
+  { P.expr = P.Call{  P.fname
                     , P.args=[ P.Expr
                                { P.expr=singlearg,
                                  P.alias = _ -- ignoring this inner alias.
@@ -193,10 +198,18 @@ solveGroupOutput P.Expr
          Name ["avg"] -> Right $ (GAvg inner, alias)
          Name ["max"] -> Right $ (GFold FMax inner, alias)
          Name ["min"] -> Right $ (GFold FMin inner, alias)
+         Name ["count"]
+           | P.Ref _ _ <- singlearg -> Right $ (GCount, alias) -- this is count(col). counts only non null...
+             -- For now, deal with counting this way, which is incorrect.
+-- In truth, We would need to have a separate vector to know which entries of this vector are null.
+-- the only query using this (q 16?) seems to have it be not-null anyway.
+             -- monet does not seem to give an answer if the inner expression is not a column name.
          _ -> Left $ E.unexpected  "unary aggregate" fname
 
 solveGroupOutput  s_ = Left $ E.unexpected "group_by output expression" s_
 
+data JoinVariant = Plain | LeftSemi | LeftOuter | LeftAnti deriving (Show,Eq, Generic,Data)
+instance NFData JoinVariant
 
 data RelExpr =
   Table       { tablename :: Name
@@ -210,12 +223,14 @@ data RelExpr =
               , predicate :: ScalarExpr
               }
   | GroupBy   { child :: RelExpr
-              , inputkeys :: [Name]
+              , inputkeys :: [(Name, Maybe Name)]
+                             -- alias used in query 16.
               , outputaggs :: [(GroupAgg, Maybe Name)]
               }
   | Join    { leftch :: RelExpr -- we will figure out if there is an fk  join later.
             , rightch :: RelExpr
             , conds :: NonEmpty ScalarExpr
+            , joinvariant :: JoinVariant
             }
   | TopN      { child :: RelExpr
               , n :: Integer
@@ -291,13 +306,12 @@ solve P.Node { P.relop = "group by"
              , P.arg_lists =  igroupkeys : igroupvalues : []
              } =
   do child <- solve ch
-     inputkeys <- sequence $ map extractKey igroupkeys
+     let inputkeys = map extractKey igroupkeys
      outputaggs  <- mapM solveGroupOutput igroupvalues
      return $ GroupBy {child, inputkeys, outputaggs}
        where extractKey P.Expr { P.expr = P.Ref { P.rname }
-                               , P.alias = Nothing } = Right rname
-             extractKey e_ =
-               Left $ E.unexpected "alias in input group key" e_
+                               , P.alias } = (rname, alias)
+             extractKey _ = error "non-ref in group by key"
 
  {- Select invariants:
  -single child node
@@ -312,22 +326,26 @@ solve P.Node { P.relop = "select"
      return $ Select { child, predicate }
 
 
-{-only handling joins where the condition is
-done via  a foreign key -}
 solve P.Node { P.relop
              , P.children = [l, r]
              , P.arg_lists =
                conditions:[]
                {- remember : its a list of lists -}
              }
-  | ("semijoin" == relop || "join" == relop) =
+  | ("semijoin" == relop || "join" == relop || "antijoin" == relop || "left outer join" == relop) =
     do leftch  <- solve l
        rightch <- solve r
+       let joinvariant = case relop of
+             "join" -> Plain
+             "semijoin" -> LeftSemi
+             "antijoin" -> LeftAnti
+             "left outer join" -> LeftOuter
+             _ -> error $ "no other joins expected: "  ++ C.unpack relop
        prelim_conds <- mapM ( sc . P.expr) conditions
        let conds = case prelim_conds of
              [] -> error " empty join condition list is invalid "
              first : rest -> first :| rest
-       return $ Join { leftch, rightch, conds }
+       return $ Join { leftch, rightch, conds, joinvariant }
 
 solve P.Node { P.relop = "top N"
              , P.children = [ch]
@@ -542,10 +560,13 @@ pushFKJoins = rewrite swap
                 , rightch = Select { child
                                    , predicate }
                 , conds=cond :| []
+                , joinvariant=joinvariant@Plain
                 } =
       Just $ Select { child=Join { leftch
-                                     , rightch = child
-                                     , conds=cond :| [] }
+                                 , rightch = child
+                                 , conds=cond :| []
+                                 , joinvariant
+                                 }
                     , predicate }
     -- fact table selects get pushed up as well, after dim table
     -- NOTE: the predicate merge step is meant to map bottommost to leftmost
@@ -553,10 +574,13 @@ pushFKJoins = rewrite swap
                                    , predicate }
                   , rightch
                   , conds=cond :| []
+                  , joinvariant=joinvariant@Plain
                   } =
       Just $ Select { child=Join { leftch = selectchild
                                      , rightch
-                                     , conds=cond :| [] }
+                                     , conds=cond :| []
+                                     , joinvariant
+                                     }
                     , predicate }
     swap _ = Nothing
 
