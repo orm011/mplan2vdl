@@ -833,12 +833,16 @@ handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}} , Env cols1 _) (Vexp { lineag
 handleSelfJoin _ _ _ = error "only self join of pure handled right now"
 
 --- assumes the non-empty list of names is defined in the env.
-handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> Either String [Vexp]
-handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx =
+handleGatherJoin :: Config -> (Vexp, Env) -> (Vexp, Env) -> Name -> M.JoinVariant -> Either String [Vexp]
+handleGatherJoin config (factkey, Env factcols _) (dimkey, Env dimcols _) fkidx joinvariant=
   let JoinIdx {selectmask, gathermask} = deduceMasks config factkey dimkey fkidx
       cleaned_factcols = gatherAll factcols selectmask
       joined_dimcols  = gatherAll dimcols gathermask
-  in return $ cleaned_factcols ++ joined_dimcols
+  in return $ case joinvariant of
+    M.Plain -> cleaned_factcols ++ joined_dimcols
+    M.LeftSemi -> cleaned_factcols ++ joined_dimcols
+    M.LeftOuter -> error "TODO implement left outer"
+    M.LeftAnti -> error "TODO implement left anti"
 
 -- assumes
 deduceMasks :: Config -> Vexp -> Vexp -> Name -> JoinIdx
