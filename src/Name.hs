@@ -51,6 +51,9 @@ instance NFData Name
 
 data NameTable v = NameTable (Map [B.ByteString] v)
 
+instance Show (NameTable t) where
+  show (NameTable m) = let (revnames,_) = unzip (Map.toList m)
+                       in show $ map (Name . reverse) revnames
 
 empty :: NameTable v
 empty = NameTable Map.empty
@@ -64,15 +67,13 @@ isprefix (a:resta) (b:restb) =
 lookup_err :: Name -> NameTable v -> (Name, v)
 lookup_err n tab =
   case lookup n tab of
-    Left _ -> error "not found"
+    Left m -> error m
     Right ans -> ans
 
 lookup :: Name -> NameTable v -> Either String (Name, v)
-lookup n@(Name lst) (NameTable nt) =
+lookup n@(Name lst) tab@(NameTable nt) =
   let reversed = reverse lst
-      nm = show n
-      sc = show $ map (Name . fst) $ Map.toAscList nt
-      notfound = Left $ printf "no name %s within scope: %s" nm sc
+      notfound = Left $  "no name: " ++ show n ++ "  in scope: " ++ show tab
   in case Map.lookupGE reversed nt of
     Just (candidate, val) ->
       if isprefix reversed candidate {- found one match -}
@@ -83,7 +84,7 @@ lookup n@(Name lst) (NameTable nt) =
             then
               let can1 = show $ (Name candidate)
                   can2 = show $ (Name next)
-              in Left $ printf "Ambiguous name resolution for %s in %s: %s and %s both match." nm sc can1 can2
+              in Left $ printf "Ambiguous name resolution for %s in %s: %s and %s both match." (show n) (show tab) can1 can2
             else Right (Name $ reverse candidate, val) {- exactly one -}
           Nothing ->  Right (Name $ reverse candidate, val) {- exactly one -}
       else notfound
