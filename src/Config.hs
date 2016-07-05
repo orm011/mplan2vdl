@@ -6,7 +6,7 @@ module Config ( Config(..)
               , isFKRef
               , lookupPkey
               , BoundsRec
-              , WhichIsLeft(..)
+              , WhichIsFact(..)
               ) where
 
 import Name as NameTable
@@ -88,9 +88,9 @@ makePKeys :: Table -> (NonEmpty Name, Name)
 makePKeys Table { pkey=FKey {} }  = error "fkey in place of pkey"
 makePKeys Table { name, pkey=PKey { pkcols, pkconstraint } } = (N.sort (N.map (concatName name) pkcols), concatName name pkconstraint)
 
-data WhichIsLeft = FactIsLeft | DimIsLeft deriving (Show,Eq,Generic)
+data WhichIsFact = FactIsLeftChild | FactIsRightChild deriving (Show,Eq,Generic)
 
-makeFKEntries :: Table -> [(NonEmpty (Name, Name), (WhichIsLeft, Name))]
+makeFKEntries :: Table -> [(NonEmpty (Name, Name), (WhichIsFact, Name))]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
@@ -103,14 +103,14 @@ makeFKEntries Table { name, fkeys } =
      let explicit = ( joinidx
                     , tidname ) :|[]
      let explicit_back = (tidname, joinidx) :| []
-     [ (implicit, (FactIsLeft, joinidx))
-       , (implicit_back, (DimIsLeft, joinidx))
-       , (explicit, (FactIsLeft, joinidx))
-       , (explicit_back, (DimIsLeft, joinidx)) ]
+     [ (implicit, (FactIsLeftChild, joinidx))
+       , (implicit_back, (FactIsRightChild, joinidx))
+       , (explicit, (FactIsLeftChild, joinidx))
+       , (explicit_back, (FactIsRightChild, joinidx)) ]
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map (NonEmpty (Name,Name)) (WhichIsLeft,Name)
+                       , fkrefs :: Map (NonEmpty (Name,Name)) (WhichIsFact,Name)
                                    -- shows the fact -> dimension direction of the dependence
                        , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one
                                    -- fully qualifed column mames
@@ -131,7 +131,7 @@ lookupPkey config tab =
 
 -- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
 -- and what the name of the constraint is
-isFKRef :: Config -> (NonEmpty (Name,Name)) -> Maybe (WhichIsLeft, Name)
+isFKRef :: Config -> (NonEmpty (Name,Name)) -> Maybe (WhichIsFact, Name)
 isFKRef conf cols = let canon = N.sort cols
                     in Map.lookup canon (fkrefs conf)
 

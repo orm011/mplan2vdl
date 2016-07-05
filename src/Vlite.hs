@@ -13,6 +13,7 @@ import Name(Name(..))
 import qualified Name as NameTable
 import Control.Monad(foldM)
 import Data.List (foldl')
+import Data.Either
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
@@ -504,22 +505,27 @@ solve' config M.GroupBy { M.child,
      return $ final
 
 
+-- classify conditions
+--- if it is equality, then if both left and right have lineage.
+--- then, of all those pairs with lineage, is there one that matches the fk -> pk pattern or the pk->pk pattern.
+--- if so, return that set of pairs in one set, and the rest separately.
 solve' config M.Join { M.leftch
                      , M.rightch
                      , M.conds
                      , M.joinvariant
                      }
-  | Just ( nonEmptyPairList ) <- fkjoinConds conds
-  , Right ((keycols1, env1), (keycols2, env2)) <- matchcols config nonEmptyPairList leftch rightch --figure out which keys go with which child
-  , Just (lineages1@LineageSpec{cols=colnames1}) <- pureCols keycols1
-  , Just (lineages2@LineageSpec{cols=colnames2}) <- pureCols keycols2
+  | (p:rest, []) <- separateEqs conds
+  , Right ((keycolsleft, envleft), (keycolsright, envright)) <- matchcols config (p:|rest) leftch rightch --figure out which keys go with which child
+  , Just (lineagesleft@LineageSpec{cols=colnamesleft}) <- pureCols keycolsleft
+  , Just (lineagesright@LineageSpec{cols=colnamesright}) <- pureCols keycolsright
   , ( joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
-    if (colnames1 == colnames2 && (isPkey config colnames1 /= Nothing))
-    then handleSelfJoin config (keycols1, env1) (keycols2, env2)
-    else assert (N.length colnames1 == N.length colnames2) $
-         case isFKRef config (N.zip colnames1 colnames2)   of
-           Just (FactIsLeft, fkidx) -> handleGatherJoin config (lineages1, env1) (lineages2, env2) fkidx joinvariant FactIsLeft
-           Just (DimIsLeft, fkidx) -> handleGatherJoin config (lineages2, env2) (lineages1, env1) fkidx joinvariant DimIsLeft
+    if (colnamesleft == colnamesright && (isPkey config colnamesleft /= Nothing))
+    then handleSelfJoin config (keycolsleft, envleft) (keycolsright, envright)
+    else assert (N.length colnamesleft == N.length colnamesright) $
+         case isFKRef config (N.zip colnamesleft colnamesright)   of
+           Just (FactIsLeftChild, fkidx) -> handleGatherJoin config (lineagesleft, envleft) (lineagesright, envright) fkidx joinvariant FactIsLeftChild
+           -- handleGatherJoin expects fact on the left, dim on the right.
+           Just (FactIsRightChild, fkidx) -> handleGatherJoin config (lineagesright, envright) (lineagesleft, envleft) fkidx joinvariant FactIsRightChild
            Nothing -> error "no fk constraint available for join"
 
 solve' config M.Join { M.leftch
@@ -582,34 +588,18 @@ loadAs config tablename colname alias =
                   in Vexp {vx=clvx, info=clinfo, quant=clquant, lineage=Pure {col=colname, mask}, memoized_hash=sha1vx clvx, name=outname} -- this is just for type compatiblity.
     Name _ -> error "unexpected name"
 
-fkjoinConds :: NonEmpty M.ScalarExpr -> Maybe (NonEmpty (Name,Name))
-fkjoinConds ne =
-  let eqs = N.filter isRefEq ne
-      rest = N.filter (not . isRefEq) ne
-  in case (map extractEqCond eqs, rest) of
-    (_,_:_) -> Nothing -- list has things other than an eq. let search continue.
-    (a : r,[]) -> Just (a :| r)
-    ([],[]) -> error "this cannot happen if list is non empty"
-
-fkjoinConds _ = Nothing
-
-isRefEq :: M.ScalarExpr -> Bool
-isRefEq (M.Binop{ M.binop=M.Eq
-                    , M.left=M.Ref _
-                    , M.right=M.Ref _ }) =  True
-isRefEq _ = False
-
-extractEqCond :: M.ScalarExpr -> (Name, Name)
-extractEqCond (M.Binop{ M.binop=M.Eq
-                    , M.left=M.Ref key1
-                    , M.right=M.Ref key2 }) = (key1,key2)
-
-extractEqCond _ = error "this is not an equality comparison between two refs"
+separateEqs :: NonEmpty M.ScalarExpr -> ([(Name,Name)], [M.ScalarExpr])
+separateEqs ne = partitionEithers (map isRefEq (N.toList ne))
+  where isRefEq (M.Binop{ M.binop=M.Eq
+                        , M.left=M.Ref key1
+                        , M.right=M.Ref key2 }) =  Left (key1,key2)
+        isRefEq a = Right a
 
 -- all the names share the same mask
 -- the gquant reports if put together, each row of the resulting composite is unique
 -- (for now, the deduction of that property only works for trivial cases, used in query 18)
 data LineageSpec = LineageSpec {cols::NonEmpty Name, gmask::Vexp, gquant::UniqueSpec} deriving (Eq,Show)
+
 
 pureCols :: NonEmpty Vexp -> Maybe LineageSpec
 pureCols (Vexp{lineage=Pure{col=col0,mask=mask0}, quant=quant0} :| rest)  =
@@ -877,7 +867,7 @@ handleSelfJoin _ _ _ = error "only self join of single pure primary columns hand
 
 
 --- assumes the non-empty list of names is defined in the env.
-handleGatherJoin :: Config -> (LineageSpec, Env) -> (LineageSpec, Env) -> Name -> M.JoinVariant -> WhichIsLeft -> Either String [Vexp]
+handleGatherJoin :: Config -> (LineageSpec, Env) -> (LineageSpec, Env) -> Name -> M.JoinVariant -> WhichIsFact -> Either String [Vexp]
 handleGatherJoin config (factlineages, Env factcols _) (dimlineages, Env dimcols _) fkidx joinvariant whichisleft =
   let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config factlineages dimlineages fkidx
       selectmask = complete $ Fold {foldop=FSel
@@ -891,16 +881,16 @@ handleGatherJoin config (factlineages, Env factcols _) (dimlineages, Env dimcols
   in return $ case joinvariant of
     M.Plain ->  cleaned_factcols ++ joined_dimcols
     M.LeftSemi -> case whichisleft of
-      FactIsLeft -> cleaned_factcols
-      DimIsLeft -> joined_dimcols
+      FactIsLeftChild -> cleaned_factcols
+      FactIsRightChild -> joined_dimcols
     M.LeftOuter -> error "TODO implement left outer"
     M.LeftAnti -> case whichisleft of
-      FactIsLeft -> let antiboolean = ones_ selectmask -. selectmask
+      FactIsLeftChild -> let antiboolean = ones_ selectmask -. selectmask
                         antigather = complete $ Fold { foldop=FSel
                                                      , fgroups=pos_ antiboolean
                                                      , fdata=antiboolean}
                     in gatherAll factcols antigather
-      DimIsLeft -> error "TODO implement anti for dimension table"
+      FactIsRightChild -> error "TODO implement anti for dimension table"
 -- assumes
 deduceMasks :: Config -> LineageSpec -> LineageSpec -> Name -> JoinIdx
 deduceMasks config
