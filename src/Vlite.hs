@@ -417,36 +417,10 @@ note: not especially dealing with % names right now
 todo: using the table schema we can resolve % names before
       they get to the final voodoo
 -}
-solve' config M.Table { M.tablename=_
+solve' config M.Table { M.tablename
                       , M.tablecolumns } =
-  let tidcols = filter isTid tablecolumns
-      nontid = filter (not . isTid) tablecolumns
-      nontidloads =
-        sequence $ (do col@(colnam, _) <- nontid -- list monad
-                       let alias = Just $ decideAlias col
-                       return $ (do (_,info) <- NameTable.lookup colnam (colinfo config)  -- either monad
-                                    let quant = if (isPkey config (colnam:|[]) /= Nothing) then Unique else Any
-                                    let vx=Load colnam
-                                    let partial=Vexp {vx, info, lineage=None, name=Nothing, memoized_hash=sha1vx vx, quant} -- this is just for type compatiblity.
-                                    let lineage=Pure{col=colnam, mask=pos_ partial} -- TODO: use a single vector for lineage range (eg primary key)
-                                    let completed = partial {lineage=lineage, name=alias}
-                                    return $ completed))
-  in do snontids@(refv@Vexp { }: _)  <- nontidloads --either
-        case tidcols of
-          [] -> return $ snontids
-          [tidcol@(orig,_)] ->
-            let anon = pos_ refv
-                lineage = Pure {col=orig, mask=pos_ refv} -- lineage of itself.
-                named = anon { lineage, name=Just $ decideAlias tidcol, quant=Unique }
-            in return $ named : snontids
-          _ -> Left $ E.unexpected "multiple tidcols defined in table" tidcols
-  where decideAlias (orig, Nothing) = orig
-        decideAlias (_, Just x) = x
-        isTid (Name [_, "%TID%"], _) = True
-        isTid (Name [_, _], _) = False
-        isTid _ = undefined -- this should never happen. used here for warning.
-
-        ---not expecting names with more than two components
+  return $ do (colnam, alias) <- tablecolumns
+              return $ loadAs config tablename colnam alias
 
 {- Project: not dealing with ordered queries right now
 note. project affects the name scope in the following ways
@@ -585,6 +559,28 @@ solve' config M.Select { M.child -- can be derived rel
                           in ( sel {name=preserved} )
 
 solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
+
+
+getRefVector :: Config -> Name -> Vexp
+getRefVector config tablename =
+  let pkname = lookupPkey config tablename
+      (_,pkinfo) = NameTable.lookup_err pkname (colinfo config)
+      pkvx=Load pkname
+  in Vexp{vx=pkvx, info=pkinfo, lineage=None, memoized_hash=sha1vx pkvx, quant=Unique, name=Nothing} -- this vector is used only for the ref part of other columns
+
+loadAs :: Config -> Name -> Name -> Maybe Name -> Vexp
+loadAs config tablename colname alias =
+  let mask = pos_ (getRefVector config tablename)
+      outname = case alias of
+        Nothing -> Just colname
+        Just x -> Just x
+  in case colname of
+    Name [_,"%TID%"] -> mask { lineage=Pure {col=colname, mask}, name=outname } -- the mask is already good, but lacks name and lineage
+    Name [_,_] -> let (_,clinfo) = NameTable.lookup_err colname (colinfo config)
+                      clquant = if (isPkey config (colname:|[]) /= Nothing) then Unique else Any
+                      clvx=Load colname
+                  in Vexp {vx=clvx, info=clinfo, quant=clquant, lineage=Pure {col=colname, mask}, memoized_hash=sha1vx clvx, name=outname} -- this is just for type compatiblity.
+    Name _ -> error "unexpected name"
 
 fkjoinConds :: NonEmpty M.ScalarExpr -> Maybe (NonEmpty (Name,Name))
 fkjoinConds ne =

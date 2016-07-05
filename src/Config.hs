@@ -4,6 +4,7 @@ module Config ( Config(..)
               , makeConfig
               , isPkey
               , isFKRef
+              , lookupPkey
               , BoundsRec
               , WhichIsLeft(..)
               ) where
@@ -50,24 +51,42 @@ instance NFData ColInfo
 checkColInfo :: ColInfo -> ColInfo
 checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
 
-addEntry :: NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
-addEntry nametab (tab,col,colmin,colmax,colcount) =
-  let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount }
-  in NameTable.insert (Name [tab,col]) colinfo nametab
+addEntry :: [Name] -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
+addEntry constraints nametab (tab,col,colmin,colmax,colcount) =
+  do let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount }
+     plain <- NameTable.insert (Name [tab,col]) colinfo nametab
+     if elem (Name[tab,col]) constraints
+       then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
+       else return $ plain
 
 makeConfig :: Integer -> V.Vector BoundsRec -> [Table] -> Either String Config
 makeConfig grainsizelg boundslist tables =
-  do colinfo <- foldM addEntry NameTable.empty boundslist
+  do let constraints = foldMap getTableConstraints tables
+     colinfo <- foldM (addEntry constraints) NameTable.empty boundslist
      let allrefs = foldMap makeFKEntries tables
      let allpkeys = map makePKeys tables -- sort the non-empty lists
-     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys }
+     let pktable = map pkpair tables
+     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+                     tablePKeys=Map.fromList pktable }
+
+pkpair :: Table -> (Name,Name)
+pkpair Table{name, pkey=PKey{pkconstraint}} = (name, concatName name pkconstraint)
+pkpair _ = error "table with no pkey"
 
 concatName :: Name -> Name -> Name
 concatName (Name a) (Name b) = Name (a ++ b)
 
+getTableConstraints :: Table -> [Name]
+getTableConstraints Table {name, pkey, fkeys}
+  = map (concatName name) (getConstraint pkey : map getConstraint fkeys)
+
+getConstraint:: Key -> Name
+getConstraint PKey {pkconstraint} = pkconstraint
+getConstraint FKey {fkconstraint} = fkconstraint
+
 makePKeys :: Table -> (NonEmpty Name, Name)
 makePKeys Table { pkey=FKey {} }  = error "fkey in place of pkey"
-makePKeys Table { name, pkey=PKey { pkcols, pkconstraint=_ } } = (N.sort (N.map (concatName name) pkcols), name)
+makePKeys Table { name, pkey=PKey { pkcols, pkconstraint } } = (N.sort (N.map (concatName name) pkcols), concatName name pkconstraint)
 
 data WhichIsLeft = FactIsLeft | DimIsLeft deriving (Show,Eq,Generic)
 
@@ -93,14 +112,22 @@ data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
                        , fkrefs :: Map (NonEmpty (Name,Name)) (WhichIsLeft,Name)
                                    -- shows the fact -> dimension direction of the dependence
-                       , pkeys :: Map (NonEmpty Name) Name
+                       , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one
                                    -- fully qualifed column mames
+                       , tablePKeys :: Map Name Name -- maps table to its pkconstraints
                        }
 
 -- if this list is a primary key, value is Just the table name, otherwise nothing
 isPkey :: Config -> (NonEmpty Name) -> Maybe Name
 isPkey conf nelist = let canon = N.sort nelist
                      in Map.lookup canon (pkeys conf)
+
+lookupPkey :: Config -> Name -> Name
+lookupPkey config tab =
+  let x = Map.lookup tab (tablePKeys config)
+  in case x of
+    Nothing -> error "every table has a pkey. no info for table loaded?"
+    Just n -> n
 
 -- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
 -- and what the name of the constraint is
