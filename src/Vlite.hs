@@ -886,10 +886,10 @@ handleGatherJoin config (factlineages, Env factcols _) (dimlineages, Env dimcols
     M.LeftOuter -> error "TODO implement left outer"
     M.LeftAnti -> case whichisleft of
       FactIsLeftChild -> let antiboolean = ones_ selectmask -. selectmask
-                        antigather = complete $ Fold { foldop=FSel
-                                                     , fgroups=pos_ antiboolean
-                                                     , fdata=antiboolean}
-                    in gatherAll factcols antigather
+                             antigather = complete $ Fold { foldop=FSel
+                                                          , fgroups=pos_ antiboolean
+                                                          , fdata=antiboolean}
+                         in gatherAll factcols antigather
       FactIsRightChild -> error "TODO implement anti for dimension table"
 -- assumes
 deduceMasks :: Config -> LineageSpec -> LineageSpec -> Name -> JoinIdx
