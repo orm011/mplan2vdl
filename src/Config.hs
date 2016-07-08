@@ -5,6 +5,8 @@ module Config ( Config(..)
               , isPkey
               , isFKRef
               , lookupPkey
+              , isPartialFk
+              , FKSpec
               , BoundsRec
               , WhichIsFact(..)
               ) where
@@ -37,6 +39,10 @@ type Map = Map.Map
 -- errors due to overflwoing numbers within the program.
 type BoundsRec = (B.ByteString, B.ByteString, Integer, Integer, Integer)
 
+-- holds the names of the matching columns for an fk.
+-- the order matters, watch out. left is fact, right is dim.
+type FKSpec = NonEmpty (Name, Name)
+
 -- we use Integer values here so that our metadata calculations
 -- don't overflow.
 data ColInfo = ColInfo
@@ -64,10 +70,12 @@ makeConfig grainsizelg boundslist tables =
   do let constraints = foldMap getTableConstraints tables
      colinfo <- foldM (addEntry constraints) NameTable.empty boundslist
      let allrefs = foldMap makeFKEntries tables
+     let make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,nelist))) nelist
+     let partialfks = Map.fromList $ foldMap make_partials allrefs
      let allpkeys = map makePKeys tables -- sort the non-empty lists
      let pktable = map pkpair tables
      return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
-                     tablePKeys=Map.fromList pktable }
+                       tablePKeys=Map.fromList pktable, partialfks }
 
 pkpair :: Table -> (Name,Name)
 pkpair Table{name, pkey=PKey{pkconstraint}} = (name, concatName name pkconstraint)
@@ -90,7 +98,7 @@ makePKeys Table { name, pkey=PKey { pkcols, pkconstraint } } = (N.sort (N.map (c
 
 data WhichIsFact = FactIsLeftChild | FactIsRightChild deriving (Show,Eq,Generic)
 
-makeFKEntries :: Table -> [(NonEmpty (Name, Name), (WhichIsFact, Name))]
+makeFKEntries :: Table -> [(FKSpec, (WhichIsFact, Name))]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
@@ -103,18 +111,20 @@ makeFKEntries Table { name, fkeys } =
      let explicit = ( joinidx
                     , tidname ) :|[]
      let explicit_back = (tidname, joinidx) :| []
-     [ (implicit, (FactIsLeftChild, joinidx))
-       , (implicit_back, (FactIsRightChild, joinidx))
-       , (explicit, (FactIsLeftChild, joinidx))
-       , (explicit_back, (FactIsRightChild, joinidx)) ]
+     let fkrefs = [ (implicit, (FactIsLeftChild, joinidx))
+                  , (implicit_back, (FactIsRightChild, joinidx))
+                  , (explicit, (FactIsLeftChild, joinidx))
+                  , (explicit_back, (FactIsRightChild, joinidx)) ]
+     fkrefs
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map (NonEmpty (Name,Name)) (WhichIsFact,Name)
+                       , fkrefs :: Map FKSpec (WhichIsFact,Name)
                                    -- shows the fact -> dimension direction of the dependence
                        , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one
                                    -- fully qualifed column mames
                        , tablePKeys :: Map Name Name -- maps table to its pkconstraints
+                       , partialfks :: Map (Name,Name) (WhichIsFact, FKSpec)
                        }
 
 -- if this list is a primary key, value is Just the table name, otherwise nothing
@@ -131,9 +141,12 @@ lookupPkey config tab =
 
 -- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
 -- and what the name of the constraint is
-isFKRef :: Config -> (NonEmpty (Name,Name)) -> Maybe (WhichIsFact, Name)
+isFKRef :: Config -> FKSpec -> Maybe (WhichIsFact, Name)
 isFKRef conf cols = let canon = N.sort cols
                     in Map.lookup canon (fkrefs conf)
+
+isPartialFk :: Config -> (Name,Name) -> Maybe (WhichIsFact, FKSpec)
+isPartialFk config (a,b) = Map.lookup (a,b) (partialfks config)
 
 --- which queries do we want.
 --- really: given colname
