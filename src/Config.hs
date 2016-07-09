@@ -6,7 +6,8 @@ module Config ( Config(..)
               , isFKRef
               , lookupPkey
               , isPartialFk
-              , FKSpec
+              , isPartialPk
+              , FKCols
               , BoundsRec
               , WhichIsFact(..)
               ) where
@@ -41,7 +42,8 @@ type BoundsRec = (B.ByteString, B.ByteString, Integer, Integer, Integer)
 
 -- holds the names of the matching columns for an fk.
 -- the order matters, watch out. left is fact, right is dim.
-type FKSpec = NonEmpty (Name, Name)
+type FKCols = NonEmpty (Name, Name)
+type PKCols = NonEmpty Name
 
 -- we use Integer values here so that our metadata calculations
 -- don't overflow.
@@ -73,9 +75,11 @@ makeConfig grainsizelg boundslist tables =
      let make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,nelist))) nelist
      let partialfks = Map.fromList $ foldMap make_partials allrefs
      let allpkeys = map makePKeys tables -- sort the non-empty lists
+     let partialpks = Map.fromList $
+           foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
      let pktable = map pkpair tables
      return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
-                       tablePKeys=Map.fromList pktable, partialfks }
+                       tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
 pkpair Table{name, pkey=PKey{pkconstraint}} = (name, concatName name pkconstraint)
@@ -98,7 +102,7 @@ makePKeys Table { name, pkey=PKey { pkcols, pkconstraint } } = (N.sort (N.map (c
 
 data WhichIsFact = FactIsLeftChild | FactIsRightChild deriving (Show,Eq,Generic)
 
-makeFKEntries :: Table -> [(FKSpec, (WhichIsFact, Name))]
+makeFKEntries :: Table -> [(FKCols, (WhichIsFact, Name))]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
@@ -119,12 +123,13 @@ makeFKEntries Table { name, fkeys } =
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map FKSpec (WhichIsFact,Name)
+                       , fkrefs :: Map FKCols (WhichIsFact,Name)
                                    -- shows the fact -> dimension direction of the dependence
                        , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one
                                    -- fully qualifed column mames
                        , tablePKeys :: Map Name Name -- maps table to its pkconstraints
-                       , partialfks :: Map (Name,Name) (WhichIsFact, FKSpec)
+                       , partialfks :: Map (Name,Name) (WhichIsFact, FKCols)
+                       , partialpks :: Map Name  PKCols
                        }
 
 -- if this list is a primary key, value is Just the table name, otherwise nothing
@@ -141,12 +146,17 @@ lookupPkey config tab =
 
 -- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
 -- and what the name of the constraint is
-isFKRef :: Config -> FKSpec -> Maybe (WhichIsFact, Name)
+isFKRef :: Config -> FKCols -> Maybe (WhichIsFact, Name)
 isFKRef conf cols = let canon = N.sort cols
                     in Map.lookup canon (fkrefs conf)
 
-isPartialFk :: Config -> (Name,Name) -> Maybe (WhichIsFact, FKSpec)
+isPartialFk :: Config -> (Name,Name) -> Maybe (WhichIsFact, FKCols)
 isPartialFk config (a,b) = Map.lookup (a,b) (partialfks config)
+
+
+isPartialPk :: Config -> Name -> Maybe PKCols
+isPartialPk config n = Map.lookup n (partialpks config)
+
 
 --- which queries do we want.
 --- really: given colname
