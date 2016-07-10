@@ -954,7 +954,9 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
    M.LeftSemi -> case whichisleft of
      FactDim -> cleaned_factcols
      DimFact -> joined_dimcols
-   M.LeftOuter -> error "TODO implement left outer"
+   M.LeftOuter -> case whichisleft of
+     FactDim -> error "left outer join on the fact side" -- this can be implemented
+     DimFact -> error "left outer join on the dim side" -- looks a bit tougher to implement
    M.LeftAnti -> case whichisleft of
      FactDim -> let antiboolean = ones_ selectmask -. selectmask
                     antigather = complete $ Fold { foldop=FSel
