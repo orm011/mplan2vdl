@@ -12,7 +12,7 @@ import Mplan(BinaryOp(..))
 import Name(Name(..))
 import qualified Name as NameTable
 import Control.Monad(foldM)
-import Data.List (foldl')
+import Data.List (foldl',(\\))
 import Data.Either
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
@@ -539,6 +539,11 @@ solve' config M.Join { M.leftch
                    boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
                    gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
                in return $ gatherAll colsleft gathermask
+       ([_],more@[extra]) -> -- single condition on each side. could do more on the right but need to AND them.
+         if joinvariant == M.Plain
+         then solve' config M.Select { M.child=M.Join {M.leftch=leftch, M.rightch=rightch, M.conds=N.fromList (N.toList conds \\ more), M.joinvariant=joinvariant}
+                                     , M.predicate=extra }
+         else error "can only do this rewrite for plain joins" -- left outer joins would be wrong.
        ow -> error $ "not handling this join case right now: " ++ show ow
 
 solve' config M.Select { M.child -- can be derived rel
