@@ -96,15 +96,3 @@ CREATE TABLE "sys"."lineitem" (
 	CONSTRAINT "lineitem_partsupp" FOREIGN KEY ("l_partkey", "l_suppkey") REFERENCES "sys"."partsupp" ("ps_partkey", "ps_suppkey"),
 	CONSTRAINT "lineitem_supplier" FOREIGN KEY ("l_suppkey") REFERENCES "sys"."supplier" ("s_suppkey")
 );
--- used in query 15.sql
-create view revenue0 (supplier_no, total_revenue) as
-	select
-		l_suppkey,
-		sum(l_extendedprice * (1 - l_discount))
-	from
-		lineitem
-	where
-		l_shipdate >= date '1996-01-01'
-		and l_shipdate < date '1996-01-01' + interval '3' month
-	group by
-		l_suppkey;
