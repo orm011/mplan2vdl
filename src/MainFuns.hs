@@ -42,7 +42,7 @@ cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for foldSum/foldMax/etc (default 8192)" &= name "g"
   , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
-  , schemafile = def &= typ "msqldump file" &= help "schema for database. via msqldump -d"
+  , schemafile = def &= typ "msqldump file" &= help "output of msqldump -D -d <dbname>"
   , dot = False &= typ "BOOL" &= help "instead of running compiler, emit dot for monet plan" &= name "d"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
