@@ -1,0 +1,78 @@
+#plan select
+#	s_acctbal,
+#	s_name,
+#	n_name,
+#	p_partkey,
+#	p_mfgr,
+#	s_address,
+#	s_phone,
+#	s_comment
+#from
+#	part,
+#	supplier,
+#	partsupp,
+#	nation,
+#	region
+#where
+#	p_partkey = ps_partkey
+#	and s_suppkey = ps_suppkey
+#	and p_size = 15
+#	and p_type like '%BRASS'
+#	and s_nationkey = n_nationkey
+#	and n_regionkey = r_regionkey
+#	and r_name = 'EUROPE'
+#	and ps_supplycost = (
+#		select
+#			min(ps_supplycost)
+#		from
+#			partsupp,
+#			supplier,
+#			nation,
+#			region
+#		where
+#			p_partkey = ps_partkey
+#			and s_suppkey = ps_suppkey
+#			and s_nationkey = n_nationkey
+% .plan # table_name
+% rel # name
+% clob # type
+% 375 # length
+project (
+| select (
+| | group by (
+| | | join (
+| | | | join (
+| | | | | join (
+| | | | | | join (
+| | | | | | | table(sys.nation) [ nation.%TID% NOT NULL as L4.%TID%, nation.%nation_region NOT NULL as L4.%nation_region ] COUNT ,
+| | | | | | | select (
+| | | | | | | | table(sys.region) [ region.r_name NOT NULL as L5.r_name, region.%TID% NOT NULL as L5.%TID% ] COUNT 
+| | | | | | | ) [ L5.r_name NOT NULL = char(25)[char(6) "EUROPE"] ]
+| | | | | | ) [ L4.%nation_region NOT NULL = L5.%TID% NOT NULL JOINIDX sys.nation.nation_region ],
+| | | | | | table(sys.supplier) [ supplier.%TID% NOT NULL as L3.%TID%, supplier.%supplier_nation NOT NULL as L3.%supplier_nation ] COUNT 
+| | | | | ) [ L3.%supplier_nation NOT NULL = L4.%TID% NOT NULL JOINIDX sys.supplier.supplier_nation ],
+| | | | | table(sys.partsupp) [ partsupp.ps_partkey NOT NULL as L2.ps_partkey, partsupp.ps_supplycost NOT NULL as L2.ps_supplycost, partsupp.%partsupp_supplier NOT NULL as L2.%partsupp_supplier ] COUNT 
+| | | | ) [ L2.%partsupp_supplier NOT NULL = L3.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_supplier ],
+| | | | project (
+| | | | | join (
+| | | | | | join (
+| | | | | | | join (
+| | | | | | | | join (
+| | | | | | | | | table(sys.partsupp) [ partsupp.ps_supplycost NOT NULL, partsupp.%partsupp_supplier NOT NULL JOINIDX sys.partsupp.partsupp_supplier, partsupp.%partsupp_part NOT NULL JOINIDX sys.partsupp.partsupp_part ] COUNT ,
+| | | | | | | | | select (
+| | | | | | | | | | table(sys.part) [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, part.p_type NOT NULL, part.p_size NOT NULL, part.%TID% NOT NULL ] COUNT 
+| | | | | | | | | ) [ part.p_size NOT NULL = int[tinyint "15"], char[part.p_type NOT NULL] FILTER like (char[char(6) "%BRASS"], char "") ]
+| | | | | | | | ) [ partsupp.%partsupp_part NOT NULL = part.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_part ],
+| | | | | | | | table(sys.supplier) [ supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, supplier.%TID% NOT NULL, supplier.%supplier_nation NOT NULL JOINIDX sys.supplier.supplier_nation ] COUNT 
+| | | | | | | ) [ partsupp.%partsupp_supplier NOT NULL = supplier.%TID% NOT NULL JOINIDX sys.partsupp.partsupp_supplier ],
+| | | | | | | table(sys.nation) [ nation.n_name NOT NULL, nation.%TID% NOT NULL, nation.%nation_region NOT NULL JOINIDX sys.nation.nation_region ] COUNT 
+| | | | | | ) [ supplier.%supplier_nation NOT NULL = nation.%TID% NOT NULL JOINIDX sys.supplier.supplier_nation ],
+| | | | | | select (
+| | | | | | | table(sys.region) [ region.r_name NOT NULL, region.%TID% NOT NULL ] COUNT 
+| | | | | | ) [ region.r_name NOT NULL = char(25)[char(6) "EUROPE"] ]
+| | | | | ) [ nation.%nation_region NOT NULL = region.%TID% NOT NULL JOINIDX sys.nation.nation_region ]
+| | | | ) [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, partsupp.ps_supplycost NOT NULL, nation.n_name NOT NULL, sys.identity(part.p_partkey NOT NULL HASHCOL ) HASHCOL  as L6.L6 ]
+| | | ) [ part.p_partkey NOT NULL = L2.ps_partkey NOT NULL HASHCOL  ]
+| | ) [ L6.L6 ] [ part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_name NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_acctbal NOT NULL, supplier.s_comment NOT NULL, partsupp.ps_supplycost NOT NULL, nation.n_name NOT NULL, L6.L6 HASHCOL , sys.min no nil (L2.ps_supplycost NOT NULL as partsupp.ps_supplycost) NOT NULL as L1.L1 ]
+| ) [ partsupp.ps_supplycost NOT NULL = L1 NOT NULL ]
+) [ supplier.s_acctbal NOT NULL, supplier.s_name NOT NULL, nation.n_name NOT NULL, part.p_partkey NOT NULL HASHCOL , part.p_mfgr NOT NULL, supplier.s_address NOT NULL, supplier.s_phone NOT NULL, supplier.s_comment NOT NULL ]

@@ -1,0 +1,38 @@
+#plan select
+#	l_shipmode,
+#	sum(case
+#		when o_orderpriority = '1-URGENT'
+#			or o_orderpriority = '2-HIGH'
+#			then 1
+#		else 0
+#	end) as high_line_count,
+#	sum(case
+#		when o_orderpriority <> '1-URGENT'
+#			and o_orderpriority <> '2-HIGH'
+#			then 1
+#		else 0
+#	end) as low_line_count
+#from
+#	orders,
+#	lineitem
+#where
+#	o_orderkey = l_orderkey
+#	and l_shipmode in ('MAIL', 'SHIP')
+#	and l_commitdate < l_receiptdate
+#	and l_shipdate < l_commitdate
+#	and l_receiptdate >= date '1994-01-01'
+#	and l_receiptdate < date '1994-01-01' + interval '1' year
+% .plan # table_name
+% rel # name
+% clob # type
+% 885 # length
+project (
+| group by (
+| | join (
+| | | select (
+| | | | table(sys.lineitem) [ lineitem.l_shipdate NOT NULL, lineitem.l_commitdate NOT NULL, lineitem.l_receiptdate NOT NULL, lineitem.l_shipmode NOT NULL, lineitem.%lineitem_orders NOT NULL JOINIDX sys.lineitem.lineitem_orders ] COUNT 
+| | | ) [ lineitem.l_shipdate NOT NULL < lineitem.l_commitdate NOT NULL < lineitem.l_receiptdate NOT NULL, date "1994-01-01" <= lineitem.l_receiptdate NOT NULL < sys.sql_add(date "1994-01-01", month_interval "12"), lineitem.l_shipmode NOT NULL in (char(10)[char(4) "MAIL"], char(10)[char(4) "SHIP"]) ],
+| | | table(sys.orders) [ orders.o_orderpriority NOT NULL, orders.%TID% NOT NULL ] COUNT 
+| | ) [ lineitem.%lineitem_orders NOT NULL = orders.%TID% NOT NULL JOINIDX sys.lineitem.lineitem_orders ]
+| ) [ lineitem.l_shipmode NOT NULL ] [ lineitem.l_shipmode NOT NULL, sys.sum no nil (sys.ifthenelse(sys.ifthenelse(sys.isnull(sys.or(sys.=(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.=(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), boolean "false", sys.or(sys.=(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.=(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), tinyint "1", tinyint "0")) as L1.L1, sys.sum no nil (sys.ifthenelse(sys.ifthenelse(sys.isnull(sys.and(sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), boolean "false", sys.and(sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(8) "1-URGENT"]), sys.<>(orders.o_orderpriority NOT NULL, char(15)[char(6) "2-HIGH"]))), tinyint "1", tinyint "0")) as L2.L2 ]
+) [ lineitem.l_shipmode NOT NULL, L1 as L1.high_line_count, L2 as L2.low_line_count ]
