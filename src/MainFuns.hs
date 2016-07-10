@@ -11,6 +11,7 @@ import Text.Printf (printf)
 import System.Console.CmdArgs.Implicit
 import Config
 
+--import Debug.Trace
 --compiler stages
 import qualified Parser as P -- raw parse tree.
 import qualified SchemaParser as SP
