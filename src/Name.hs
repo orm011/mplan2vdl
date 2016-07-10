@@ -5,7 +5,10 @@ module Name (Name(..)
             ,insert
             ,insertWeak
             ,lookup
-            ,lookup_err) where
+            ,lookup_err
+            ,fromList
+            ,toList
+            ) where
 
 --import Data.String.Utils(join)
 import qualified Data.Map.Strict as Map
@@ -17,6 +20,7 @@ import Data.Data
 import Data.Hashable
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
+import Data.List (foldl')
 --import qualified Data.ByteString.Builder as Bld
 
 {- eg decimal(15,2) , or smallint  -}
@@ -54,6 +58,15 @@ data NameTable v = NameTable (Map [B.ByteString] v)
 instance Show (NameTable t) where
   show (NameTable m) = let (revnames,_) = unzip (Map.toList m)
                        in show $ map (Name . reverse) revnames
+
+
+fromList :: [(Name,a)] -> NameTable a
+fromList prs = foldl' (\tab (n,a) -> insertWeak n a tab) empty prs
+
+toList :: NameTable a -> [(Name,a)]
+toList (NameTable tab) =
+  let prs = Map.toList tab
+  in map (\(bs, vexp) -> (Name (reverse bs), vexp)) prs
 
 empty :: NameTable v
 empty = NameTable Map.empty

@@ -19,15 +19,17 @@ import GHC.Generics
 import Control.DeepSeq(NFData)
 import Data.Int
 import qualified Error as E
-import Error(errzip,check)
+import Error(check)
 import Data.Bits
 --import Debug.Trace
 import Text.Groom
+import qualified Data.HashMap.Strict as Map
 --import qualified Data.Map.Strict as Map
+--import Data.HashMap.Strict((!))
 --import Data.String.Utils(join)
-import Data.List.NonEmpty(NonEmpty(..),(<|))
+import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as N
---type Map = Map.Map
+
 --type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 import Text.Printf
 import Control.Exception.Base hiding (mask)
@@ -39,8 +41,7 @@ import Data.Hashable
 import qualified Data.ByteString.Lazy.Char8 as C
 import Sha
 
-
---type Map = Map.Map
+type Map = Map.HashMap
 type NameTable = NameTable.NameTable
 
 data ShOp = Gather | Scatter
@@ -116,7 +117,6 @@ instance Eq Vexp where
 -- the original one.
 -- Note also: right now, uniqueSpec means conditionally unique: if the original column was unique (such as the pos id)
 -- then the current version is also unique.
-
 instance NFData Vexp
 
 -- instance Monad W where
@@ -505,51 +505,41 @@ solve' config M.GroupBy { M.child,
      return $ final
 
 
--- classify conditions
---- if it is equality, then if both left and right have lineage.
---- then, of all those pairs with lineage, is there one that matches the fk -> pk pattern or the pk->pk pattern.
---- if so, return that set of pairs in one set, and the rest separately.
+
+
 solve' config M.Join { M.leftch
                      , M.rightch
                      , M.conds
                      , M.joinvariant
-                     }
-  | (p:rest, []) <- separateEqs conds
-  , Right ((keycolsleft, envleft), (keycolsright, envright)) <- matchcols config (p:|rest) leftch rightch --figure out which keys go with which child
-  , Just (lineagesleft@LineageSpec{cols=colnamesleft}) <- pureCols keycolsleft
-  , Just (lineagesright@LineageSpec{cols=colnamesright}) <- pureCols keycolsright
-  , ( joinvariant == M.Plain || joinvariant == M.LeftSemi || joinvariant == M.LeftOuter || joinvariant == M.LeftAnti )  =
-    if (colnamesleft == colnamesright && (isPkey config colnamesleft /= Nothing))
-    then handleSelfJoin config (keycolsleft, envleft) (keycolsright, envright)
-    else assert (N.length colnamesleft == N.length colnamesright) $
-         case isFKRef config (N.zip colnamesleft colnamesright)   of
-           Just (FactIsLeftChild, fkidx) -> handleGatherJoin config (lineagesleft, envleft) (lineagesright, envright) fkidx joinvariant FactIsLeftChild
-           -- handleGatherJoin expects fact on the left, dim on the right.
-           Just (FactIsRightChild, fkidx) -> handleGatherJoin config (lineagesright, envright) (lineagesleft, envleft) fkidx joinvariant FactIsRightChild
-           Nothing -> error "no fk constraint available for join"
-
-solve' config M.Join { M.leftch
-                     , M.rightch
-                     , M.conds=conds@M.Binop{ M.binop
-                                            , M.left=leftexpr
-                                            , M.right=rightexpr } :| []
-                     } = -- TODO: we are skipping returning the column that was selected...
-  do env1@(Env cols1 _) <- solve config leftch  --- assume that left expr is solvable in env1, and right expr is solvable in env2 for now.
-     env2@(Env cols2 _) <- solve config rightch
-     keycol1 <- sc env1 leftexpr
-     keycol2 <- sc env2 rightexpr
-     return $ case ((count $ info keycol1, cols1),  (count $ info keycol2, cols2)) of --single column, single element.
-       ( (1, [_]) , _) -> let broadcastcol1 = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol2, shsource=keycol1 } -- left is val
-                              boolean = complete $ Binop {binop, left=broadcastcol1, right=keycol2}
-                              gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-                          in gatherAll cols2 gathermask
-       (_ , (1, [_]) ) -> let broadcastcol2 = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol1, shsource=keycol2 } -- right is val
-                              boolean = complete $ Binop {binop, left=keycol1, right=broadcastcol2}
-                              gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-                          in gatherAll cols1 gathermask
-       (_,_) -> error $ "this join requires product?\n" ++ show keycol1 ++ "\n" ++ show keycol2 ++ "\n" ++ show conds
-
-
+                     } =
+  do sleft@(Env colsleft _) <- solve config leftch
+     sright@(Env colsright _) <- solve config rightch
+     case separateFKJoinable config (N.toList conds) sleft sright of
+       ([jspec@FKJoinSpec{joinorder}],[]) -> case joinorder of
+         FactDim -> handleGatherJoin config sleft sright joinvariant jspec
+         DimFact -> handleGatherJoin config sright sleft joinvariant jspec
+       ([jspec@SelfJoinSpec{}],[]) -> handleGatherJoin config sleft sright joinvariant jspec
+       ([], [M.Binop{ M.binop
+                   , M.left=leftexpr
+                   , M.right=rightexpr }])
+         | Right keycol_left <- sc sleft leftexpr
+         , Right keycol_right <- sc sright rightexpr
+         , (1, [_]) <- (count $ info keycol_left, colsleft)
+           -> let broadcastcol_left = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_right, shsource=keycol_left } -- left is val
+                  boolean = complete $ Binop {binop, left=broadcastcol_left, right=keycol_right}
+                  gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
+              in return $ gatherAll colsright gathermask
+       ([], [M.Binop{ M.binop
+                   , M.left=leftexpr
+                   , M.right=rightexpr }])
+         | Right keycol_left <- sc sleft leftexpr
+         , Right keycol_right <- sc sright rightexpr
+         , (1,[_]) <- (count $ info keycol_right, colsright)
+           ->  let broadcastcol_right = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_left, shsource=keycol_right } -- right is val
+                   boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
+                   gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
+               in return $ gatherAll colsleft gathermask
+       ow -> error $ "not handling this join case right now: " ++ show ow
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
@@ -588,34 +578,150 @@ loadAs config tablename colname alias =
                   in Vexp {vx=clvx, info=clinfo, quant=clquant, lineage=Pure {col=colname, mask}, memoized_hash=sha1vx clvx, name=outname} -- this is just for type compatiblity.
     Name _ -> error "unexpected name"
 
-separateEqs :: NonEmpty M.ScalarExpr -> ([(Name,Name)], [M.ScalarExpr])
-separateEqs ne = partitionEithers (map isRefEq (N.toList ne))
-  where isRefEq (M.Binop{ M.binop=M.Eq
-                        , M.left=M.Ref key1
-                        , M.right=M.Ref key2 }) =  Left (key1,key2)
-        isRefEq a = Right a
 
 -- all the names share the same mask
 -- the gquant reports if put together, each row of the resulting composite is unique
 -- (for now, the deduction of that property only works for trivial cases, used in query 18)
-data LineageSpec = LineageSpec {cols::NonEmpty Name, gmask::Vexp, gquant::UniqueSpec} deriving (Eq,Show)
 
 
-pureCols :: NonEmpty Vexp -> Maybe LineageSpec
-pureCols (Vexp{lineage=Pure{col=col0,mask=mask0}, quant=quant0} :| rest)  =
-  let mergeCol (LineageSpec{cols=acccols,gmask=accmask, gquant=accquant}) (Vexp{lineage,quant=newquant}) =
-        case lineage of
-          None -> Nothing
-          Pure {col=newcol,mask=newmask} ->
-            if newmask == accmask
-            then (let gquant = case newquant of
-                        Unique -> accquant
-                        Any -> Any
-                  in Just $ LineageSpec {cols=newcol<|acccols, gmask=accmask, gquant })
-            else Nothing
-  in foldM mergeCol (LineageSpec {cols=col0:|[], gmask=mask0, gquant=quant0}) rest
+-- split these conditions into categories: those that match an fk relation get resolved, the rest get put on a separate side
+separateFKJoinable :: Config -> [M.ScalarExpr] -> Env -> Env -> ([JoinSpec], [M.ScalarExpr])
+separateFKJoinable config conds (Env _ leftEnv) (Env _ rightEnv) =
+  let joinEnv = (let mleft = map (\(n,a) -> (n, (LeftChild, a))) (NameTable.toList leftEnv)
+                     mright = map (\(n,a) -> (n, (RightChild,a))) (NameTable.toList rightEnv)
+                     mergedlist = (mleft ++ mright)
+                     mergedmap = NameTable.fromList mergedlist
+                 in assert (length mergedlist == (length $ NameTable.toList mergedmap)) $ mergedmap) -- check the merging loses no entries
+      foldFun (partials::Partials, non::[M.ScalarExpr]) expr =
+        let (partials', mexp) = classifyExpr config partials joinEnv expr
+        in (partials', mexp ++ non)
+      (finalpartial, finalnon) = foldl' foldFun (Map.empty, []) conds
+      partialSpecToJoinSpec (PartialFKJoinSpec {pfactmask, pcols, pdimmask, pjoinorder}, (AccFK (kp,quant),origs)) =
+        if kp == pcols
+        then case isFKRef config kp of
+          Just (whichl, joinidx) ->
+            let final = FKJoinSpec {factmask=pfactmask, dimmask=pdimmask, factunique=quant, joinorder=pjoinorder, joinidx}
+            in assert (whichl == FactDim) $ Left final
+                --because we keep fact on left, then at this point lookup should alwasy by left child. Who was the actual
+                --left child is kept in the joinorder field.
+          Nothing -> error "kp was result of lookup earlier"
+        else assert ((N.length kp ) > (N.length pcols)) $ Right origs
+      partialSpecToJoinSpec (PartialSelfJoinSpec {pleftmask, prightmask,ppkcols}, (AccPK (acccols), origs)) =
+        if acccols == ppkcols
+        then let pkconstraint = case isPkey config acccols of
+                   Just x -> x
+                   Nothing -> error "at this point this must be a constraint"
+             in Left $ SelfJoinSpec {leftmask=pleftmask, rightmask=prightmask, pkconstraint }
+        else assert (N.length acccols < N.length ppkcols) $ Right origs
+      partialSpecToJoinSpec _ = error "joinspec / acc mismatch"
+      finalizePartials p = let entries = Map.toList p
+                           in map partialSpecToJoinSpec entries
+      (joinspecs,morenons) = partitionEithers $ finalizePartials finalpartial
+  in (joinspecs, (foldl' (++) [] morenons) ++ finalnon)
 
-pureCols _ = Nothing --initial is not pure.
+-- maps a name to a vexp, but tags it with information about which side of the join it came from
+data WhichChild = LeftChild | RightChild deriving (Eq,Show,Ord)
+
+-- keeps track of the matching column names as well as the mask being used by each side.
+data PartialJoinSpec =
+  PartialFKJoinSpec
+  { pfactmask::Vexp
+  , pcols::FKCols
+  , pdimmask::Vexp
+  , pjoinorder::FKJoinOrder
+  }
+  | PartialSelfJoinSpec
+    { pleftmask::Vexp
+    , prightmask::Vexp
+    , ppkcols :: PKCols
+    }
+  deriving (Eq,Show,Generic) -- the left and right are masks.
+instance Hashable PartialJoinSpec
+
+-- fully resolve join info. this has all the info needed to compute gather masks without needing
+-- make any more config lookups
+data JoinSpec
+  = FKJoinSpec { factmask::Vexp
+               , factunique::UniqueSpec
+               , joinidx::Name
+               , dimmask::Vexp
+               , joinorder::FKJoinOrder
+               }
+  | SelfJoinSpec { leftmask::Vexp
+                 , rightmask::Vexp
+                 , pkconstraint::Name
+                 }
+  deriving (Eq,Show) -- dim mask unique spec must be unique.
+
+data AccCols = AccFK (FKCols, UniqueSpec) | AccPK (PKCols) deriving (Show,Eq)
+
+accmerge :: AccCols -> AccCols -> AccCols
+accmerge (AccFK (fkcols1,unique1)) (AccFK (fkcols2,unique2)) =
+  AccFK ( N.sort $ N.fromList $ N.toList fkcols1 ++ N.toList fkcols2
+        , if unique1==Unique || unique2==Unique then Unique else Any)
+
+accmerge (AccPK pkcols1) (AccPK pkcols2) =
+  AccPK (N.sort $ N.fromList $ N.toList pkcols1 ++ N.toList pkcols2)
+
+accmerge _ _ = error "incompatible acc"
+
+type Partials = Map PartialJoinSpec (AccCols, [M.ScalarExpr])
+
+addinfo :: (AccCols, [M.ScalarExpr]) -> (AccCols, [M.ScalarExpr]) -> (AccCols, [M.ScalarExpr])
+addinfo (partk1, exprs1) (partk2, exprs2) = (accmerge partk1 partk2, exprs1 ++ exprs2)
+
+-- this is a map that associates a prelim result to a list of accumulated keycols, and the exprs
+-- that went into it.
+
+-- either adds condition to the partial, or returns it on the RHS as non-fk join.
+classifyExpr :: Config -> Partials -> NameTable (WhichChild, Vexp) -> M.ScalarExpr -> (Partials, [M.ScalarExpr])
+classifyExpr config partials joinenv arg@M.Binop{ M.binop=M.Eq
+                                                , M.left=M.Ref key1
+                                                , M.right=M.Ref key2 } =
+  let mpartials = case (snd $ NameTable.lookup_err key1 joinenv, snd $ NameTable.lookup_err key2 joinenv) of -- map should have them, or this is an irrecoverable error.
+        ( (LeftChild, Vexp{lineage=Pure{col=leftcol, mask=leftmask}, quant=leftquant})
+            , (RightChild, Vexp{lineage=Pure{col=rightcol, mask=rightmask}, quant=rightquant}) )
+          -> processPartials config partials (leftcol, leftmask, leftquant) (rightcol,rightmask, rightquant) arg
+        ( (RightChild, Vexp{lineage=Pure{col=rightcol, mask=rightmask}, quant=rightquant})
+            , (LeftChild, Vexp{lineage=Pure{col=leftcol, mask=leftmask}, quant=leftquant}) )
+          -> processPartials config partials (leftcol, leftmask, leftquant) (rightcol, rightmask, rightquant) arg
+        _ -> Nothing
+  in case mpartials of
+    Nothing -> (partials, [arg])
+    Just newpartials -> (newpartials, [])
+
+classifyExpr _ partials _ expr = (partials, [expr]) -- not an eq
+
+-- if the pair is potentially part of an fk, then add it. otherwise nothing.
+-- TODO: here, also deal with self join case.
+processPartials :: Config -> Partials -> (Name, Vexp, UniqueSpec) -> (Name, Vexp, UniqueSpec) -> M.ScalarExpr -> Maybe Partials
+processPartials config partials (leftcol, leftmask, leftquant) (rightcol,rightmask,rightquant) expr =
+  if leftcol == rightcol
+  then case isPartialPk config leftcol of
+    Nothing -> Nothing
+    Just pks -> if quant leftmask == Unique || quant rightmask == Unique then
+                  Just $ Map.insertWith addinfo (PartialSelfJoinSpec { pleftmask=leftmask, prightmask=rightmask, ppkcols=pks })
+                  (AccPK (leftcol:|[]), [expr]) partials
+                else Nothing
+  else case isPartialFk config (leftcol,rightcol) of
+    Nothing -> Nothing
+    Just (joinorder, kp :: FKCols) ->
+      let (deltajoinspec, acc) = case joinorder of
+            FactDim -> (PartialFKJoinSpec { pfactmask=leftmask
+                                                , pdimmask=rightmask
+                                                , pcols=kp
+                                                , pjoinorder=FactDim
+                                                }
+                               , (AccFK ((leftcol,rightcol):|[], leftquant),[expr])) --keep them in (fact,dim) order
+            DimFact -> (PartialFKJoinSpec { pfactmask=rightmask
+                                                 , pdimmask=leftmask
+                                                 , pcols=kp
+                                                 , pjoinorder=DimFact
+                                                 }
+                                , (AccFK ((rightcol,leftcol):|[], rightquant),[expr])) -- fact,dim order
+          partials' = Map.insertWith addinfo deltajoinspec acc partials
+      in Just partials'
+
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
@@ -826,77 +932,48 @@ make2LevelFold config foldop fgroups fdata =
 
 
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
--- select is a positions list
--- gathermask is only valid whenapplied to a clumn after select.
 
--- figures out which name belongs to which expr.
--- the left child is returned first
-matchcols :: Config -> NonEmpty (Name,Name) -> M.RelExpr -> M.RelExpr -> Either String ((NonEmpty Vexp, Env),(NonEmpty Vexp,Env))
-matchcols config pairList leftch rightch = do
-  left@(Env _ leftenv)  <- solve config leftch
-  right@(Env _ rightenv) <- solve config rightch
-  let (leftsides, rightsides) = N.unzip pairList
-  let leftSidesLeftEnv = sequence $ N.map (\n -> NameTable.lookup n leftenv >>= (return . snd)) leftsides
-  let rightSidesRightEnv = sequence $ N.map (\n -> NameTable.lookup n rightenv >>= (return . snd)) rightsides
-  let rightSidesLeftEnv = sequence $ N.map (\n -> NameTable.lookup n leftenv >>= (return . snd)) rightsides
-  let leftSidesRightEnv = sequence $ N.map (\n -> NameTable.lookup n rightenv >>= (return . snd)) leftsides
-  --- find the keys in the subrelations. the order is not well defined,
-  --- so, try both and check if there was ambiguity.
-  let tryOne = errzip leftSidesLeftEnv rightSidesRightEnv
-  let tryTwo = errzip rightSidesLeftEnv leftSidesRightEnv
-  case (tryOne,tryTwo) of
-    (Left _, Left _) -> error  "failed join lookup. it may be that equalities are not all in the same left to right order and this is the first time we see this"
-    (Right (leftvexps,rightvexps), Left _) -> Right ((leftvexps, left), (rightvexps, right))
-    (Left _, Right (leftvexps,rightvexps)) -> Right ((rightvexps, left), (leftvexps, right))
-    (Right _, Right _) -> error "ambiguous key lookup. didn't expect this could happen"
+handleGatherJoin :: Config -> Env -> Env -> M.JoinVariant -> JoinSpec -> Either String [Vexp]
+handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJoinSpec{joinorder=whichisleft})   =
+ let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config jspec
+     selectmask = complete $ Fold { foldop=FSel
+                                  , fgroups=pos_ selectboolean
+                                  , fdata= selectboolean
+                                  }
+     (clean_gathermask, cleaned_factcols) = case gatherAll (gathermask:factcols) selectmask of
+       a:b -> (a,b)
+       _ -> error "unexpected empty"
+     joined_dimcols = gatherAll dimcols clean_gathermask
+ in return $ case joinvariant of
+   M.Plain ->  cleaned_factcols ++ joined_dimcols
+   M.LeftSemi -> case whichisleft of
+     FactDim -> cleaned_factcols
+     DimFact -> joined_dimcols
+   M.LeftOuter -> error "TODO implement left outer"
+   M.LeftAnti -> case whichisleft of
+     FactDim -> let antiboolean = ones_ selectmask -. selectmask
+                    antigather = complete $ Fold { foldop=FSel
+                                                 , fgroups=pos_ antiboolean
+                                                 , fdata=antiboolean}
+                in gatherAll factcols antigather
+     DimFact -> error "TODO implement anti for dimension table"
 
-handleSelfJoin :: Config -> (NonEmpty Vexp, Env) -> (NonEmpty Vexp, Env) -> Either String [Vexp]
-handleSelfJoin _ (Vexp { lineage=Pure {mask=idx1}}:|[] , Env cols1 _) (Vexp { lineage=Pure {mask=idx2}} :|[] , Env cols2 _) =
-  let (factcols, dimcols, JoinIdx {selectmask=selectidx, gathermask=gatheridx}) =
-        case (idx2,idx1) of  --- idx2 modified -> use it as facttable. TODO: check here.
-          (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (cols1,cols2, JoinIdx{gathermask=idx1,
-                                                                            selectmask=ones_ idx1}) -- use the idx1 as gather mask against cols2
-          (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (cols2,cols1, JoinIdx{gathermask=idx2,
-                                                                            selectmask=ones_ idx2})
-          (_,_) -> error $ "both children of this self join have been modified.\n"
-      cleaned_factcols = gatherAll factcols selectidx
-      joined_dimcols  = gatherAll dimcols gatheridx
-  in return $ cleaned_factcols ++ joined_dimcols
-
-handleSelfJoin _ _ _ = error "only self join of single pure primary columns handled right now"
-
-
---- assumes the non-empty list of names is defined in the env.
-handleGatherJoin :: Config -> (LineageSpec, Env) -> (LineageSpec, Env) -> Name -> M.JoinVariant -> WhichIsFact -> Either String [Vexp]
-handleGatherJoin config (factlineages, Env factcols _) (dimlineages, Env dimcols _) fkidx joinvariant whichisleft =
-  let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config factlineages dimlineages fkidx
-      selectmask = complete $ Fold {foldop=FSel
-                                   , fgroups=pos_ selectboolean
-                                   , fdata= selectboolean
-                                   }
-      (clean_gathermask, cleaned_factcols) = case gatherAll (gathermask:factcols) selectmask of
-        a:b -> (a,b)
-        _ -> error "unexpected empty"
-      joined_dimcols = gatherAll dimcols clean_gathermask
+handleGatherJoin _ (Env leftcols _) (Env rightcols _) joinvariant  (SelfJoinSpec{leftmask, rightmask}) =
+  let (factcols, dimcols, JoinIdx {gathermask}) =
+        case (leftmask,rightmask) of -- only dealing with an easy case right now. can easily modify here for more invovled cases.
+          (_,Vexp { vx=RangeV {rmin=0, rstep=1} }) -> (leftcols,rightcols, JoinIdx{gathermask=leftmask,
+                                                                                   selectmask=ones_ leftmask})
+          (Vexp { vx=RangeV {rmin=0, rstep=1} },_) -> (rightcols,leftcols, JoinIdx{gathermask=rightmask,
+                                                                                   selectmask=ones_ rightmask}) -- use the idx1 as gather mask against cols2
+          (_,_) -> error $ "TODO: handle case where both children of this self join have been modified (but one is unique)"
+      cleaned_factcols = factcols -- no need to clean.
+      joined_dimcols  = gatherAll dimcols gathermask
   in return $ case joinvariant of
-    M.Plain ->  cleaned_factcols ++ joined_dimcols
-    M.LeftSemi -> case whichisleft of
-      FactIsLeftChild -> cleaned_factcols
-      FactIsRightChild -> joined_dimcols
-    M.LeftOuter -> error "TODO implement left outer"
-    M.LeftAnti -> case whichisleft of
-      FactIsLeftChild -> let antiboolean = ones_ selectmask -. selectmask
-                             antigather = complete $ Fold { foldop=FSel
-                                                          , fgroups=pos_ antiboolean
-                                                          , fdata=antiboolean}
-                         in gatherAll factcols antigather
-      FactIsRightChild -> error "TODO implement anti for dimension table"
--- assumes
-deduceMasks :: Config -> LineageSpec -> LineageSpec -> Name -> JoinIdx
-deduceMasks config
-  (LineageSpec {gmask=fprime_fact_idx, gquant=quantf})
-  (LineageSpec {gmask=dimprime_dim_idx})
-  fact_dim_idx_name =
+    M.Plain -> cleaned_factcols ++ joined_dimcols
+    _ -> error $ "TODO: not a plain selfjoin: " ++ show joinvariant
+
+deduceMasks :: Config -> JoinSpec -> JoinIdx
+deduceMasks config (FKJoinSpec { factmask=fprime_fact_idx, factunique=quantf, dimmask=dimprime_dim_idx, joinidx=fact_dim_idx_name }) =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx
                              , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
@@ -938,7 +1015,7 @@ deduceMasks config
 
     Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n"
 
-deduceMasks _ _ _ _  = error "non pure columns in fk join"
+deduceMasks _ _  = error "not an fkjoinspec"
 
 -- applies a gather to a group while preserving names
 gatherAll :: [Vexp] -> Vexp -> [Vexp]

@@ -8,8 +8,9 @@ module Config ( Config(..)
               , isPartialFk
               , isPartialPk
               , FKCols
+              , PKCols
               , BoundsRec
-              , WhichIsFact(..)
+              , FKJoinOrder(..)
               ) where
 
 import Name as NameTable
@@ -25,6 +26,7 @@ import qualified Data.Map.Strict as Map
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as N
 import qualified Data.ByteString.Lazy as B
+import Data.Hashable
 --import qualified Data.ByteString.Char8 as C
 type Map = Map.Map
 --type Set = Set.Set
@@ -72,7 +74,10 @@ makeConfig grainsizelg boundslist tables =
   do let constraints = foldMap getTableConstraints tables
      colinfo <- foldM (addEntry constraints) NameTable.empty boundslist
      let allrefs = foldMap makeFKEntries tables
-     let make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,nelist))) nelist
+     let straighten qual (a,b) = case qual of
+           FactDim -> (a,b)
+           DimFact -> (b,a)
+     let make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,N.map (straighten qual) nelist))) nelist
      let partialfks = Map.fromList $ foldMap make_partials allrefs
      let allpkeys = map makePKeys tables -- sort the non-empty lists
      let partialpks = Map.fromList $
@@ -100,9 +105,10 @@ makePKeys :: Table -> (NonEmpty Name, Name)
 makePKeys Table { pkey=FKey {} }  = error "fkey in place of pkey"
 makePKeys Table { name, pkey=PKey { pkcols, pkconstraint } } = (N.sort (N.map (concatName name) pkcols), concatName name pkconstraint)
 
-data WhichIsFact = FactIsLeftChild | FactIsRightChild deriving (Show,Eq,Generic)
+data FKJoinOrder = FactDim | DimFact deriving (Show,Eq,Generic,Ord)
+instance Hashable FKJoinOrder
 
-makeFKEntries :: Table -> [(FKCols, (WhichIsFact, Name))]
+makeFKEntries :: Table -> [(FKCols, (FKJoinOrder, Name))]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
@@ -115,20 +121,20 @@ makeFKEntries Table { name, fkeys } =
      let explicit = ( joinidx
                     , tidname ) :|[]
      let explicit_back = (tidname, joinidx) :| []
-     let fkrefs = [ (implicit, (FactIsLeftChild, joinidx))
-                  , (implicit_back, (FactIsRightChild, joinidx))
-                  , (explicit, (FactIsLeftChild, joinidx))
-                  , (explicit_back, (FactIsRightChild, joinidx)) ]
+     let fkrefs = [ (implicit, (FactDim, joinidx))
+                  , (implicit_back, (DimFact, joinidx))
+                  , (explicit, (FactDim, joinidx))
+                  , (explicit_back, (DimFact, joinidx)) ]
      fkrefs
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map FKCols (WhichIsFact,Name)
+                       , fkrefs :: Map FKCols (FKJoinOrder,Name)
                                    -- shows the fact -> dimension direction of the dependence
                        , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one
                                    -- fully qualifed column mames
                        , tablePKeys :: Map Name Name -- maps table to its pkconstraints
-                       , partialfks :: Map (Name,Name) (WhichIsFact, FKCols)
+                       , partialfks :: Map (Name,Name) (FKJoinOrder, FKCols)
                        , partialpks :: Map Name  PKCols
                        }
 
@@ -146,11 +152,11 @@ lookupPkey config tab =
 
 -- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
 -- and what the name of the constraint is
-isFKRef :: Config -> FKCols -> Maybe (WhichIsFact, Name)
+isFKRef :: Config -> FKCols -> Maybe (FKJoinOrder, Name)
 isFKRef conf cols = let canon = N.sort cols
                     in Map.lookup canon (fkrefs conf)
 
-isPartialFk :: Config -> (Name,Name) -> Maybe (WhichIsFact, FKCols)
+isPartialFk :: Config -> (Name,Name) -> Maybe (FKJoinOrder, FKCols)
 isPartialFk config (a,b) = Map.lookup (a,b) (partialfks config)
 
 
