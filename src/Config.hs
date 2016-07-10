@@ -136,7 +136,7 @@ data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , tablePKeys :: Map Name Name -- maps table to its pkconstraints
                        , partialfks :: Map (Name,Name) (FKJoinOrder, FKCols)
                        , partialpks :: Map Name  PKCols
-                       }
+                       } deriving (Show)
 
 -- if this list is a primary key, value is Just the table name, otherwise nothing
 isPkey :: Config -> (NonEmpty Name) -> Maybe Name
