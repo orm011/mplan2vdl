@@ -1,0 +1,26 @@
+#! /bin/bash
+DIR=$1  # the dir with the query mplans and the metadata files
+
+OUT=/tmp/vdlresults/$(basename $DIR)
+
+rm -rf $OUT
+mkdir -p $OUT
+
+COUNT=0
+SUCCESS=0
+for test in $(ls $DIR/*plan)
+do
+    COUNT=$((COUNT+1))
+    FILE=$(basename $test)
+    ./mplan2vdl -b $DIR/bounds.csv -s $DIR/schema.msqldump $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err
+    if [[ $? == 0 ]]
+    then
+       SUCCESS=$((SUCCESS+1))
+       echo "$FILE: success. vdl at $OUT/$FILE.vdl"
+    else
+       echo "$FILE: FAILURE. log at $OUT/$FILE.err"
+       rm $OUT/$FILE.vdl
+    fi
+done
+
+echo "SUCCESS/TOTAL = $SUCCESS/$COUNT"
