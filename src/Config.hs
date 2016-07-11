@@ -10,9 +10,13 @@ module Config ( Config(..)
               , FKCols
               , PKCols
               , BoundsRec
+              , StorageRec
               , FKJoinOrder(..)
+              , MType(..)
+              , resolveTypeSpec
               ) where
 
+import Data.Data
 import Name as NameTable
 --import Data.Int
 import SchemaParser(Table(..),Key(..))
@@ -27,7 +31,7 @@ import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as N
 import qualified Data.ByteString.Lazy as B
 import Data.Hashable
---import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Lazy.Char8 as C
 type Map = Map.Map
 --type Set = Set.Set
 
@@ -42,18 +46,99 @@ type Map = Map.Map
 -- errors due to overflwoing numbers within the program.
 type BoundsRec = (B.ByteString, B.ByteString, Integer, Integer, Integer)
 
+-- contents of select * from storage
+type StorageRec = ( C.ByteString -- schema
+                  , C.ByteString -- table
+                  , C.ByteString -- column
+                  , C.ByteString -- type
+                  , C.ByteString -- location
+                  , Integer -- count
+                  , Integer -- typewidth (bytes)
+                  , Integer -- columnsize (bytes)
+                  , Integer -- heapsize
+                  , Integer -- hashes
+                  , Integer -- imprints
+                  , C.ByteString  -- sorted (boolean)
+                  )
+
+data MType =
+  MTinyint
+  | MInt
+  | MBigInt
+  | MSmallint
+  | MOid
+  | MDate
+  | MMillisec
+  | MMonth
+  | MDouble
+  | MChar Integer
+  | MVarchar Integer
+  | MDecimal Integer Integer
+  | MSecInterval Integer
+  | MMonthInterval
+  | MBoolean
+  deriving (Eq, Show, Generic, Data)
+instance NFData MType
+
+resolveTypeSpec :: TypeSpec -> MType
+resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
+  where f "int" [] = MInt
+        f "tinyint" [] = MTinyint
+        f "smallint" [] = MSmallint
+        f "bigint" [] = MBigInt
+        f "date" []  = MDate
+        f "char" [len] =  MChar len
+        f "varchar" [maxlength] =  MVarchar maxlength
+        f "decimal" [precision,scale] = MDecimal precision scale
+        f "sec_interval" [_] = MMillisec -- they use millisecs to express their seconds
+        f "month_interval" [] = MMonth
+        f "double" [] = MDouble -- used for averages even if columns arent doubles
+        f "boolean" [] = MBoolean
+        f "oid" [] = MOid -- used in storage files
+        f "INTEGER" [] = MInt -- CAPS comes from parsed schema
+        f "CHAR" [len] = MChar len
+        f "DECIMAL" [precision,scale] = MDecimal precision scale
+        f "VARCHAR" [maxlength] = MVarchar maxlength
+        f "DATE" [] = MDate
+        f name _ = error $ "unsupported typespec: " ++ show name
+
+toKeyPair :: (NameTable TypeSpec) -> StorageRec -> (Name, MType)
+toKeyPair ns (_,tab,col,typstring,_,_,bytewidth,_,_,_,_,_) =
+  let name = Name [tab,col]
+      tspec = if typstring /= "oid"
+              then snd $ (NameTable.lookup_err name ns)
+              else TypeSpec { tname="oid", tparams=[] }
+      mtype = resolveTypeSpec tspec
+  in assert (case mtype of
+                MChar _ -> True
+                MVarchar _ -> True
+                _ -> getTypeBitwidth mtype == (8*bytewidth)) (name,mtype)
+
 -- holds the names of the matching columns for an fk.
 -- the order matters, watch out. left is fact, right is dim.
 type FKCols = NonEmpty (Name, Name)
 type PKCols = NonEmpty Name
+
+getTypeBitwidth :: MType -> Integer
+getTypeBitwidth tp = case tp of
+  MTinyint -> 8
+  MInt -> 32
+  MBigInt -> 64
+  MDecimal _ _ -> 64
+  MVarchar _ -> 64
+  MChar _ -> 64 -- assuming that when dict encoding, offsets get stored as 64 bit ints.
+  MOid -> 64
+  MDate -> 32
+  ow -> error $  "implement type bitwidth for " ++ show ow
 
 -- we use Integer values here so that our metadata calculations
 -- don't overflow.
 data ColInfo = ColInfo
   { bounds::(Integer,Integer)
     -- bounds on element values
-  , count::Integer
     --this is a bound on the array size (num elts) needed to hold it
+  , count::Integer
+  , coltype :: MType
   } deriving (Eq,Show,Generic)
 
 instance NFData ColInfo
@@ -61,18 +146,21 @@ instance NFData ColInfo
 checkColInfo :: ColInfo -> ColInfo
 checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
 
-addEntry :: [Name] -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
-addEntry constraints nametab (tab,col,colmin,colmax,colcount) =
-  do let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount }
+addEntry :: [Name] -> NameTable MType -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
+addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount) =
+  do let coltype  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
+     let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, coltype }
      plain <- NameTable.insert (Name [tab,col]) colinfo nametab
      if elem (Name[tab,col]) constraints
        then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
        else return $ plain
 
-makeConfig :: Integer -> V.Vector BoundsRec -> [Table] -> Either String Config
-makeConfig grainsizelg boundslist tables =
+makeConfig :: Integer -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> Either String Config
+makeConfig grainsizelg boundslist storagelist tables =
   do let constraints = foldMap getTableConstraints tables
-     colinfo <- foldM (addEntry constraints) NameTable.empty boundslist
+     let tspecs = NameTable.fromList $ foldMap getTspecs tables
+     let storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
+     colinfo <- foldM (addEntry constraints storagemap) NameTable.empty boundslist
      let allrefs = foldMap makeFKEntries tables
      let straighten qual (a,b) = case qual of
            FactDim -> (a,b)
@@ -97,7 +185,10 @@ getTableConstraints :: Table -> [Name]
 getTableConstraints Table {name, pkey, fkeys}
   = map (concatName name) (getConstraint pkey : map getConstraint fkeys)
 
-getConstraint:: Key -> Name
+getTspecs :: Table -> [(Name, TypeSpec)]
+getTspecs tab = map (\(n,ts) -> (concatName (name tab) n, ts)) $ N.toList $ columns tab
+
+getConstraint :: Key -> Name
 getConstraint PKey {pkconstraint} = pkconstraint
 getConstraint FKey {fkconstraint} = fkconstraint
 

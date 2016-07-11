@@ -38,23 +38,6 @@ import Data.List.NonEmpty(NonEmpty(..))
 
 --type Map = Map.Map
 
-data MType =
-  MTinyint
-  | MInt
-  | MBigInt
-  | MSmallint
-  | MDate
-  | MMillisec
-  | MMonth
-  | MDouble
-  | MChar
-  | MDecimal Integer Integer
-  | MSecInterval Integer
-  | MMonthInterval
-  | MBoolean
-  deriving (Eq, Show, Generic, Data)
-instance NFData MType
-
 isJoinIdx :: P.Attr -> [Name]
 isJoinIdx (P.JoinIdx s) = [s]
 isJoinIdx _ = []
@@ -62,21 +45,6 @@ isJoinIdx _ = []
 getJoinIdx :: [P.Attr] -> [Name]
 getJoinIdx attrs = foldl' (++) [] (map isJoinIdx attrs)
 
-resolveTypeSpec :: TypeSpec -> MType
-resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
-  where f "int" [] = MInt
-        f "tinyint" [] = MTinyint
-        f "smallint" [] = MSmallint
-        f "bigint" [] = MBigInt
-        f "date" []  = MDate
-        f "char" _ =  MChar -- ignoring length fields
-        f "varchar" [_] =  MChar --ignore length fields
-        f "decimal" [a,b] = MDecimal a b
-        f "sec_interval" [_] = MMillisec -- they use millisecs to express their seconds
-        f "month_interval" [] = MMonth
-        f "double" [] = MDouble -- used for averages even if columns arent doubles
-        f "boolean" [] = MBoolean
-        f name _ = error $ "unsupported typespec: " ++ show name
 
 resolveCharLiteral :: B.ByteString -> Either String Integer
 resolveCharLiteral ch = dictEncode (C.unpack ch)
@@ -437,7 +405,7 @@ sc arg@P.Literal { P.tspec, P.stringRep } =
   do let mtype = resolveTypeSpec tspec
      ret <- case mtype of
        MDate -> Right $ resolveDateString stringRep
-       MChar -> resolveCharLiteral stringRep
+       MChar _ -> resolveCharLiteral stringRep
        MMillisec ->
          do r <- readIntLiteral stringRep
             check r (/= 0) "weird zero interval"

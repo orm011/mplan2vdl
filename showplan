@@ -1,6 +1,9 @@
 #! /bin/bash
 set -e # stop on first error
 
-./mplan2vdl --dot -b ./tests/bounds_file.csv -s ./tests/tpch001.schema $1 > /tmp/$(basename $1).dot
-dot -Tpdf /tmp/$(basename $1).dot > /tmp/$(basename $1).pdf
-evince /tmp/$(basename $1).pdf
+DIR=$(dirname $1)
+BASE=$(basename $1)
+
+./mplan2vdl --dot -b $DIR/bounds.csv -s  $DIR/schema.msqldump -t $DIR/storage.csv  $1 > /tmp/$BASE.dot
+dot -Tpdf /tmp/$BASE.dot > /tmp/$BASE.pdf
+evince /tmp/$BASE.pdf

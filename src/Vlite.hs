@@ -80,7 +80,7 @@ instance Show Vx where
   show Binop {binop} = "Binop { binop=" ++ show binop ++ " left=..., right=... }"
   show RangeV {rmin, rstep} = "RangeV { rmin=" ++ show rmin ++ ", rstep=" ++ show rstep ++ ", rref=... }"
   show Shuffle {shop} = "Shuffle { shop=" ++ show shop ++ ", shsource=..., shpos=... }"
-  show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
+  show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ ", fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
   show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
 
@@ -192,7 +192,11 @@ complete vx =
       name = case vx of
         Shuffle {shsource=Vexp{name=orig_name}} -> orig_name -- preserve name for scatter and gather.
         _ -> Nothing
-  in Vexp { vx, info, lineage, name, memoized_hash, quant }
+  in let ans = Vexp { vx, info, lineage, name, memoized_hash, quant }
+         (mn,mx) = bounds info
+     in if (mx > toInteger (maxBound :: Int32 )) || (mn <= toInteger  (minBound :: Int32))
+        then error $ "col values may exceed int32 bounds: " ++ show ans
+        else ans
 
 checkLineage :: Lineage -> Lineage
 checkLineage l =
@@ -208,39 +212,41 @@ inferMetadata :: Vx -> ColInfo
 inferMetadata (Load _) = error "at the moment, should not be called with Load. TODO: need to pass config to address this case"
 
 inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
-  = ColInfo { bounds=(0,1), count }
+  = ColInfo { bounds=(0,1), count, coltype=MBoolean }
 
 inferMetadata RangeV {rmin=rstart,rstep,rref=Vexp {info=ColInfo {count}}}
   =  let extremes = [rstart, rstart + count*rstep]
      in ColInfo { bounds=(minimum extremes, maximum extremes)
-                , count }
+                , count
+                , coltype=MBigInt } -- todo: this is not fully true, is it?
 
 inferMetadata RangeC {rmin=rstart, rstep, rcount}
   =  let extremes = [rstart + rcount*rstep, rstart]
      in ColInfo { bounds=(minimum extremes, maximum extremes)
-                , count=rcount }
+                , count=rcount
+                , coltype = MBigInt}
 
 inferMetadata Shuffle { shop=Scatter
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, coltype}}
                       , shpos=Vexp {info=ColInfo {bounds=(_,posmax)}}
                       }
-  = ColInfo { bounds=sourcebounds, count=posmax }
+  = ColInfo { bounds=sourcebounds, count=posmax, coltype }
 
 inferMetadata Shuffle { shop=Gather
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, coltype}}
                       , shpos=Vexp {info=ColInfo {count}}
                       }
-  = ColInfo { bounds=sourcebounds, count }
+  = ColInfo { bounds=sourcebounds, count, coltype }
 
 inferMetadata Fold { foldop=FSel
                    , fgroups=_
                    , fdata=Vexp {info=ColInfo {count}}
                    }
-  = ColInfo {bounds=(0, count-1), count} -- coefficients
+  = ColInfo {bounds=(0, count-1), count, coltype=MOid }
 
 inferMetadata Fold { foldop
                    , fgroups = Vexp { info=ColInfo {bounds=(glower,gupper), count=gcount} }
-                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount} }
+                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, coltype} }
                    } =
   -- "suspicious: group and data count bounds dont match"
   --assert (gcount == dcount) $ -- TODO is this assert correct?
@@ -249,9 +255,9 @@ inferMetadata Fold { foldop
     FSum -> let extremes = [dlower, dlower*dcount, dupper, dupper*dcount]
                   -- for positive dlower, dlower is the minimum.
                   -- for negative dlower, dlower*dcount is the minimum, and so on.
-            in ColInfo (minimum extremes, maximum extremes) count_bound
-    FMax -> ColInfo (dlower, dupper) count_bound
-    FMin -> ColInfo (dlower, dupper) count_bound
+            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, coltype }
+    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, coltype }
+    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, coltype }
     FSel -> error "use different handler for select"
 
 -- the result of partition is a list of indices that, for each pdata
@@ -262,12 +268,12 @@ inferMetadata Fold { foldop
 inferMetadata Partition
   { pivots=Vexp { info=ColInfo {count=pivotcount} }
   , pdata=Vexp { info=ColInfo {count=datacount} }
-  } = ColInfo {bounds=(0,pivotcount-1), count=datacount}
+  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, coltype=MOid }
 
 inferMetadata Binop
   { binop
-  , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 } }
-  , right=right@Vexp { info=ColInfo {bounds=(l2,u2), count=c2 } }
+  , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 , coltype=lefttype } }
+  , right=right@Vexp { info=ColInfo {bounds=(l2,u2), count=c2, coltype=righttype } }
   } = do
          let count = min c1 c2
              bounds = case binop of
@@ -290,10 +296,10 @@ inferMetadata Binop
                 Min -> (min l1 l2, min u1 u2) -- this is true, right?
                 Max -> (max l1 l2, max u1 u2)
                 Mod -> (0, u2) -- assuming mods are always positive
-                BitAnd -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
+                BitAnd -> if (l1 >= 0 && l2 >= 0) -- negatives would trip things up
                           then let mx = min (maxForWidth left) (maxForWidth right)
-                               in (0,mx) -- precision could be improved.
-                          else error $ E.todo "cant deduce BitAnd bounds" ((l1,u1),(l2,u2))
+                               in (0,mx)
+                          else error "shifting negatives"
                 BitOr -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
                          then let mx = max (maxForWidth left) (maxForWidth right)
                               in (0,mx) -- precision could be improved.
@@ -309,7 +315,7 @@ inferMetadata Binop
                                 allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
                                 extremes = map mshift allpairs
                             in (minimum extremes, maximum extremes)
-           in ColInfo {bounds, count}
+           in ColInfo {bounds, count, coltype=if lefttype==righttype then lefttype else error $ "type mismatch in binop: " ++ show binop ++ "\n" ++ show left  ++ "\n" ++ show right ++ "\n" ++ "types: " ++  show lefttype ++ " vs " ++ show righttype  }
 
 inferLineage :: Vx -> Lineage
 
@@ -757,22 +763,16 @@ sc (Env _ env) (M.Ref refname)  =
 -- We need the input type bc, for example Decimal(10,2) -> Decimal(10,3) = *10
 -- but Decimal(10,1) -> Decimal(10,3) = * 100. Right now, that input type is not explicitly given.
 sc env (M.Cast { M.mtype, M.arg }) =
-  case mtype of
-    M.MTinyint -> sc env arg
-    M.MInt -> sc env arg
-    M.MBigInt -> sc env arg
-    M.MSmallint -> sc env arg
-    M.MChar -> sc env arg -- assuming the input has already been converted
-    M.MDouble -> sc env arg -- assume it was an integer originally...
-    M.MDecimal _ dec -> --we are assuming inputs are integers, but should not.
-      do orig <- sc env arg
-         -- multiply by 10^dec. hope there is no overflow.
-         -- TODO now we could statically check for overflow using sizes
-         let factor = (10 ^ dec)
-         let fvec = const_ factor orig
-         return $ orig *. fvec
-    othertype -> Left $ "unsupported type cast: " ++ groom othertype
-
+  do Vexp{info=ColInfo{coltype=inputtype}} <- sc env arg
+     return $ case (inputtype,mtype) of
+     --   (MDecimal a0 b0, MDecimal a1 b1) ->
+     --     do orig <- sc env arg
+     --        -- multiply by 10^dec. hope there is no overflow.
+     --        -- TODO now we could statically check for overflow using sizes
+     --     let factor = (10 ^ dec)
+     --     let fvec = const_ factor orig
+     --     return $ orig *. fvec
+       _ -> error $  "unsupported type cast: from: " ++ show inputtype ++ " to: " ++ show mtype
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
   do l <- sc env left

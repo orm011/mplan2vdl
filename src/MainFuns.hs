@@ -33,6 +33,7 @@ import qualified Dot
 data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , grainsize :: Int
                             , boundsfile :: String
+                            , storagefile :: String
                             , schemafile :: String
                             , dot :: Bool
                             } deriving (Show, Data, Typeable)
@@ -42,7 +43,8 @@ cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for foldSum/foldMax/etc (default 8192)" &= name "g"
   , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
-  , schemafile = def &= typ "msqldump file" &= help "output of msqldump -D -d <dbname>"
+  , storagefile = def &= typ "CSV FILE" &= help "output of 'select * from storage' in csv format" &= name "t"
+  , schemafile = def &= typ "msqldump file" &= help "output of msqldump -D -d <dbname>" &= name "s"
   , dot = False &= typ "BOOL" &= help "instead of running compiler, emit dot for monet plan" &= name "d"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
@@ -77,6 +79,7 @@ checkUsage cmdargs  =
        else
        do checkInput "need a column bounds csv" $ boundsfile cmdargs /= []
           checkInput "need a schema file"  $ schemafile cmdargs /= []
+          checkInput "need a storage file" $ storagefile cmdargs /= []
           let mgrainsize = grainsize cmdargs
           checkInput "grainsize must be a power of 2" $ (mgrainsize  >= 0) && (popCount mgrainsize  == 1)
 
@@ -84,6 +87,11 @@ readBoundsFile :: String -> IO (Either String (V.Vector BoundsRec))
 readBoundsFile fname =
   do boundsf <- B.readFile fname
      return $ ( decode NoHeader boundsf)
+
+readStorageFile :: String -> IO (Either String (V.Vector StorageRec))
+readStorageFile fname =
+  do storagef <- B.readFile fname
+     return $ ( decode NoHeader storagef)
 
 main :: IO ()
 main = do
@@ -98,9 +106,11 @@ main = do
   monetplan <- readCommentedFile $ mplanfile cmdargs
   monetschema <- readCommentedFile $ schemafile cmdargs
   mboundslist <- readBoundsFile $ boundsfile cmdargs
+  mstoragelist <- readStorageFile $ storagefile cmdargs
   let res = (do boundslist <- mboundslist -- maybe monad
                 tables <- SP.fromString monetschema
-                config <- makeConfig grainsizelg boundslist tables
+                storagelist <- mstoragelist
+                config <- makeConfig grainsizelg boundslist storagelist tables
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage
