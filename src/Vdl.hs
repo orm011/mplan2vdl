@@ -217,7 +217,7 @@ voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
 voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern })
   | V.Vexp { V.lineage=V.Pure {V.col} } <- ldata =
       do (s', newldata) <- voodooFromVexpMemo s ldata
-         let ldict = let Name ns = col in makeload $ Name (ns ++ ["dict"])
+         let ldict = let Name ns = col in makeload $ Name (ns ++ ["heap"])
          return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
 
 voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
