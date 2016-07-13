@@ -1064,18 +1064,27 @@ algebraicIdentities (Binop {binop, left, right})
 
 algebraicIdentities (Binop {binop=BitAnd, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}})
   = Just zeros
-
 algebraicIdentities (Binop {binop=BitAnd, right=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}})
   = Just zeros
 
-algebraicIdentities (Binop {binop=BitShift, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just zeros -- zeros stay constant
+algebraicIdentities (Binop {binop=BitOr, left=Vexp{vx=RangeV{rmin=0,rstep=0}}, right})
+  = Just right
 
+algebraicIdentities (Binop {binop=BitOr, left, right=Vexp{vx=RangeV{rmin=0,rstep=0}}})
+  = Just left
+
+algebraicIdentities (Binop {binop=BitShift, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just zeros -- zeros stay constant
 algebraicIdentities (Binop {binop=BitShift, left, right=Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just left -- noop
 
 
---- scatter or gather of v where it is exactly pos_ v is identity.
-algebraicIdentities (Shuffle {shpos=Vexp{vx=RangeV{rmin=0,rstep=1,rref}}, shsource})
-  | rref == shsource = Just shsource -- true for both scatter and gather
+-- in the scatter case: the positions array must be exactly the size of the source at this point.
+-- so this is really an identity if the scatter was legal in the first place.
+algebraicIdentities (Shuffle {shop=Scatter, shpos=Vexp{vx=RangeV{rmin=0,rstep=1}}, shsource})
+  = Just shsource
+
+-- in the gather case, only if we know the size of the positions matches then this is an identity.
+algebraicIdentities (Shuffle {shop=Gather, shpos=Vexp{vx=RangeV{rmin=0,rstep=1, rref}}, shsource})
+  | rref==shsource = Just shsource
 
 algebraicIdentities _ = Nothing
 
