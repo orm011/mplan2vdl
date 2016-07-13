@@ -273,7 +273,7 @@ inferMetadata Partition
 inferMetadata Binop
   { binop
   , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 , coltype=lefttype } }
-  , right=right@Vexp { info=ColInfo {bounds=(l2,u2), count=c2, coltype=righttype } }
+  , right=right@Vexp { info=ColInfo {bounds=(l2,u2), count=c2} }
   } = do
          let count = min c1 c2
              bounds = case binop of
@@ -315,7 +315,7 @@ inferMetadata Binop
                                 allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
                                 extremes = map mshift allpairs
                             in (minimum extremes, maximum extremes)
-           in ColInfo {bounds, count, coltype=if lefttype==righttype then lefttype else error $ "type mismatch in binop: " ++ show binop ++ "\n" ++ show left  ++ "\n" ++ show right ++ "\n" ++ "types: " ++  show lefttype ++ " vs " ++ show righttype  }
+           in ColInfo {bounds, count, coltype=lefttype  } -- arbitrary choice of type right now.
 
 inferLineage :: Vx -> Lineage
 

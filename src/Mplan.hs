@@ -349,15 +349,19 @@ sc P.Call { P.fname=Name ["identity"]
 -- one of two versions of like in the plans:
 sc P.Call { P.fname=Name ["like"]
           , P.args = [ P.Expr { P.expr=likearg }
-                     , P.Expr { P.expr=P.Cast { P.value=P.Expr { P.expr=P.Literal { P.tspec=TypeSpec { tname="char"
-                                                                                                     , tparams=[_]
-                                                                                                     }
-                                                                                  , P.stringRep=likepattern
-                                                                                  }
-                                                               }
-                                              , P.tspec=TypeSpec { tname="char", tparams=[] }
-                                              }
-                              }
+                     , P.Expr {
+                         P.expr=P.Cast {
+                             P.value=P.Expr {
+                                 P.expr=P.Literal {
+                                     P.tspec=TypeSpec { tname="char"
+                                                      , tparams=[_]
+                                                      }
+                                     , P.stringRep=likepattern
+                                     }
+                                 }
+                             , P.tspec=TypeSpec { tname="char", tparams=[] }
+                             }
+                         }
                      ]
           } =
   do ldata <- sc likearg
