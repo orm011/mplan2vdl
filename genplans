@@ -12,11 +12,12 @@ for test in $(ls $DIR/*plan)
 do
     COUNT=$((COUNT+1))
     FILE=$(basename $test)
-    ./mplan2vdl -b $DIR/bounds.csv -s $DIR/schema.msqldump $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err
+    ./mplan2vdl -b $DIR/bounds.csv -s $DIR/schema.msqldump ${2} $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err
     if [[ $? == 0 ]]
     then
-       SUCCESS=$((SUCCESS+1))
-       echo "$FILE: success. vdl at $OUT/$FILE.vdl"
+        SUCCESS=$((SUCCESS+1))
+        D=$(wc -l $OUT/$FILE.vdl | awk '{print $1}')
+       echo "$FILE: success. vdl at $OUT/$FILE.vdl $D voodoo statements"
     else
        echo "$FILE: FAILURE. log at $OUT/$FILE.err"
        rm $OUT/$FILE.vdl

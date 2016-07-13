@@ -35,6 +35,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , boundsfile :: String
                             , schemafile :: String
                             , dot :: Bool
+                            , apply_cleanup_passes::Bool
                             } deriving (Show, Data, Typeable)
 
 cmdTemplate :: Mplan2Vdl
@@ -44,6 +45,7 @@ cmdTemplate = Mplan2Vdl
   , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
   , schemafile = def &= typ "msqldump file" &= help "output of msqldump -D -d <dbname>"
   , dot = False &= typ "BOOL" &= help "instead of running compiler, emit dot for monet plan" &= name "d"
+  , apply_cleanup_passes = True &= typ "BOOL" &= help "after generating vdl identify and clean up known no-op patterns" &= name "c"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -93,7 +95,7 @@ main = do
   checkUsage cmdargs
   let action = if dot cmdargs
                then emitdot $ mplanfile cmdargs
-               else compile
+               else (compile $  apply_cleanup_passes cmdargs)
   let grainsizelg = fromInteger $ toInteger $ countTrailingZeros $ grainsize cmdargs
   monetplan <- readCommentedFile $ mplanfile cmdargs
   monetschema <- readCommentedFile $ schemafile cmdargs
@@ -119,8 +121,8 @@ emitdot qname planstring config =
        other -> other
      return $ Dot.toDotString (C.pack qname) parseTree
 
-compile :: C.ByteString -> Config -> Either String C.ByteString
-compile planstring config =
+compile :: Bool -> C.ByteString -> Config -> Either String C.ByteString
+compile apply_passes planstring config =
   do parseTree <- case P.fromString planstring config of
                     Left err -> Left $ "(at Parse stage)" ++ err
                     other -> other
@@ -132,7 +134,10 @@ compile planstring config =
      vexps <- case Vl.vexpsFromMplan mplan config of
                   Left err -> Left $ "(at Vlite stage)" ++ err
                   other -> other
-     vdl <- case Vdl.vdlFromVexps vexps config of
+     let passes = if apply_passes then
+                   (Vl.algebraicIdentitiesPass . Vl.loweringPass . Vl.redundantRangePass)  else (\x -> x)
+     let vexps' =  passes vexps
+     vdl <- case Vdl.vdlFromVexps vexps' of
                   Left err -> Left $ "(at Vdl stage)" ++ err
                   other -> other
      return $ (C.pack $ show vdl)

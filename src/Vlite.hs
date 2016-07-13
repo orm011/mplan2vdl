@@ -4,7 +4,13 @@ module Vlite( vexpsFromMplan
             , BinaryOp(..)
             , ShOp(..)
             , FoldOp(..)
-            , Lineage(..)) where
+            , Lineage(..)
+            , xformIden
+            , redundantRangePass
+            , algebraicIdentitiesPass
+            , loweringPass
+            , pos_
+            , complete) where
 
 import Config
 import qualified Mplan as M
@@ -70,7 +76,7 @@ data Vx =
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
-  | Like { ldata::Vexp, lpattern::C.ByteString }
+  | Like { ldata::Vexp, lpattern::C.ByteString, lcol::Name }
   deriving (Eq,Generic)
 instance NFData Vx
 instance Hashable Vx
@@ -83,6 +89,7 @@ instance Show Vx where
   show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
   show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
+
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
@@ -140,6 +147,12 @@ ones_ = const_ 1
 
 (==.) :: Vexp -> Vexp -> Vexp
 a ==. b = makeBinop Eq a b
+
+(>.) :: Vexp -> Vexp -> Vexp
+a >. b = makeBinop Gt a b
+
+(<.) :: Vexp -> Vexp -> Vexp
+a <. b = makeBinop Gt b a -- notice switch
 
 (>>.) :: Vexp -> Vexp -> Vexp
 a >>. b = makeBinop BitShift a b
@@ -817,7 +830,7 @@ sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
 sc env (M.Like { M.ldata, M.lpattern }) =
   do sldata@Vexp {lineage} <- sc env ldata
      return $ case lineage of
-       Pure {} -> complete $ Like { ldata=sldata, lpattern }
+       Pure {col} -> complete $ Like { ldata=sldata, lpattern, lcol=col }
        None -> error "cannot apply like expressions without knowing lineage"
 
 sc env (M.Unary { M.unop=M.Neg, M.arg }) =
@@ -1032,6 +1045,104 @@ gatherAll cols shpos =
                                  , shsource
                                  , shpos
                                  }
+
+type Memoized = Map Vexp Vexp
+
+xformIden :: [Vexp] -> [Vexp]
+xformIden ins = xform (\x -> Just $ complete $ x) ins
+
+redundantRangePattern :: Vx -> Maybe Vexp
+redundantRangePattern (RangeV out1 out2 (Vexp{vx=(RangeV _ _ innerref)}))
+  = Just $ complete $ RangeV out1 out2 innerref
+
+redundantRangePattern _ = Nothing
+
+algebraicIdentities :: Vx -> Maybe Vexp
+algebraicIdentities (Binop {binop, left, right})
+  | (binop == BitAnd || binop == BitOr) && left == right =
+      Just left
+
+algebraicIdentities (Binop {binop=BitAnd, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}})
+  = Just zeros
+
+algebraicIdentities (Binop {binop=BitAnd, right=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}})
+  = Just zeros
+
+algebraicIdentities (Binop {binop=BitShift, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just zeros -- zeros stay constant
+
+algebraicIdentities (Binop {binop=BitShift, left, right=Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just left -- noop
+
+
+--- scatter or gather of v where it is exactly pos_ v is identity.
+algebraicIdentities (Shuffle {shpos=Vexp{vx=RangeV{rmin=0,rstep=1,rref}}, shsource})
+  | rref == shsource = Just shsource -- true for both scatter and gather
+
+algebraicIdentities _ = Nothing
+
+lowering :: Vx -> Maybe Vexp
+lowering Binop{binop, left, right} =
+  case binop of
+    Max -> Just $ (left >. right) ?. (left, right)
+    Min -> Just $ (left <. right) ?. (left, right)
+    Neq -> Just $ (ones_ left) -. (left ==. right)
+    _ -> Nothing
+
+lowering _ = Nothing
+
+loweringPass :: [Vexp] -> [Vexp]
+loweringPass = xform lowering
+
+algebraicIdentitiesPass :: [Vexp] -> [Vexp]
+algebraicIdentitiesPass = xform algebraicIdentities
+
+redundantRangePass :: [Vexp] -> [Vexp]
+redundantRangePass = xform redundantRangePattern
+
+xform :: (Vx -> Maybe Vexp) -> [Vexp] -> [Vexp]
+xform fn vexps = let merge (accm,accl) vexp  = let (newm,newv) = transform fn vexp accm
+                                               in (newm, newv:accl)
+                     (_,outr) = foldl' merge (Map.empty, []) vexps
+                 in reverse outr
+
+transform :: (Vx -> Maybe Vexp) -> Vexp -> Memoized -> (Memoized, Vexp)
+transform fn vexp@(Vexp {vx}) mp  =
+  case Map.lookup vexp mp of
+    Nothing -> let (mp', ans) = transformVx fn vx mp
+                   mp'' = Map.insert vexp ans mp'
+               in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
+    Just x -> (mp, x)
+
+transformVx :: (Vx -> Maybe Vexp) -> Vx -> Memoized -> (Memoized, Vexp)
+transformVx fn vx mp =
+  let (outmp, prelim) = case vx of
+        Load _ -> (mp, vx)
+        RangeC {} -> (mp, vx)
+        RangeV a b rref ->
+          let (mp',rref') = transform fn rref mp
+          in (mp', RangeV a b rref')
+        Binop a left right ->
+          let (mp',left') = transform fn left mp
+              (mp'', right') = transform fn right mp'
+          in (mp'', Binop a left' right')
+        Shuffle a shsource  shpos ->
+          let (mp',shsource') = transform fn shsource mp
+              (mp'',shpos') = transform fn shpos mp'
+          in (mp'', Shuffle a shsource' shpos')
+        Fold a fgroups fdata ->
+          let (mp',fgroups') = transform fn fgroups mp
+              (mp'',fdata') = transform fn fdata mp'
+          in (mp'', Fold a fgroups' fdata')
+        Partition pivots pdata ->
+          let (mp', pivots') = transform fn pivots mp
+              (mp'',pdata') = transform fn pdata mp'
+          in (mp'', Partition pivots' pdata')
+        Like ldata a b ->
+          let (mp', ldata') = transform fn ldata mp
+          in (mp', Like ldata' a b)
+      xformPrelim = case fn prelim of -- now apply function to this.
+        Nothing -> complete $ prelim -- pattern does not match anything.
+        Just x -> x
+  in (outmp, xformPrelim)
 
 {-
 Diagram to understand the join deduce masks code:

@@ -13,7 +13,7 @@ import Data.Hashable
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.ByteString.Lazy.Char8 as C
 --import Data.List (foldl')
-import Config
+--import Config
 import Prelude hiding (log)
 --import qualified Error as E
 import Sha
@@ -211,14 +211,15 @@ voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
      (s'', positions) <- voodooFromVexpMemo s' shpos
      return $ (s'', case shop of
                   V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
-                  V.Scatter -> let scatterfold = completeW $ pos_ source
+                  V.Scatter -> let scatterfold = case source of
+                                     RangeV {rmin=0,rstep=1} -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
+                                     _ -> completeW $ pos_ source
                                in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions })
 
-voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern })
-  | V.Vexp { V.lineage=V.Pure {V.col} } <- ldata =
-      do (s', newldata) <- voodooFromVexpMemo s ldata
-         let ldict = let Name ns = col in makeload $ Name (ns ++ ["heap"])
-         return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
+voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern, V.lcol }) =
+  do (s', newldata) <- voodooFromVexpMemo s ldata
+     let ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
+     return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
 
 voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
 
@@ -361,8 +362,8 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: [V.Vexp] -> Config -> Either String Vdl
-vdlFromVexps vexps _ =
+vdlFromVexps :: [V.Vexp] -> Either String Vdl
+vdlFromVexps vexps =
   do voodoos <- voodoosFromVexps vexps
      vrefs <- vrefsFromVoodoos voodoos
      return $ Vdl $ dumpVref vrefs
