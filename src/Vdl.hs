@@ -31,6 +31,7 @@ data Vd a =
   | Binary { op::Voodop, arg1::a, arg2::a  }
   | Scatter { scattersource::a, scatterfold::a, scatterpos::a }
   | Like { ldata::a, ldict::a, lpattern::C.ByteString }
+  | MaterializeCompact { mout::a }
   deriving (Eq,Show,Generic)
 instance (NFData a) => NFData (Vd a)
 instance (Hashable a) => Hashable (Vd a)
@@ -243,7 +244,7 @@ voodoosFromVexps vexps =
   do let solve (s, res) v = do (s', v') <- voodooFromVexpMemo s v
                                return (s', v':res)
      (_, res) <- foldM solve (HMap.empty,[]) vexps
-     return $ res
+     return $ map (MaterializeCompact . completeW) res
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =
@@ -308,6 +309,11 @@ vrefFromVoodoo state (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
      (state'', n2) <- memVrefFromVoodoo state' ldict
      return $ (state'', Like { ldata=n1, ldict=n2, lpattern})
 
+
+vrefFromVoodoo state (MaterializeCompact {mout=W (mout,_)}) =
+  do (state', n') <- memVrefFromVoodoo state mout
+     return $ (state', MaterializeCompact n' )
+
 {- now a list of strings -}
 toList :: Vref -> [String]
 
@@ -345,7 +351,8 @@ toList (Like { ldata, ldict, lpattern } ) =
   where id1 = "Id " ++ show ldata
         id2 = "Id " ++ show ldict
 
-toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
+toList (MaterializeCompact x) =
+  ["MaterializeCompact","Id " ++ show x]
 
 printVd :: [(Int, [String])] -> String
 printVd prs = join "\n" $ map makeline prs
