@@ -36,6 +36,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , schemafile :: String
                             , dot :: Bool
                             , apply_cleanup_passes::Bool
+                            , push_joins :: Bool
                             } deriving (Show, Data, Typeable)
 
 cmdTemplate :: Mplan2Vdl
@@ -45,6 +46,7 @@ cmdTemplate = Mplan2Vdl
   , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
   , schemafile = def &= typ "msqldump file" &= help "output of msqldump -D -d <dbname>"
   , dot = False &= typ "BOOL" &= help "instead of running compiler, emit dot for monet plan" &= name "d"
+  , push_joins = False &= typ "Bool" &= help "push joins below selects, and merges those selects when possible" &= name "p"
   , apply_cleanup_passes = True &= typ "BOOL" &= help "after generating vdl identify and clean up known no-op patterns" &= name "c"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
@@ -95,7 +97,7 @@ main = do
   checkUsage cmdargs
   let action = if dot cmdargs
                then emitdot $ mplanfile cmdargs
-               else (compile $  apply_cleanup_passes cmdargs)
+               else (compile (apply_cleanup_passes cmdargs) (push_joins cmdargs))
   let grainsizelg = fromInteger $ toInteger $ countTrailingZeros $ grainsize cmdargs
   monetplan <- readCommentedFile $ mplanfile cmdargs
   monetschema <- readCommentedFile $ schemafile cmdargs
@@ -121,8 +123,8 @@ emitdot qname planstring config =
        other -> other
      return $ Dot.toDotString (C.pack qname) parseTree
 
-compile :: Bool -> C.ByteString -> Config -> Either String C.ByteString
-compile apply_passes planstring config =
+compile :: Bool -> Bool -> C.ByteString -> Config -> Either String C.ByteString
+compile apply_passes push_fk_joins planstring config =
   do parseTree <- case P.fromString planstring config of
                     Left err -> Left $ "(at Parse stage)" ++ err
                     other -> other
@@ -130,8 +132,11 @@ compile apply_passes planstring config =
                   Left err -> Left $ "(at Mplan stage)" ++ err
                   other -> other
      --apply logical plan transforms here
-     -- let mplan' = (M.fuseSelects . M.pushFKJoins) mplan
-     vexps <- case Vl.vexpsFromMplan mplan config of
+     let rel_passes = if push_fk_joins then
+                      (M.fuseSelects . M.pushFKJoins)
+                      else (\x -> x)
+     let mplan' = rel_passes mplan
+     vexps <- case Vl.vexpsFromMplan mplan' config of
                   Left err -> Left $ "(at Vlite stage)" ++ err
                   other -> other
      let passes = if apply_passes then
