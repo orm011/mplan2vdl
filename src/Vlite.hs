@@ -24,7 +24,7 @@ import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
 import Data.Int
-import qualified Error as E
+--import qualified Error as E
 import Error(check)
 import Data.Bits
 --import Debug.Trace
@@ -303,19 +303,18 @@ inferMetadata Binop
                 Min -> (min l1 l2, min u1 u2) -- this is true, right?
                 Max -> (max l1 l2, max u1 u2)
                 Mod -> (0, u2) -- assuming mods are always positive
-                BitAnd -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
+                BitAnd -> if (l1 >= 0 && l2 >= 0)
                           then let mx = min (maxForWidth left) (maxForWidth right)
                                in (0,mx) -- precision could be improved.
-                          else error $ E.todo "cant deduce BitAnd bounds" ((l1,u1),(l2,u2))
-                BitOr -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
+                          else (toInteger $ (minBound :: Int64), toInteger$ (maxBound :: Int64)) -- used to be an error
+                BitOr -> if (l1 >= 0 && l2 >= 0)
                          then let mx = max (maxForWidth left) (maxForWidth right)
                               in (0,mx) -- precision could be improved.
-                         else error $ E.todo "cant deduce BitOr bounds" ((l1,u1),(l2,u2))
-                BitShift -> assert (u2 < 32) $ --"shift left by more than 31?"
-                            assert (l2 > -32) $ --"shift right by more than 31?"
-                               -- shift left is like multiplication (amplifies neg and pos)
-                               -- shift right is like division (shrinks numbers neg and pos)
-                               -- both can happen in a single call to shift...
+                         else (toInteger $ (minBound :: Int64), toInteger $ (maxBound :: Int64)) -- used to be an error
+                BitShift -> --assert (u2 < 64) $ --"shift left by more than 31?"
+                            --    -- shift left is like multiplication (amplifies neg and pos)
+                            --    -- shift right is like division (shrinks numbers neg and pos)
+                            --    -- both can happen in a single call to shift...
                             let mshift (a,b) = let shfmask = (fromInteger $ toInteger $ abs b)
                                                in if b < 0 then (a `shiftR` shfmask)
                                                   else a `shiftL` shfmask
@@ -890,7 +889,7 @@ maxForWidth vec =
       -- bitwidth is 1, then max should be 0b1. (1 << 1) - 1 = (2 - 1) = 1 = 0xb1
       -- bitwidth is 2, then max should be 0xb11. (1 << 2) -1 = (4 - 1) = 3 = 0xb11
       -- cannot really subtract 1 from 1 << 31, b/c is underflow. so just check.
-  in assert (width < 32) $ --"about to shift by 32 or more"
+  in assert (width < 65) $ --"about to shift by 32 or more"
      (1 `shiftL` (fromInteger width)) - 1
 
 makeCompositeKey :: NonEmpty Vexp -> Vexp
@@ -916,11 +915,11 @@ getBitWidth Vexp { info=ColInfo {bounds=(l,u)} }
 bitsize :: Integer -> Integer
 bitsize num =
   if num >= 0 then
-    if num < toInteger (maxBound :: Int32) then
-      let num32 = (fromInteger num) :: Int32
-          ans = toInteger $ (finiteBitSize num32) - (countLeadingZeros num32)
-      in assert (ans <= 31) ans
-    else error (printf "number %d is larger than maxInt32" num)
+    if num < toInteger (maxBound :: Int64) then
+      let num64 = (fromInteger num) :: Int64
+          ans = toInteger $ (finiteBitSize num64) - (countLeadingZeros num64)
+      in assert (ans <= 64) ans
+    else error (printf "number %d is larger than maxInt int64" num)
   else error (printf "bitwidth only allowed for non-negative numbers (num=%d)" num)
 
 composeKeys :: Vexp -> Vexp -> Vexp
@@ -930,7 +929,7 @@ composeKeys l r =
       oldbits = getBitWidth sleft
       deltabits = getBitWidth sright
       newbits = oldbits + deltabits
-  in assert (newbits < 32) $
+  in assert (newbits < 65) $
      (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
