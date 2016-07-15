@@ -13,10 +13,15 @@ module Config ( Config(..)
               , StorageRec
               , FKJoinOrder(..)
               , MType(..)
+              , SType(..)
               , resolveTypeSpec
+              , sizeOf
+              , bitwidthOf
+              , getSTypeOfMType
               ) where
 
 import Data.Data
+import Data.Int
 import Name as NameTable
 --import Data.Int
 import SchemaParser(Table(..),Key(..))
@@ -61,16 +66,92 @@ type StorageRec = ( C.ByteString -- schema
                   , C.ByteString  -- sorted (boolean)
                   )
 
+
+--- repr info from Monet tpch001
+-- sql>select distinct "type","columnsize"/"count" as rep_size from storage where "schema"='sys' and ("table"='lineitem' or "table"='orders' or "table"='customer' or "table"='partsupp' or "table"='supplier' or "table"='part' or "table"='nation' or "table"='region') order by "type","rep_size";
+-- +---------+----------+
+-- | type    | rep_size |
+-- +=========+==========+
+-- | char    |        1 |
+-- | char    |        2 |
+-- | date    |        4 |
+-- | decimal |        8 |
+-- | int     |        4 |
+-- | oid     |        8 |
+-- | varchar |        2 |
+-- | varchar |        4 |
+-- +---------+----------+
+
+--- repr info from Monet tpch10
+-- select distinct "type","columnsize"/"count" as rep_size from storage where "schema"='sys' and ("table"='lineitem' or "table"='orders' or "table"='customer' or "table"='partsupp' or "table"='supplier' or "table"='part' or "table"='nation' or "table"='region') order by "type","rep_size";
+-- +---------+----------+
+-- | type    | rep_size |
+-- +=========+==========+
+-- | char    |        1 |
+-- | char    |        2 |
+-- | char    |        4 |
+-- | date    |        4 |
+-- | decimal |        8 |
+-- | int     |        4 |
+-- | oid     |        8 |
+-- | varchar |        2 |
+-- | varchar |        4 |
+-- +---------+----------+
+
+
+-- these are storage types used in monet tpch.
+-- for different tables, other types may show up.
+--- right now, we immediately convert literals to the types they are used with
+-- (eg, dates, millisecs, months to days.)
+-- Date gets stored as integer startig from 0 (4 bytes)
+-- Char and Varchar get treated the same way here.
+-- Decimal is needed here in order to correctly do conversions between decimals.
+--Precision is the number of digits in a number.
+-- Scale is the number of digits to the right of the decimal point in a number.
+-- For example, the number 123.45 has a precision of 5 and a scale of 2.
+
+data SType  = -- limited to the storage types we actually have?
+  SDecimal {precision::Integer, scale::Integer}  -- as an integer?. 1<=P<=18. 0<=S<=P.
+  | SInt32   -- 2's compliment?
+  | SInt64    -- 2's compliment unsigned?
+  deriving (Eq,Show,Generic,Data)
+instance NFData SType
+
+sizeOf :: SType -> Integer
+sizeOf (SDecimal {}) = 8
+sizeOf SInt32 = 4
+sizeOf SInt64 = 8
+bitwidthOf :: SType -> Integer
+bitwidthOf t = 8 * sizeOf t
+
+boundsOf :: SType -> (Integer, Integer)
+boundsOf stype = case stype of
+  SDecimal {} -> ( toInteger (minBound :: Int64 )
+                 , toInteger (maxBound :: Int64 ) )
+  SInt32 -> ( toInteger (minBound :: Int32 )
+            , toInteger (maxBound :: Int32 ) )
+  SInt64 -> ( toInteger (minBound :: Int64 )
+            , toInteger (maxBound :: Int64 ) )
+
+withinBounds :: (Integer,Integer) -> SType -> Bool
+withinBounds (l,u) stype =
+  let (ll,uu) = boundsOf stype
+  in (ll <= l && l <= u && u <= uu)
+
+-- these are more general monet types that show
+-- up as literals in tpch plans, but not as columns in storage.
+-- we convert them as soon as possible to the stypes that fit them
+-- so that we only need to think about fewer types.
 data MType =
   MTinyint
   | MInt
   | MBigInt
   | MSmallint
-  | MOid
   | MDate
   | MMillisec
   | MMonth
   | MDouble
+  | MOid
   | MChar Integer
   | MVarchar Integer
   | MDecimal Integer Integer
@@ -79,6 +160,8 @@ data MType =
   | MBoolean
   deriving (Eq, Show, Generic, Data)
 instance NFData MType
+instance Hashable MType
+
 
 resolveTypeSpec :: TypeSpec -> MType
 resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
@@ -88,6 +171,7 @@ resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
         f "bigint" [] = MBigInt
         f "date" []  = MDate
         f "char" [len] =  MChar len
+        f "char" [] = MChar (-1) -- beh
         f "varchar" [maxlength] =  MVarchar maxlength
         f "decimal" [precision,scale] = MDecimal precision scale
         f "sec_interval" [_] = MMillisec -- they use millisecs to express their seconds
@@ -95,41 +179,33 @@ resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
         f "double" [] = MDouble -- used for averages even if columns arent doubles
         f "boolean" [] = MBoolean
         f "oid" [] = MOid -- used in storage files
-        f "INTEGER" [] = MInt -- CAPS comes from parsed schema
+        -- capitalized forms come from schema file.
+        f "INTEGER" [] = MInt
         f "CHAR" [len] = MChar len
         f "DECIMAL" [precision,scale] = MDecimal precision scale
         f "VARCHAR" [maxlength] = MVarchar maxlength
         f "DATE" [] = MDate
         f name _ = error $ "unsupported typespec: " ++ show name
 
-toKeyPair :: (NameTable TypeSpec) -> StorageRec -> (Name, MType)
-toKeyPair ns (_,tab,col,typstring,_,_,bytewidth,_,_,_,_,_) =
+toKeyPair :: (NameTable TypeSpec) -> StorageRec -> (Name, StorageInfo)
+toKeyPair ns (_,tab,col,typstring,_,colcount,bytewidth,colsize,_,_,_,_) =
   let name = Name [tab,col]
       tspec = if typstring /= "oid"
               then snd $ (NameTable.lookup_err name ns)
               else TypeSpec { tname="oid", tparams=[] }
       mtype = resolveTypeSpec tspec
-  in assert (case mtype of
-                MChar _ -> True
-                MVarchar _ -> True
-                _ -> getTypeBitwidth mtype == (8*bytewidth)) (name,mtype)
+      storagesize = colsize `quot` colcount
+      off = colsize `rem` colcount
+      matches = (case mtype of
+                    MChar _ -> True
+                    MVarchar _ -> True
+                    _ -> storagesize == bytewidth )
+  in assert (matches &&  (off == 0)) (name, StorageInfo{mtype,storagesize})
 
 -- holds the names of the matching columns for an fk.
 -- the order matters, watch out. left is fact, right is dim.
 type FKCols = NonEmpty (Name, Name)
 type PKCols = NonEmpty Name
-
-getTypeBitwidth :: MType -> Integer
-getTypeBitwidth tp = case tp of
-  MTinyint -> 8
-  MInt -> 32
-  MBigInt -> 64
-  MDecimal _ _ -> 64
-  MVarchar _ -> 64
-  MChar _ -> 64 -- assuming that when dict encoding, offsets get stored as 64 bit ints.
-  MOid -> 64
-  MDate -> 32
-  ow -> error $  "implement type bitwidth for " ++ show ow
 
 -- we use Integer values here so that our metadata calculations
 -- don't overflow.
@@ -138,18 +214,41 @@ data ColInfo = ColInfo
     -- bounds on element values
     --this is a bound on the array size (num elts) needed to hold it
   , count::Integer
-  , coltype :: MType
+  , stype::SType
   } deriving (Eq,Show,Generic)
+
+data StorageInfo = StorageInfo
+  { mtype :: MType
+  , storagesize :: Integer
+  }
 
 instance NFData ColInfo
 
 checkColInfo :: ColInfo -> ColInfo
-checkColInfo i@(ColInfo {bounds=(l,u), count}) = assert (l <= u && count > 0) i
+checkColInfo i@(ColInfo {bounds=(l,u), count, stype}) =
+  if l <= u && count > 0 && withinBounds (l,u) stype
+  then i
+  else error $ "info does not pass validation: " ++ show i ++ "\ntype bounds: " ++ (show $  boundsOf stype)
 
-addEntry :: [Name] -> NameTable MType -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
+getSTypeOfMType :: MType -> SType
+getSTypeOfMType mtype = case mtype of
+  MInt -> SInt32
+  MDate -> SInt32
+  MOid -> SInt64
+  MChar _ -> SInt64
+  MVarchar _ -> SInt64
+  MDecimal precision scale  -> SDecimal {precision, scale}
+  MSmallint -> SInt32
+  MTinyint -> SInt32
+  MBigInt -> SInt64
+  ow -> error $ "we don't expect reading this type from the monet columns/queries at the moment: " ++ (show ow)
+
+
+addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
 addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount) =
-  do let coltype  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
-     let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, coltype }
+  do let StorageInfo {mtype}  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
+     let stype = getSTypeOfMType mtype
+     let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype }
      plain <- NameTable.insert (Name [tab,col]) colinfo nametab
      if elem (Name[tab,col]) constraints
        then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well

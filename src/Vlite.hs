@@ -27,7 +27,7 @@ import Data.Int
 --import qualified Error as E
 import Error(check)
 import Data.Bits
---import Debug.Trace
+import Debug.Trace
 import Text.Groom
 import qualified Data.HashMap.Strict as Map
 --import qualified Data.Map.Strict as Map
@@ -71,7 +71,7 @@ sha1vx vx = sha1hack vx
 data Vx =
   Load Name
   | RangeV { rmin :: Integer, rstep :: Integer, rref::Vexp }
-  | RangeC { rmin :: Integer, rstep :: Integer, rcount::Integer }
+  | RangeC { rmin :: Integer, rstep :: Integer, rcount::Integer}
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
@@ -138,8 +138,13 @@ pos_ :: Vexp -> Vexp
 pos_ v = complete $ RangeV {rmin=0, rstep=1, rref=v}
 
 const_ :: Integer -> Vexp -> Vexp
-const_ k v = complete $ RangeV{rmin=k, rstep=0, rref=v}
+const_ k v = complete $ RangeV {rmin=k, rstep=0, rref=v}
 
+-- used for literals, so they don't lose their type info.
+typedconst_ :: Integer -> Vexp -> SType -> Vexp
+typedconst_ k v st = let partial@Vexp{info} = const_ k v
+                         newinfo = checkColInfo $ info{stype=st}
+                     in partial {info=newinfo}
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
 
@@ -206,11 +211,8 @@ complete vx =
       name = case vx of
         Shuffle {shsource=Vexp{name=orig_name}} -> orig_name -- preserve name for scatter and gather.
         _ -> Nothing
-  in let ans = Vexp { vx, info, lineage, name, memoized_hash, quant }
-         (mn,mx) = bounds info
-     in if (mx > toInteger (maxBound :: Int32 )) || (mn <= toInteger  (minBound :: Int32))
-        then error $ "col values may exceed int32 bounds: " ++ show ans
-        else ans
+  in Vexp { vx, info, lineage, name, memoized_hash, quant }
+
 
 checkLineage :: Lineage -> Lineage
 checkLineage l =
@@ -223,46 +225,57 @@ checkLineage l =
 
 inferMetadata :: Vx -> ColInfo
 
+-- typeNeeded :: (Integer,Integer) -> SType
+-- typeNeeded (lower,upper) =
+--   if lower < (toInteger  (minBound :: Int32))
+--      || upper > (toInteger  (maxBound :: Int32))
+--   then if lower < (toInteger  (minBound ::Int64))
+--           || upper > (toInteger  (maxBound ::Int64))
+--           then error "range does not fit in a 64 bit int"
+--        else SInt64
+--   else SInt32
+
 inferMetadata (Load _) = error "at the moment, should not be called with Load. TODO: need to pass config to address this case"
 
 inferMetadata VShuffle {varg=Vexp{info}} = info -- same, just no ordering if there was
 
 inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
-  = ColInfo { bounds=(0,1), count, coltype=MBoolean }
+  = ColInfo { bounds=(0,1), count, stype=SInt32 }
 
 inferMetadata RangeV {rmin=rstart,rstep,rref=Vexp {info=ColInfo {count}}}
   =  let extremes = [rstart, rstart + count*rstep]
-     in ColInfo { bounds=(minimum extremes, maximum extremes)
+         bounds = (minimum extremes, maximum extremes)
+     in ColInfo { bounds
                 , count
-                , coltype=MBigInt } -- todo: this is not fully true, is it?
+                , stype=SInt64 }
 
 inferMetadata RangeC {rmin=rstart, rstep, rcount}
   =  let extremes = [rstart + rcount*rstep, rstart]
      in ColInfo { bounds=(minimum extremes, maximum extremes)
                 , count=rcount
-                , coltype = MBigInt}
+                , stype=SInt64 } 
 
 inferMetadata Shuffle { shop=Scatter
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, coltype}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype}}
                       , shpos=Vexp {info=ColInfo {bounds=(_,posmax)}}
                       }
-  = ColInfo { bounds=sourcebounds, count=posmax, coltype }
+  = ColInfo { bounds=sourcebounds, count=posmax, stype }
 
 inferMetadata Shuffle { shop=Gather
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, coltype}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype}}
                       , shpos=Vexp {info=ColInfo {count}}
                       }
-  = ColInfo { bounds=sourcebounds, count, coltype }
+  = ColInfo { bounds=sourcebounds, count, stype }
 
 inferMetadata Fold { foldop=FSel
                    , fgroups=_
                    , fdata=Vexp {info=ColInfo {count}}
                    }
-  = ColInfo {bounds=(0, count-1), count, coltype=MOid }
+  = ColInfo {bounds=(0, count-1), count, stype=SInt64 } -- positions always int64
 
 inferMetadata Fold { foldop
                    , fgroups = Vexp { info=ColInfo {bounds=(glower,gupper), count=gcount} }
-                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, coltype} }
+                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, stype} }
                    } =
   -- "suspicious: group and data count bounds dont match"
   --assert (gcount == dcount) $ -- TODO is this assert correct?
@@ -271,10 +284,10 @@ inferMetadata Fold { foldop
     FSum -> let extremes = [dlower, dlower*dcount, dupper, dupper*dcount]
                   -- for positive dlower, dlower is the minimum.
                   -- for negative dlower, dlower*dcount is the minimum, and so on.
-            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, coltype }
-    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, coltype }
-    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, coltype }
-    FSel -> error "use different handler for select"
+            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype }
+    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, stype }
+    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype }
+    FSel -> error "use different handler for select (should be above this one)"
 
 -- the result of partition is a list of indices that, for each pdata
 -- tells it where the first element in pivots is that is larger or equal to it.
@@ -284,11 +297,11 @@ inferMetadata Fold { foldop
 inferMetadata Partition
   { pivots=Vexp { info=ColInfo {count=pivotcount} }
   , pdata=Vexp { info=ColInfo {count=datacount} }
-  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, coltype=MOid }
+  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, stype=SInt64 }
 
 inferMetadata Binop
   { binop
-  , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 , coltype=lefttype } }
+  , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 , stype=lefttype } }
   , right=right@Vexp { info=ColInfo {bounds=(l2,u2), count=c2} }
   } = do
          let count = min c1 c2
@@ -330,7 +343,14 @@ inferMetadata Binop
                                 allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
                                 extremes = map mshift allpairs
                             in (minimum extremes, maximum extremes)
-           in ColInfo {bounds, count, coltype=lefttype  } -- arbitrary choice of type right now.
+             -- type_compatible = case (lefttype, righttype) of -- this check is quite loose.
+             --   (a,b) | a == b -> True -- identical then true.
+             --   (SChar _, SChar _) -> True -- character types.
+             --   (SInt64, SInt32) -> True -- C is good enough for this
+             --   (SInt32, SInt64) -> True -- C is good enough for this
+             --   _ -> error $ "incompatible types for op: " ++ show binop ++ "\nleft:\n" ++ show left ++ "\nright:\n" ++ show right
+               -- notice incompatible decimals will fail here
+           in ColInfo {bounds, count, stype=lefttype} -- arbitrary choice of type right now.
 
 inferLineage :: Vx -> Lineage
 
@@ -773,21 +793,40 @@ sc (Env _ env) (M.Ref refname)  =
     Right (_, v) -> Right v
     Left s -> Left s
 
+
+sc env (M.Cast {M.mtype = MDouble, M.arg}) = sc env arg -- ignore this cast. it is use only prior to averages etc. note C may not do the right thing.
+-- or we should insert a voodoo cast.
+
 -- serious TODO: strictly speaking, I need to know the orignal type in order
 -- to correctly produce code here.
 -- We need the input type bc, for example Decimal(10,2) -> Decimal(10,3) = *10
 -- but Decimal(10,1) -> Decimal(10,3) = * 100. Right now, that input type is not explicitly given.
-sc env (M.Cast { M.mtype, M.arg }) =
-  do Vexp{info=ColInfo{coltype=inputtype}} <- sc env arg
-     return $ case (inputtype,mtype) of
-     --   (MDecimal a0 b0, MDecimal a1 b1) ->
-     --     do orig <- sc env arg
-     --        -- multiply by 10^dec. hope there is no overflow.
-     --        -- TODO now we could statically check for overflow using sizes
-     --     let factor = (10 ^ dec)
-     --     let fvec = const_ factor orig
-     --     return $ orig *. fvec
-       _ -> error $  "unsupported type cast: from: " ++ show inputtype ++ " to: " ++ show mtype
+sc env cast@(M.Cast { M.mtype, M.arg }) =
+  do vexp@Vexp{info=ColInfo{stype=inputtype}} <- sc env arg
+     let outputtype = getSTypeOfMType mtype
+     let outrep@Vexp{info} = case (inputtype,outputtype) of
+           (a,b) | a == b -> vexp
+         -- semantic cast of int to decimal: eg. 1 -> 1.0 which is repr as 10
+           (intt, SDecimal {scale})
+             | intt == SInt64 || intt == SInt32
+               -> let factor = (10 ^ scale)
+                  in const_ factor vexp *. vexp
+         -- adjust the type so a future cast is not wrong
+           (SDecimal {scale}, intt) -- cast from decimal to int i assume is lossy.
+             | intt == SInt64 || intt == SInt32
+               -> let factor = (10 ^ scale)
+                  in vexp /. (const_ factor vexp)
+           (SDecimal {scale=sfrom}, SDecimal{scale=sto}) ->
+             if sto == sfrom then vexp
+             else let factor = (10 ^ abs (sto - sfrom))
+                  in if sto > sfrom
+                     then vexp *. const_ factor vexp
+                     else vexp /. const_ factor vexp
+           _ -> error $  "unsupported type cast: from: " ++ show inputtype ++ " to: " ++ show outputtype ++ " in: " ++ show cast
+     return $ outrep {info=info{stype=outputtype}}
+     -- makes sure the new type is okay. this ensures future casts don't
+     -- multiply things by more than needed.
+
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
   do l <- sc env left
@@ -803,8 +842,8 @@ sc env M.In { M.left, M.set } =
            a:b -> (a,b)
      return $ foldl' (||.) first rest
 
-sc (Env (vref : _ ) _) (M.IntLiteral n)
-  = return $ const_ n vref
+sc (Env (vref : _ ) _) (M.Literal st n)
+  = return $ typedconst_ n vref st
 
 sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
@@ -817,7 +856,7 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
 --a column or derived column that is statically known to not be null, so we just remove that.
 {- sys.ifthenelse(sys.isnull(sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])), boolean "false", sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])) -}
 sc env (M.IfThenElse { M.if_=M.Unary { M.unop=M.IsNull
-                                     , M.arg=oper1 } , M.then_=M.IntLiteral 0, M.else_=oper2 } )=
+                                     , M.arg=oper1 } , M.then_=M.Literal _  0, M.else_=oper2 } )=
   do check (oper1,oper2) (\(a,b) -> a == b) "different use of isnull than expected"
      sc env oper1 --just return the guarded operator.
 
@@ -860,7 +899,7 @@ solveAgg config env gkeyvec (M.GDominated nm) =
 
 -- count is rewritten to summing a one for every row
 solveAgg config env gkeyvec (M.GCount) =
-  let rewrite = (M.GFold M.FSum (M.IntLiteral 1))
+  let rewrite = (M.GFold M.FSum (M.Literal SInt64 1))
   in solveAgg config env gkeyvec rewrite
 
 solveAgg config env gkeyvec (M.GFold op expr) =
@@ -881,7 +920,8 @@ getScatterMask pdata@Vexp { info=ColInfo {bounds=(pdatamin, pdatamax)} } =
   then return $ pos_ pdata -- pivots would be empty. unclear semantics.
   else let pivots = complete $ RangeC { rmin=pdatamin
                                  , rstep=1
-                                 , rcount=pdatamax-pdatamin }
+                                 , rcount=pdatamax-pdatamin
+                                 }
        in return $ complete $ Partition { pivots, pdata }
 
 maxForWidth :: Vexp -> Integer

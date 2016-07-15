@@ -16,6 +16,7 @@ import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Data.Hashable
+import Control.Exception.Base
 --import Data.Int
 --import Data.Monoid(mappend)
 --import Debug.Trace
@@ -45,9 +46,10 @@ isJoinIdx _ = []
 getJoinIdx :: [P.Attr] -> [Name]
 getJoinIdx attrs = foldl' (++) [] (map isJoinIdx attrs)
 
-
-resolveCharLiteral :: B.ByteString -> Either String Integer
-resolveCharLiteral ch = dictEncode (C.unpack ch)
+resolveCharLiteral :: B.ByteString -> Integer
+resolveCharLiteral ch = case dictEncode (C.unpack ch) of
+  Left _ -> error $  "not found in dictionary: " ++ (C.unpack ch)
+  Right x -> x
 
 {- assumes date is formatted properly: todo. error handling for tis -}
 resolveDateString :: B.ByteString -> Integer
@@ -115,7 +117,7 @@ resolveUnopOpcode nm =
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
   Ref Name
-  | IntLiteral Integer {- use the widest possible type to not lose info -}
+  | Literal SType Integer -- the integer encodes the representation of the value.
   | Unary { unop:: UnaryOp, arg::ScalarExpr }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
@@ -327,7 +329,7 @@ solve P.Node { P.relop = "top N"
                                  }
                              ] : []
              } =
-  do n  <- readIntLiteral stringRep
+  do let n = readIntLiteral stringRep
      child <- solve ch
      return $ TopN { child , n }
 
@@ -407,40 +409,35 @@ sc P.Cast { P.tspec
 
 sc arg@P.Literal { P.tspec, P.stringRep } =
   do let mtype = resolveTypeSpec tspec
-     ret <- case mtype of
-       MDate -> Right $ resolveDateString stringRep
-       MChar _ -> resolveCharLiteral stringRep
-       MMillisec ->
-         do r <- readIntLiteral stringRep
-            check r (/= 0) "weird zero interval"
-            let days = quot r (1000 * 60* 60* 24)
-            check days (/= 0)  "check that we are not rounding seconds down to 0 (its possible query is correct, but unlikely in tpch)"
-            return $ days
-            -- millis/secs/mins/hours normalize to days,
-            --since thats what tpch uses
-       MMonth  ->
-         do months  <- readIntLiteral stringRep
-            return $ months * 30
-            -- really, the day value of month intervals isnt that simple,
-            --it depends on the context it is used
-            --(eg the actual it is being added to). nvm
-       MDecimal _ _ -> readIntLiteral stringRep
-       -- sql 0.06 shows up
-       -- as mplan Decimal (,2) "6", so just leave it as is.
-       MBoolean  -> (case stringRep of
-                        "true" -> Right 1
-                        "false" -> Right 0
-                        s_ -> Left $ E.unexpected "boolean literal" s_)
-
-       _ -> do int <- ( let r = readIntLiteral stringRep in
-                        case mtype of
-                          MInt -> r
-                          MTinyint -> r
-                          MSmallint -> r
-                          _ -> Left $ E.unexpected "literal" arg )
-               return $ int
-     return $ IntLiteral ret
-
+     let (stype,repr) = case mtype of
+           -- eg q1:
+           -- lineitem.l_shipdate NOT NULL <= sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000").
+           -- if shipdate is stored as an integer representing days.
+           -- then, if
+           MDate -> (SInt32, resolveDateString stringRep)
+           MMillisec -> let r = readIntLiteral stringRep
+                            millis_in_a_day = (1000 * 60* 60* 24)
+                            days = r `quot` millis_in_a_day
+                            leftover = r `rem` millis_in_a_day
+                        in assert (r > 0) (assert (leftover == 0)  (SInt32, days))
+           MMonth  -> let months = readIntLiteral stringRep
+                      in (SInt32, months * 30)
+           MDecimal a b -> (SDecimal{precision=a, scale=b}, readIntLiteral stringRep)
+           -- sql 0.06 shows up
+           -- as mplan Decimal (,2) "6", so just reinterpret int as decimal.
+           MBoolean  -> (case stringRep of
+                            "true" -> (SInt32, 1)
+                            "false" -> (SInt32, 0)
+                            _ -> error $ "unknown invalid boolean literal: " ++ show arg)
+           MTinyint -> (SInt32, readIntLiteral stringRep)
+           MSmallint -> (SInt32, readIntLiteral stringRep)
+           MInt -> (SInt32, readIntLiteral stringRep)
+           MBigInt -> (SInt64, readIntLiteral stringRep)
+           -- the problem here is that we don't really know the bitwidth...
+           -- so assume the worst (likely it won't match columns it is used against)
+           MChar _ -> (SInt64, resolveCharLiteral stringRep) -- assume 8 bytes is enough...
+           _ -> error $ "need to support literal of this type: " ++ show arg
+     return $ Literal stype repr
 
 sc P.Infix {P.infixop
            ,P.left
@@ -511,11 +508,11 @@ conjunction exprs =
        where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
 
 
-readIntLiteral :: B.ByteString -> Either String Integer
+readIntLiteral :: B.ByteString -> Integer
 readIntLiteral str =
   case (C.readInteger str :: Maybe (Integer, B.ByteString)) of
-    Just (num, "") -> Right num
-    _ -> Left $ E.unexpected "integer literal" str
+    Just (num, "") -> num
+    _ -> error $  "unrecognizable integer literal: " ++ (C.unpack str)
 
 mplanFromParseTree :: P.Rel -> Config -> Either String RelExpr
 mplanFromParseTree _1 _ = solve _1
