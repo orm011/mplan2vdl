@@ -77,6 +77,7 @@ data Vx =
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
   | Like { ldata::Vexp, lpattern::C.ByteString, lcol::Name }
+  | VShuffle { varg :: Vexp }
   deriving (Eq,Generic)
 instance NFData Vx
 instance Hashable Vx
@@ -89,7 +90,7 @@ instance Show Vx where
   show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ "fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
   show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
-
+  show VShuffle {} = "VShuffle{...}"
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
@@ -219,6 +220,8 @@ checkLineage l =
 inferMetadata :: Vx -> ColInfo
 
 inferMetadata (Load _) = error "at the moment, should not be called with Load. TODO: need to pass config to address this case"
+
+inferMetadata VShuffle {varg=Vexp{info}} = info -- same, just no ordering if there was
 
 inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
   = ColInfo { bounds=(0,1), count }
@@ -1147,6 +1150,9 @@ transformVx fn vx mp =
         Like ldata a b ->
           let (mp', ldata') = transform fn ldata mp
           in (mp', Like ldata' a b)
+        VShuffle varg ->
+          let (mp', varg') = transform fn varg mp
+          in (mp', VShuffle varg')
       xformPrelim = case fn prelim of -- now apply function to this.
         Nothing -> complete $ prelim -- pattern does not match anything.
         Just x -> x

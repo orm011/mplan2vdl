@@ -31,6 +31,7 @@ data Vd a =
   | Binary { op::Voodop, arg1::a, arg2::a  }
   | Scatter { scattersource::a, scatterfold::a, scatterpos::a }
   | Like { ldata::a, ldict::a, lpattern::C.ByteString }
+  | VShuffle { varg::a }
   | MaterializeCompact { mout::a }
   deriving (Eq,Show,Generic)
 instance (NFData a) => NFData (Vd a)
@@ -224,6 +225,10 @@ voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern, V.lcol }) =
 
 voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
 
+voodooFromVxNoMemo s (V.VShuffle { V.varg }) =
+  do (s', newarg) <- voodooFromVexpMemo s varg
+     return $ (s', VShuffle $ completeW newarg)
+
 voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
   do (s', arg1) <- voodooFromVexpMemo s fgroups
      (s'', arg2) <- voodooFromVexpMemo s' fdata
@@ -309,6 +314,9 @@ vrefFromVoodoo state (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
      (state'', n2) <- memVrefFromVoodoo state' ldict
      return $ (state'', Like { ldata=n1, ldict=n2, lpattern})
 
+vrefFromVoodoo state (VShuffle { varg=W(varg,_)}) =
+  do (state', n1) <- memVrefFromVoodoo state varg
+     return $ (state', VShuffle {varg=n1})
 
 vrefFromVoodoo state (MaterializeCompact {mout=W (mout,_)}) =
   do (state', n') <- memVrefFromVoodoo state mout
@@ -350,6 +358,9 @@ toList (Like { ldata, ldict, lpattern } ) =
   ["Like", "val",id1, "val",id2,"character", C.unpack lpattern]
   where id1 = "Id " ++ show ldata
         id2 = "Id " ++ show ldict
+
+toList (VShuffle {varg}) =
+  ["Shuffle", "Id " ++ show varg]
 
 toList (MaterializeCompact x) =
   ["MaterializeCompact","Id " ++ show x]
