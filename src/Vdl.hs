@@ -13,7 +13,7 @@ import Data.Hashable
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.ByteString.Lazy.Char8 as C
 --import Data.List (foldl')
-import Config
+--import Config
 import Prelude hiding (log)
 --import qualified Error as E
 import Sha
@@ -31,6 +31,8 @@ data Vd a =
   | Binary { op::Voodop, arg1::a, arg2::a  }
   | Scatter { scattersource::a, scatterfold::a, scatterpos::a }
   | Like { ldata::a, ldict::a, lpattern::C.ByteString }
+  | VShuffle { varg::a }
+  | MaterializeCompact { mout::a }
   deriving (Eq,Show,Generic)
 instance (NFData a) => NFData (Vd a)
 instance (Hashable a) => Hashable (Vd a)
@@ -211,16 +213,21 @@ voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
      (s'', positions) <- voodooFromVexpMemo s' shpos
      return $ (s'', case shop of
                   V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
-                  V.Scatter -> let scatterfold = completeW $ pos_ source
+                  V.Scatter -> let scatterfold = case source of
+                                     RangeV {rmin=0,rstep=1} -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
+                                     _ -> completeW $ pos_ source
                                in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions })
 
-voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern })
-  | V.Vexp { V.lineage=V.Pure {V.col} } <- ldata =
-      do (s', newldata) <- voodooFromVexpMemo s ldata
-         let ldict = let Name ns = col in makeload $ Name (ns ++ ["heap"])
-         return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
+voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern, V.lcol }) =
+  do (s', newldata) <- voodooFromVexpMemo s ldata
+     let ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
+     return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
 
 voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
+
+voodooFromVxNoMemo s (V.VShuffle { V.varg }) =
+  do (s', newarg) <- voodooFromVexpMemo s varg
+     return $ (s', VShuffle $ completeW newarg)
 
 voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
   do (s', arg1) <- voodooFromVexpMemo s fgroups
@@ -242,7 +249,7 @@ voodoosFromVexps vexps =
   do let solve (s, res) v = do (s', v') <- voodooFromVexpMemo s v
                                return (s', v':res)
      (_, res) <- foldM solve (HMap.empty,[]) vexps
-     return $ res
+     return $ map (MaterializeCompact . completeW) res
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =
@@ -307,6 +314,14 @@ vrefFromVoodoo state (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
      (state'', n2) <- memVrefFromVoodoo state' ldict
      return $ (state'', Like { ldata=n1, ldict=n2, lpattern})
 
+vrefFromVoodoo state (VShuffle { varg=W(varg,_)}) =
+  do (state', n1) <- memVrefFromVoodoo state varg
+     return $ (state', VShuffle {varg=n1})
+
+vrefFromVoodoo state (MaterializeCompact {mout=W (mout,_)}) =
+  do (state', n') <- memVrefFromVoodoo state mout
+     return $ (state', MaterializeCompact n' )
+
 {- now a list of strings -}
 toList :: Vref -> [String]
 
@@ -344,7 +359,11 @@ toList (Like { ldata, ldict, lpattern } ) =
   where id1 = "Id " ++ show ldata
         id2 = "Id " ++ show ldict
 
-toList s_ = trace ("TODO implement toList for: " ++ show s_) undefined
+toList (VShuffle {varg}) =
+  ["Shuffle", "Id " ++ show varg]
+
+toList (MaterializeCompact x) =
+  ["MaterializeCompact","Id " ++ show x]
 
 printVd :: [(Int, [String])] -> String
 printVd prs = join "\n" $ map makeline prs
@@ -361,8 +380,8 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: [V.Vexp] -> Config -> Either String Vdl
-vdlFromVexps vexps _ =
+vdlFromVexps :: [V.Vexp] -> Either String Vdl
+vdlFromVexps vexps =
   do voodoos <- voodoosFromVexps vexps
      vrefs <- vrefsFromVoodoos voodoos
      return $ Vdl $ dumpVref vrefs

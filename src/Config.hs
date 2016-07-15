@@ -155,8 +155,8 @@ addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount) =
        then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
        else return $ plain
 
-makeConfig :: Integer -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> Either String Config
-makeConfig grainsizelg boundslist storagelist tables =
+makeConfig :: Integer -> V.Vector BoundsRec -> Bool -> (V.Vector StorageRec) -> [Table] -> Either String Config
+makeConfig grainsizelg boundslist shuffle_aggs storagelist tables =
   do let constraints = foldMap getTableConstraints tables
      let tspecs = NameTable.fromList $ foldMap getTspecs tables
      let storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
@@ -171,7 +171,7 @@ makeConfig grainsizelg boundslist storagelist tables =
      let partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
      let pktable = map pkpair tables
-     return $ Config { grainsizelg, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+     return $ Config { grainsizelg, colinfo, shuffle_aggs, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
                        tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -220,6 +220,7 @@ makeFKEntries Table { name, fkeys } =
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
                        , colinfo :: NameTable ColInfo
+                       , shuffle_aggs :: Bool
                        , fkrefs :: Map FKCols (FKJoinOrder,Name)
                                    -- shows the fact -> dimension direction of the dependence
                        , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one

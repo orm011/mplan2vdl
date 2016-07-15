@@ -4,7 +4,13 @@ module Vlite( vexpsFromMplan
             , BinaryOp(..)
             , ShOp(..)
             , FoldOp(..)
-            , Lineage(..)) where
+            , Lineage(..)
+            , xformIden
+            , redundantRangePass
+            , algebraicIdentitiesPass
+            , loweringPass
+            , pos_
+            , complete) where
 
 import Config
 import qualified Mplan as M
@@ -18,7 +24,7 @@ import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
 import Data.Int
-import qualified Error as E
+--import qualified Error as E
 import Error(check)
 import Data.Bits
 --import Debug.Trace
@@ -70,7 +76,8 @@ data Vx =
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Partition { pivots:: Vexp, pdata::Vexp }
-  | Like { ldata::Vexp, lpattern::C.ByteString }
+  | Like { ldata::Vexp, lpattern::C.ByteString, lcol::Name }
+  | VShuffle { varg :: Vexp }
   deriving (Eq,Generic)
 instance NFData Vx
 instance Hashable Vx
@@ -83,6 +90,7 @@ instance Show Vx where
   show Fold {foldop} = "Fold { foldop=" ++ show foldop ++ ", fgroups=..., fdata=... }"
   show Partition {} = "Partition {pivots=..., pdata=...}"
   show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
+  show VShuffle {} = "VShuffle{...}"
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
@@ -140,6 +148,12 @@ ones_ = const_ 1
 
 (==.) :: Vexp -> Vexp -> Vexp
 a ==. b = makeBinop Eq a b
+
+(>.) :: Vexp -> Vexp -> Vexp
+a >. b = makeBinop Gt a b
+
+(<.) :: Vexp -> Vexp -> Vexp
+a <. b = makeBinop Gt b a -- notice switch
 
 (>>.) :: Vexp -> Vexp -> Vexp
 a >>. b = makeBinop BitShift a b
@@ -210,6 +224,8 @@ checkLineage l =
 inferMetadata :: Vx -> ColInfo
 
 inferMetadata (Load _) = error "at the moment, should not be called with Load. TODO: need to pass config to address this case"
+
+inferMetadata VShuffle {varg=Vexp{info}} = info -- same, just no ordering if there was
 
 inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
   = ColInfo { bounds=(0,1), count, coltype=MBoolean }
@@ -296,19 +312,18 @@ inferMetadata Binop
                 Min -> (min l1 l2, min u1 u2) -- this is true, right?
                 Max -> (max l1 l2, max u1 u2)
                 Mod -> (0, u2) -- assuming mods are always positive
-                BitAnd -> if (l1 >= 0 && l2 >= 0) -- negatives would trip things up
+                BitAnd -> if (l1 >= 0 && l2 >= 0)
                           then let mx = min (maxForWidth left) (maxForWidth right)
-                               in (0,mx)
-                          else error "shifting negatives"
-                BitOr -> if (l1 >= 0 && l2 >= 0 && u1 < (1 `shiftL` 31) && u2 < (1 `shiftL` 31))
+                               in (0,mx) -- precision could be improved.
+                          else (toInteger $ (minBound :: Int64), toInteger$ (maxBound :: Int64)) -- used to be an error
+                BitOr -> if (l1 >= 0 && l2 >= 0)
                          then let mx = max (maxForWidth left) (maxForWidth right)
                               in (0,mx) -- precision could be improved.
-                         else error $ E.todo "cant deduce BitOr bounds" ((l1,u1),(l2,u2))
-                BitShift -> assert (u2 < 32) $ --"shift left by more than 31?"
-                            assert (l2 > -32) $ --"shift right by more than 31?"
-                               -- shift left is like multiplication (amplifies neg and pos)
-                               -- shift right is like division (shrinks numbers neg and pos)
-                               -- both can happen in a single call to shift...
+                         else (toInteger $ (minBound :: Int64), toInteger $ (maxBound :: Int64)) -- used to be an error
+                BitShift -> --assert (u2 < 64) $ --"shift left by more than 31?"
+                            --    -- shift left is like multiplication (amplifies neg and pos)
+                            --    -- shift right is like division (shrinks numbers neg and pos)
+                            --    -- both can happen in a single call to shift...
                             let mshift (a,b) = let shfmask = (fromInteger $ toInteger $ abs b)
                                                in if b < 0 then (a `shiftR` shfmask)
                                                   else a `shiftL` shfmask
@@ -817,7 +832,7 @@ sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
 sc env (M.Like { M.ldata, M.lpattern }) =
   do sldata@Vexp {lineage} <- sc env ldata
      return $ case lineage of
-       Pure {} -> complete $ Like { ldata=sldata, lpattern }
+       Pure {col} -> complete $ Like { ldata=sldata, lpattern, lcol=col }
        None -> error "cannot apply like expressions without knowing lineage"
 
 sc env (M.Unary { M.unop=M.Neg, M.arg }) =
@@ -877,7 +892,7 @@ maxForWidth vec =
       -- bitwidth is 1, then max should be 0b1. (1 << 1) - 1 = (2 - 1) = 1 = 0xb1
       -- bitwidth is 2, then max should be 0xb11. (1 << 2) -1 = (4 - 1) = 3 = 0xb11
       -- cannot really subtract 1 from 1 << 31, b/c is underflow. so just check.
-  in assert (width < 32) $ --"about to shift by 32 or more"
+  in assert (width < 65) $ --"about to shift by 32 or more"
      (1 `shiftL` (fromInteger width)) - 1
 
 makeCompositeKey :: NonEmpty Vexp -> Vexp
@@ -903,11 +918,11 @@ getBitWidth Vexp { info=ColInfo {bounds=(l,u)} }
 bitsize :: Integer -> Integer
 bitsize num =
   if num >= 0 then
-    if num < toInteger (maxBound :: Int32) then
-      let num32 = (fromInteger num) :: Int32
-          ans = toInteger $ (finiteBitSize num32) - (countLeadingZeros num32)
-      in assert (ans <= 31) ans
-    else error (printf "number %d is larger than maxInt32" num)
+    if num < toInteger (maxBound :: Int64) then
+      let num64 = (fromInteger num) :: Int64
+          ans = toInteger $ (finiteBitSize num64) - (countLeadingZeros num64)
+      in assert (ans <= 64) ans
+    else error (printf "number %d is larger than maxInt int64" num)
   else error (printf "bitwidth only allowed for non-negative numbers (num=%d)" num)
 
 composeKeys :: Vexp -> Vexp -> Vexp
@@ -917,23 +932,25 @@ composeKeys l r =
       oldbits = getBitWidth sleft
       deltabits = getBitWidth sright
       newbits = oldbits + deltabits
-  in assert (newbits < 32) $
+  in assert (newbits < 65) $
      (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
 make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Either String Vexp
 make2LevelFold config foldop fgroups fdata =
-  do let pos = pos_ fgroups
-     let log_gsize = const_ (grainsizelg config) fgroups
-     let ones = ones_ fgroups
+  let pos = pos_ fgroups
+      log_gsize = const_ (grainsizelg config) fgroups
+      ones = ones_ fgroups
      -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) | 1 = 01010101...
      -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) | 1 = 00110011
      -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) | 1 ...
-     let level1par = (pos >>. log_gsize) &. ones
-     let level1groups = composeKeys fgroups level1par
-     let level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
-     let level2results = complete $ Fold { foldop, fgroups, fdata=level1results }
-     return  $ assert (getBitWidth level1par == 1) level2results
+      level1par = (pos >>. log_gsize) &. ones
+      level1groups = composeKeys fgroups level1par
+      level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
+      level2results = complete $ Fold { foldop, fgroups, fdata=level1results }
+  in Right $ if (shuffle_aggs config)
+             then complete $ Fold {foldop, fgroups=complete $ VShuffle{varg=fgroups}, fdata}
+             else assert (getBitWidth level1par == 1) level2results
 
 
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
@@ -1032,6 +1049,116 @@ gatherAll cols shpos =
                                  , shsource
                                  , shpos
                                  }
+
+type Memoized = Map Vexp Vexp
+
+xformIden :: [Vexp] -> [Vexp]
+xformIden ins = xform (\x -> Just $ complete $ x) ins
+
+redundantRangePattern :: Vx -> Maybe Vexp
+redundantRangePattern (RangeV out1 out2 (Vexp{vx=(RangeV _ _ innerref)}))
+  = Just $ complete $ RangeV out1 out2 innerref
+
+redundantRangePattern _ = Nothing
+
+algebraicIdentities :: Vx -> Maybe Vexp
+algebraicIdentities (Binop {binop, left, right})
+  | (binop == BitAnd || binop == BitOr) && left == right =
+      Just left
+
+algebraicIdentities (Binop {binop=BitAnd, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}})
+  = Just zeros
+algebraicIdentities (Binop {binop=BitAnd, right=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}})
+  = Just zeros
+
+algebraicIdentities (Binop {binop=BitOr, left=Vexp{vx=RangeV{rmin=0,rstep=0}}, right})
+  = Just right
+
+algebraicIdentities (Binop {binop=BitOr, left, right=Vexp{vx=RangeV{rmin=0,rstep=0}}})
+  = Just left
+
+algebraicIdentities (Binop {binop=BitShift, left=zeros@Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just zeros -- zeros stay constant
+algebraicIdentities (Binop {binop=BitShift, left, right=Vexp{vx=RangeV{rmin=0,rstep=0}}}) = Just left -- noop
+
+
+-- in the scatter case: the positions array must be exactly the size of the source at this point.
+-- so this is really an identity if the scatter was legal in the first place.
+algebraicIdentities (Shuffle {shop=Scatter, shpos=Vexp{vx=RangeV{rmin=0,rstep=1}}, shsource})
+  = Just shsource
+
+-- in the gather case, only if we know the size of the positions matches then this is an identity.
+algebraicIdentities (Shuffle {shop=Gather, shpos=Vexp{vx=RangeV{rmin=0,rstep=1, rref}}, shsource})
+  | rref==shsource = Just shsource
+
+algebraicIdentities _ = Nothing
+
+lowering :: Vx -> Maybe Vexp
+lowering Binop{binop, left, right} =
+  case binop of
+    Max -> Just $ (left >. right) ?. (left, right)
+    Min -> Just $ (left <. right) ?. (left, right)
+    Neq -> Just $ (ones_ left) -. (left ==. right)
+    _ -> Nothing
+
+lowering _ = Nothing
+
+loweringPass :: [Vexp] -> [Vexp]
+loweringPass = xform lowering
+
+algebraicIdentitiesPass :: [Vexp] -> [Vexp]
+algebraicIdentitiesPass = xform algebraicIdentities
+
+redundantRangePass :: [Vexp] -> [Vexp]
+redundantRangePass = xform redundantRangePattern
+
+xform :: (Vx -> Maybe Vexp) -> [Vexp] -> [Vexp]
+xform fn vexps = let merge (accm,accl) vexp  = let (newm,newv) = transform fn vexp accm
+                                               in (newm, newv:accl)
+                     (_,outr) = foldl' merge (Map.empty, []) vexps
+                 in reverse outr
+
+transform :: (Vx -> Maybe Vexp) -> Vexp -> Memoized -> (Memoized, Vexp)
+transform fn vexp@(Vexp {vx}) mp  =
+  case Map.lookup vexp mp of
+    Nothing -> let (mp', ans) = transformVx fn vx mp
+                   mp'' = Map.insert vexp ans mp'
+               in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
+    Just x -> (mp, x)
+
+transformVx :: (Vx -> Maybe Vexp) -> Vx -> Memoized -> (Memoized, Vexp)
+transformVx fn vx mp =
+  let (outmp, prelim) = case vx of
+        Load _ -> (mp, vx)
+        RangeC {} -> (mp, vx)
+        RangeV a b rref ->
+          let (mp',rref') = transform fn rref mp
+          in (mp', RangeV a b rref')
+        Binop a left right ->
+          let (mp',left') = transform fn left mp
+              (mp'', right') = transform fn right mp'
+          in (mp'', Binop a left' right')
+        Shuffle a shsource  shpos ->
+          let (mp',shsource') = transform fn shsource mp
+              (mp'',shpos') = transform fn shpos mp'
+          in (mp'', Shuffle a shsource' shpos')
+        Fold a fgroups fdata ->
+          let (mp',fgroups') = transform fn fgroups mp
+              (mp'',fdata') = transform fn fdata mp'
+          in (mp'', Fold a fgroups' fdata')
+        Partition pivots pdata ->
+          let (mp', pivots') = transform fn pivots mp
+              (mp'',pdata') = transform fn pdata mp'
+          in (mp'', Partition pivots' pdata')
+        Like ldata a b ->
+          let (mp', ldata') = transform fn ldata mp
+          in (mp', Like ldata' a b)
+        VShuffle varg ->
+          let (mp', varg') = transform fn varg mp
+          in (mp', VShuffle varg')
+      xformPrelim = case fn prelim of -- now apply function to this.
+        Nothing -> complete $ prelim -- pattern does not match anything.
+        Just x -> x
+  in (outmp, xformPrelim)
 
 {-
 Diagram to understand the join deduce masks code:
