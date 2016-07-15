@@ -27,7 +27,7 @@ import Data.Int
 --import qualified Error as E
 import Error(check)
 import Data.Bits
-import Debug.Trace
+--import Debug.Trace
 import Text.Groom
 import qualified Data.HashMap.Strict as Map
 --import qualified Data.Map.Strict as Map
