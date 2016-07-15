@@ -1,0 +1,92 @@
+,,FRANCE,-1
+,,BRAZIL,-1
+,,AIR REG,-1
+,,BUILDING,16
+,,ASIA,64
+,,ECONOMY ANODIZED STEEL,4104
+,,AMERICA,40
+,,R,40
+,,GERMANY,200
+,,1-URGENT,40
+,,2-HIGH,104
+,,1-URGENT,40
+,,2-HIGH,104
+,,Brand#45,656
+,,Brand#23,432
+,,MED BOX,1072
+,,CANADA,96
+,,SAUDI ARABIA,528
+,,F,40
+lineitem,l_shipinstruct,DELIVER IN PERSON,16
+lineitem,l_shipmode,AIR,88
+lineitem,l_shipmode,FOB,112
+lineitem,l_shipmode,MAIL,40
+lineitem,l_shipmode,RAIL,136
+lineitem,l_shipmode,REG AIR,64
+lineitem,l_shipmode,SHIP,160
+lineitem,l_shipmode,TRUCK,16
+part,p_container,"JUMBO BAG",504
+part,p_container,"JUMBO BOX",352
+part,p_container,"JUMBO CAN",632
+part,p_container,"JUMBO CASE",288
+part,p_container,"JUMBO DRUM",1096
+part,p_container,"JUMBO JAR",440
+part,p_container,"JUMBO PACK",320
+part,p_container,"JUMBO PKG",16
+part,p_container,"LG BAG",584
+part,p_container,"LG BOX",416
+part,p_container,"LG CAN",232
+part,p_container,"LG CASE",48
+part,p_container,"LG DRUM",208
+part,p_container,"LG JAR",912
+part,p_container,"LG PACK",840
+part,p_container,"LG PKG",608
+part,p_container,"MED BAG",160
+part,p_container,"MED BOX",1072
+part,p_container,"MED CAN",864
+part,p_container,"MED CASE",472
+part,p_container,"MED DRUM",104
+part,p_container,"MED JAR",992
+part,p_container,"MED PACK",384
+part,p_container,"MED PKG",560
+part,p_container,"SM BAG",184
+part,p_container,"SM BOX",888
+part,p_container,"SM CAN",936
+part,p_container,"SM CASE",536
+part,p_container,"SM DRUM",1048
+part,p_container,"SM JAR",664
+part,p_container,"SM PACK",720
+part,p_container,"SM PKG",136
+part,p_container,"WRAP BAG",744
+part,p_container,"WRAP BOX",256
+part,p_container,"WRAP CAN",1016
+part,p_container,"WRAP CASE",72
+part,p_container,"WRAP DRUM",808
+part,p_container,"WRAP JAR",688
+part,p_container,"WRAP PACK",960
+part,p_container,"WRAP PKG",776
+part,p_brand,"Brand#11",176
+part,p_brand,"Brand#12",464
+part,p_brand,"Brand#13",16
+part,p_brand,"Brand#14",560
+part,p_brand,"Brand#15",400
+part,p_brand,"Brand#21",688
+part,p_brand,"Brand#22",624
+part,p_brand,"Brand#23",432
+part,p_brand,"Brand#24",144
+part,p_brand,"Brand#25",304
+part,p_brand,"Brand#31",784
+part,p_brand,"Brand#32",112
+part,p_brand,"Brand#33",336
+part,p_brand,"Brand#34",80
+part,p_brand,"Brand#35",496
+part,p_brand,"Brand#41",720
+part,p_brand,"Brand#42",48
+part,p_brand,"Brand#43",240
+part,p_brand,"Brand#44",208
+part,p_brand,"Brand#45",656
+part,p_brand,"Brand#51",752
+part,p_brand,"Brand#52",528
+part,p_brand,"Brand#53",592
+part,p_brand,"Brand#54",272
+part,p_brand,"Brand#55",368

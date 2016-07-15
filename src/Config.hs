@@ -11,6 +11,7 @@ module Config ( Config(..)
               , PKCols
               , BoundsRec
               , StorageRec
+              , DictRec
               , FKJoinOrder(..)
               , MType(..)
               , SType(..)
@@ -37,8 +38,11 @@ import qualified Data.List.NonEmpty as N
 import qualified Data.ByteString.Lazy as B
 import Data.Hashable
 import qualified Data.ByteString.Lazy.Char8 as C
+import qualified Data.HashMap.Strict as HashMap
+type HashMap = HashMap.HashMap
 type Map = Map.Map
 --type Set = Set.Set
+
 
 -- we use integer in the rec so that strings get
 -- parsed to Integer.
@@ -65,6 +69,13 @@ type StorageRec = ( C.ByteString -- schema
                   , Integer -- imprints
                   , C.ByteString  -- sorted (boolean)
                   )
+
+
+type DictRec = ( C.ByteString -- schema
+               , C.ByteString -- table
+               , C.ByteString -- column
+               , Integer -- encoding
+               )
 
 
 --- repr info from Monet tpch001
@@ -163,6 +174,11 @@ instance NFData MType
 instance Hashable MType
 
 
+makeDictionary :: V.Vector DictRec -> (HashMap C.ByteString Integer)
+makeDictionary vec =
+  let merge mp (_,_,str,i) = HashMap.insert str i mp
+  in V.foldl' merge HashMap.empty vec
+
 resolveTypeSpec :: TypeSpec -> MType
 resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
   where f "int" [] = MInt
@@ -254,9 +270,11 @@ addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount) =
        then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
        else return $ plain
 
-makeConfig :: Integer -> V.Vector BoundsRec -> Bool -> (V.Vector StorageRec) -> [Table] -> Either String Config
-makeConfig grainsizelg boundslist shuffle_aggs storagelist tables =
-  do let constraints = foldMap getTableConstraints tables
+makeConfig :: Integer -> V.Vector BoundsRec -> Bool -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Either String Config
+makeConfig grainsizelg boundslist shuffle_aggs storagelist tables dictlist =
+  do
+     let dictionary = makeDictionary dictlist
+     let constraints = foldMap getTableConstraints tables
      let tspecs = NameTable.fromList $ foldMap getTspecs tables
      let storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
      colinfo <- foldM (addEntry constraints storagemap) NameTable.empty boundslist
@@ -270,7 +288,7 @@ makeConfig grainsizelg boundslist shuffle_aggs storagelist tables =
      let partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
      let pktable = map pkpair tables
-     return $ Config { grainsizelg, colinfo, shuffle_aggs, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+     return $ Config { dictionary, grainsizelg, colinfo, shuffle_aggs, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
                        tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -318,6 +336,7 @@ makeFKEntries Table { name, fkeys } =
      fkrefs
 
 data Config =  Config  { grainsizelg :: Integer -- log of grainsizfae
+                       , dictionary :: HashMap C.ByteString Integer
                        , colinfo :: NameTable ColInfo
                        , shuffle_aggs :: Bool
                        , fkrefs :: Map FKCols (FKJoinOrder,Name)

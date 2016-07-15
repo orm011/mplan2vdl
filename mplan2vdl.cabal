@@ -28,8 +28,7 @@ library
                      , Config
                      , Dot
                      , SchemaParser
-  other-modules:       Dict
-                       Error
+  other-modules:       Error
                        Sha
   build-depends:       base >= 4.7 && <5
                      , MissingH
