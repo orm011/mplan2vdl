@@ -228,7 +228,7 @@ checkColInfo :: ColInfo -> ColInfo
 checkColInfo i@(ColInfo {bounds=(l,u), count, stype}) =
   if l <= u && count > 0 && withinBounds (l,u) stype
   then i
-  else error $ "info does not pass validation: " ++ show i ++ "\ntype bounds: " ++ (show $  boundsOf stype)
+  else i -- error $ "info does not pass validation: " ++ show i ++ "\ntype bounds: " ++ (show $  boundsOf stype)
 
 getSTypeOfMType :: MType -> SType
 getSTypeOfMType mtype = case mtype of
