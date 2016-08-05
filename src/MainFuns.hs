@@ -2,7 +2,7 @@ module MainFuns (main) where
 
 import System.Environment (getProgName,getArgs)
 import qualified System.Exit
-import System.IO (hPutStrLn, stderr)
+import System.IO (hPutStrLn, stderr, stdin)
 import Text.Printf (printf)
 --import Text.Groom (groom)
 --import Control.Monad(foldM)
@@ -79,15 +79,19 @@ readCommentedFile :: String -> IO B.ByteString
 readCommentedFile fname  = do contents <- B.readFile fname
                               return $ filterComments contents
 
+readCommentedFileFromStdIn :: IO B.ByteString
+readCommentedFileFromStdIn = do contents <- B.hGetContents stdin
+                                return $ filterComments contents
+
 checkUsage :: Mplan2Vdl -> IO ()
 checkUsage cmdargs  =
-  do checkInput "need an input mplan" $ mplanfile cmdargs /= []
-     if (dot cmdargs)
+  do if (dot cmdargs)
        then return ()
        else
        do checkInput "need a column bounds csv" $ boundsfile cmdargs /= []
           checkInput "need a schema file"  $ schemafile cmdargs /= []
           checkInput "need a storage file" $ storagefile cmdargs /= []
+          checkInput "need a dictionary file" $ dictionaryfile cmdargs /= []
           let mgrainsize = grainsize cmdargs
           checkInput "grainsize must be a power of 2" $ (mgrainsize  >= 0) && (popCount mgrainsize  == 1)
 
@@ -117,7 +121,7 @@ main = do
                then emitdot $ mplanfile cmdargs
                else (compile (apply_cleanup_passes cmdargs) (push_joins cmdargs))
   let grainsizelg = fromInteger $ toInteger $ countTrailingZeros $ grainsize cmdargs
-  monetplan <- readCommentedFile $ mplanfile cmdargs
+  monetplan <- if mplanfile cmdargs /= [] then readCommentedFile (mplanfile cmdargs) else hPutStrLn stderr "reading from stdin" >> readCommentedFileFromStdIn
   monetschema <- readCommentedFile $ schemafile cmdargs
   mboundslist <- readBoundsFile $ boundsfile cmdargs
   mstoragelist <- readStorageFile $ storagefile cmdargs
