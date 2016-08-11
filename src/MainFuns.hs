@@ -30,8 +30,8 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Dot
 
+
 data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
-                            , grainsize :: Int
                             , boundsfile :: String
                             , storagefile :: String
                             , schemafile :: String
@@ -39,13 +39,13 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , dot :: Bool
                             , apply_cleanup_passes::Bool
                             , push_joins :: Bool
-                            , shuffle_aggs_flag :: Bool
+                            , agg_strategy :: AggStrategy
+                            , grainsize :: Int
                             } deriving (Show, Data, Typeable)
 
 cmdTemplate :: Mplan2Vdl
 cmdTemplate = Mplan2Vdl
   { mplanfile = def &= args &= typ "FILE"
-  , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for foldSum/foldMax/etc (default 8192)" &= name "g"
   , boundsfile = def &= typ "CSV FILE" &= help "file in (table,col,min,max,count) csv format" &= name "b"
   , storagefile = def &= typ "CSV FILE" &= help "output of 'select * from storage' in csv format" &= name "t"
   , schemafile = def &= typ "msqldump file" &= help "output of msqldump -D -d <dbname>" &= name "s"
@@ -53,7 +53,11 @@ cmdTemplate = Mplan2Vdl
   , dot = False &= typ "BOOL" &= help "instead of running compiler, emit dot for monet plan" &= name "d"
   , push_joins = False &= typ "Bool" &= help "push joins below selects, and merges those selects when possible" &= name "p"
   , apply_cleanup_passes = True &= typ "BOOL" &= help "after generating vdl identify and clean up known no-op patterns" &= name "c"
-  , shuffle_aggs_flag = False &= typ "BOOL" &= help "insert shuffle operator in aggregates" &= name "shuffle"
+  , agg_strategy = enum
+        [AggSerial &= help "serial aggregation"
+        ,AggHierarchical 13 &= help "2-level hierarchical aggregation. use together with the grain size argument."
+        ,AggShuffle &= help "parallel agg with shuffle operator"]
+  , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for --agghierarchical (default 8192). Ignored otherwise" &= name "g"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -126,11 +130,14 @@ main = do
   mboundslist <- readBoundsFile $ boundsfile cmdargs
   mstoragelist <- readStorageFile $ storagefile cmdargs
   mdictlist <- readDictionaryFile $ dictionaryfile cmdargs
+  let strat = case agg_strategy cmdargs of
+        AggHierarchical _ -> AggHierarchical (grainsizelg)
+        x -> x
   let res = (do boundslist <- mboundslist -- maybe monad
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                config <- makeConfig grainsizelg boundslist (shuffle_aggs_flag cmdargs) storagelist tables dictlist
+                config <- makeConfig strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage

@@ -978,19 +978,21 @@ composeKeys l r =
 -- Assumes the fgroups are alrady sorted
 make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Either String Vexp
 make2LevelFold config foldop fgroups fdata =
-  let pos = pos_ fgroups
-      log_gsize = const_ (grainsizelg config) fgroups
-      ones = ones_ fgroups
-     -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) | 1 = 01010101...
-     -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) | 1 = 00110011
-     -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) | 1 ...
-      level1par = (pos >>. log_gsize) &. ones
-      level1groups = composeKeys fgroups level1par
-      level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
-      level2results = complete $ Fold { foldop, fgroups, fdata=level1results }
-  in Right $ if (shuffle_aggs config)
-             then complete $ Fold {foldop, fgroups=complete $ VShuffle{varg=fgroups}, fdata}
-             else assert (getBitWidth level1par == 1) level2results
+  Right $ complete $ case aggregation_strategy config of
+  AggSerial -> Fold {foldop, fgroups, fdata}
+  AggShuffle -> Fold {foldop, fgroups=complete $ VShuffle{varg=fgroups}, fdata}
+  AggHierarchical gsz ->
+      let pos = pos_ fgroups
+          log_gsize = const_ gsz fgroups
+          ones = ones_ fgroups
+          -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) | 1 = 01010101...
+          -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) | 1 = 00110011
+          -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) | 1 ...
+          level1par = (pos >>. log_gsize) &. ones
+          level1groups = composeKeys fgroups level1par
+          level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
+          level2results = Fold { foldop, fgroups, fdata=level1results }
+      in assert (getBitWidth level1par == 1) level2results
 
 
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
