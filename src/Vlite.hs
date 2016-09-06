@@ -27,7 +27,7 @@ import Data.Int
 --import qualified Error as E
 import Error(check)
 import Data.Bits
---import Debug.Trace
+import Debug.Trace
 import Text.Groom
 import qualified Data.HashMap.Strict as Map
 --import qualified Data.Map.Strict as Map
@@ -240,42 +240,44 @@ inferMetadata (Load _) = error "at the moment, should not be called with Load. T
 inferMetadata VShuffle {varg=Vexp{info}} = info -- same, just no ordering if there was
 
 inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
-  = ColInfo { bounds=(0,1), count, stype=SInt32 }
+  = ColInfo { bounds=(0,1), count, stype=SInt32, trailing_zeros=0 }
 
 inferMetadata RangeV {rmin=rstart,rstep,rref=Vexp {info=ColInfo {count}}}
   =  let extremes = [rstart, rstart + count*rstep]
          bounds = (minimum extremes, maximum extremes)
      in ColInfo { bounds
                 , count
-                , stype=SInt64 }
+                , stype=SInt64
+                , trailing_zeros = 0}
 
 inferMetadata RangeC {rmin=rstart, rstep, rcount}
   =  let extremes = [rstart + rcount*rstep, rstart]
      in ColInfo { bounds=(minimum extremes, maximum extremes)
                 , count=rcount
-                , stype=SInt64 } 
+                , stype=SInt64
+                , trailing_zeros = 0}
 
 inferMetadata Shuffle { shop=Scatter
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, trailing_zeros}}
                       , shpos=Vexp {info=ColInfo {bounds=(_,posmax)}}
                       }
-  = ColInfo { bounds=sourcebounds, count=posmax, stype }
+  = ColInfo { bounds=sourcebounds, count=posmax, stype, trailing_zeros }
 
 inferMetadata Shuffle { shop=Gather
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, trailing_zeros}}
                       , shpos=Vexp {info=ColInfo {count}}
                       }
-  = ColInfo { bounds=sourcebounds, count, stype }
+  = ColInfo { bounds=sourcebounds, count, stype, trailing_zeros }
 
 inferMetadata Fold { foldop=FSel
                    , fgroups=_
                    , fdata=Vexp {info=ColInfo {count}}
                    }
-  = ColInfo {bounds=(0, count-1), count, stype=SInt64 } -- positions always int64
+  = ColInfo {bounds=(0, count-1), count, stype=SInt64, trailing_zeros=0 } -- positions always int64
 
 inferMetadata Fold { foldop
                    , fgroups = Vexp { info=ColInfo {bounds=(glower,gupper), count=gcount} }
-                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, stype} }
+                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, stype, trailing_zeros} }
                    } =
   -- "suspicious: group and data count bounds dont match"
   --assert (gcount == dcount) $ -- TODO is this assert correct?
@@ -284,9 +286,9 @@ inferMetadata Fold { foldop
     FSum -> let extremes = [dlower, dlower*dcount, dupper, dupper*dcount]
                   -- for positive dlower, dlower is the minimum.
                   -- for negative dlower, dlower*dcount is the minimum, and so on.
-            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype }
-    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, stype }
-    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype }
+            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype, trailing_zeros }
+    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, stype, trailing_zeros }
+    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, trailing_zeros }
     FSel -> error "use different handler for select (should be above this one)"
 
 -- the result of partition is a list of indices that, for each pdata
@@ -297,52 +299,63 @@ inferMetadata Fold { foldop
 inferMetadata Partition
   { pivots=Vexp { info=ColInfo {count=pivotcount} }
   , pdata=Vexp { info=ColInfo {count=datacount} }
-  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, stype=SInt64 }
+  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, stype=SInt64, trailing_zeros=0 }
 
-inferMetadata Binop
-  { binop
-  , left=left@Vexp { info=ColInfo {bounds=(l1,u1), count=c1 , stype=lefttype } }
-  , right=right@Vexp { info=ColInfo {bounds=(l2,u2), count=c2} }
-  } = do
-         let count = min c1 c2
-             bounds = case binop of
-                Gt ->  (0,1)
-                Lt ->  (0,1)
-                Eq ->  (0,1)
-                Neq ->  (0,1)
-                Geq ->  (0,1)
-                Leq ->  (0,1)
-                LogAnd ->  (0,1)
-                LogOr ->  (0,1)
-                Add ->  (l1 + l2, u1 + u2)
-                Sub ->  (l1 - u2, u1 - l2) -- notice swap
-                Mul -> let allpairs = sequence [[l1,u1],[l2,u2]] -- cross product
-                           prods = map (foldl (*) 1) allpairs
-                       in  (minimum prods, maximum prods) -- TODO double check reasoning here.
-                Div -> let allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
-                           divs = map (\(x,y) -> x `div` y) allpairs
-                       in  (minimum divs, maximum divs) -- TODO double check reasoning here.
-                Min -> (min l1 l2, min u1 u2) -- this is true, right?
-                Max -> (max l1 l2, max u1 u2)
-                Mod -> (0, u2) -- assuming mods are always positive
-                BitAnd -> if (l1 >= 0 && l2 >= 0)
-                          then let mx = min (maxForWidth left) (maxForWidth right)
-                               in (0,mx) -- precision could be improved.
-                          else (toInteger $ (minBound :: Int64), toInteger$ (maxBound :: Int64)) -- used to be an error
-                BitOr -> if (l1 >= 0 && l2 >= 0)
-                         then let mx = max (maxForWidth left) (maxForWidth right)
-                              in (0,mx) -- precision could be improved.
-                         else (toInteger $ (minBound :: Int64), toInteger $ (maxBound :: Int64)) -- used to be an error
-                BitShift -> --assert (u2 < 64) $ --"shift left by more than 31?"
-                            --    -- shift left is like multiplication (amplifies neg and pos)
-                            --    -- shift right is like division (shrinks numbers neg and pos)
-                            --    -- both can happen in a single call to shift...
-                            let mshift (a,b) = let shfmask = (fromInteger $ toInteger $ abs b)
-                                               in if b < 0 then (a `shiftR` shfmask)
-                                                  else a `shiftL` shfmask
-                                allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
-                                extremes = map mshift allpairs
-                            in (minimum extremes, maximum extremes)
+
+inferMetadata arg@Binop { binop
+                        , left=Vexp { info=ColInfo {count=c1 , stype=lefttype, trailing_zeros=ltrail } }
+                        , right=Vexp { info=ColInfo {count=c2, bounds=(_, upper)} }
+                        } =
+    let count = min c1 c2
+        bounds = inferBounds arg
+        trailing_zeros' = case binop of
+          BitShift -> Debug.Trace.traceShowId (ltrail - upper) -- in a bitshift
+          _ -> 0
+    in ColInfo {bounds, count, stype=lefttype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
+         -- until we need more precision, we're conservative on the trailing zeros...
+
+inferBounds :: Vx -> (Integer, Integer)
+inferBounds Binop { binop
+  , left=left@Vexp { info=ColInfo {bounds=(l1,u1)} }
+  , right=right@Vexp { info=ColInfo {bounds=(l2,u2) } }
+  } = case binop of
+       Gt ->  (0,1)
+       Lt ->  (0,1)
+       Eq ->  (0,1)
+       Neq ->  (0,1)
+       Geq ->  (0,1)
+       Leq ->  (0,1)
+       LogAnd ->  (0,1)
+       LogOr ->  (0,1)
+       Add ->  (l1 + l2, u1 + u2)
+       Sub ->  (l1 - u2, u1 - l2) -- notice swap
+       Mul -> let allpairs = sequence [[l1,u1],[l2,u2]] -- cross product
+                  prods = map (foldl (*) 1) allpairs
+              in  (minimum prods, maximum prods) -- TODO double check reasoning here.
+       Div -> let allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
+                  divs = map (\(x,y) -> x `div` y) allpairs
+              in  (minimum divs, maximum divs) -- TODO double check reasoning here.
+       Min -> (min l1 l2, min u1 u2) -- this is true, right?
+       Max -> (max l1 l2, max u1 u2)
+       Mod -> (0, u2) -- assuming mods are always positive
+       BitAnd -> if (l1 >= 0 && l2 >= 0)
+                 then let mx = min (maxForWidth left) (maxForWidth right)
+                      in (0,mx) -- precision could be improved.
+                 else (toInteger $ (minBound :: Int64), toInteger$ (maxBound :: Int64)) -- used to be an error
+       BitOr -> if (l1 >= 0 && l2 >= 0)
+                then let mx = max (maxForWidth left) (maxForWidth right)
+                     in (0,mx) -- precision could be improved.
+                else (toInteger $ (minBound :: Int64), toInteger $ (maxBound :: Int64)) -- used to be an error
+       BitShift -> --assert (u2 < 64) $ --"shift left by more than 31?"
+                   --    -- shift left is like multiplication (amplifies neg and pos)
+                   --    -- shift right is like division (shrinks numbers neg and pos)
+                   --    -- both can happen in a single call to shift...
+                   let mshift (a,b) = let shfmask = (fromInteger $ toInteger $ abs b)
+                                      in if b < 0 then (a `shiftR` shfmask)
+                                         else a `shiftL` shfmask
+                       allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
+                       extremes = map mshift allpairs
+                   in (minimum extremes, maximum extremes)
              -- type_compatible = case (lefttype, righttype) of -- this check is quite loose.
              --   (a,b) | a == b -> True -- identical then true.
              --   (SChar _, SChar _) -> True -- character types.
@@ -350,7 +363,8 @@ inferMetadata Binop
              --   (SInt32, SInt64) -> True -- C is good enough for this
              --   _ -> error $ "incompatible types for op: " ++ show binop ++ "\nleft:\n" ++ show left ++ "\nright:\n" ++ show right
                -- notice incompatible decimals will fail here
-           in ColInfo {bounds, count, stype=lefttype} -- arbitrary choice of type right now.
+
+inferBounds _ = error "not for this variant" -- not needed or called for other variants
 
 inferLineage :: Vx -> Lineage
 
@@ -945,10 +959,11 @@ makeCompositeKey (firstvexp :| rest) =
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
-shiftToZero arg@Vexp { info=ColInfo {bounds=(vmin,_)} }
-  = if vmin == 0 then arg
-    else let ret@Vexp { info=ColInfo {bounds=(newmin,_)} } = arg -. const_ vmin arg
-         in assert (newmin == 0) ret
+shiftToZero arg@Vexp { info=ColInfo {bounds=(vmin,_), trailing_zeros} }
+  = if vmin == 0 && trailing_zeros == 0 then arg
+    else let norm@Vexp { info=ColInfo {bounds=(vmin', _), trailing_zeros=t'} } = (arg >>. const_ trailing_zeros arg)
+             ret@Vexp {info=ColInfo {bounds=(vmin'', _) }} = norm -. const_ vmin' norm
+         in assert (vmin'' == 0 && t' == 0) ret
 
 -- bitwidth required to represent all members
 getBitWidth :: Vexp -> Integer
@@ -964,6 +979,7 @@ bitsize num =
       in assert (ans <= 64) ans
     else error (printf "number %d is larger than maxInt int64" num)
   else error (printf "bitwidth only allowed for non-negative numbers (num=%d)" num)
+
 
 composeKeys :: Vexp -> Vexp -> Vexp
 composeKeys l r =

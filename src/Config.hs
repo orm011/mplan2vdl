@@ -54,7 +54,9 @@ type Map = Map.Map
 -- We want any type bound errors (such as being <  0 when it shouldnt) to
 -- be the result of errors inherent in the input data, not of
 -- errors due to overflwoing numbers within the program.
-type BoundsRec = (B.ByteString, B.ByteString, Integer, Integer, Integer)
+
+
+type BoundsRec = (B.ByteString, B.ByteString, Integer, Integer, Integer, Integer)
 
 -- contents of select * from storage
 type StorageRec = ( C.ByteString -- schema
@@ -230,6 +232,7 @@ data ColInfo = ColInfo
   { bounds::(Integer,Integer)
     -- bounds on element values
     --this is a bound on the array size (num elts) needed to hold it
+  , trailing_zeros::Integer -- largest power of two known to divide all values in column
   , count::Integer
   , stype::SType
   } deriving (Eq,Show,Generic)
@@ -242,8 +245,8 @@ data StorageInfo = StorageInfo
 instance NFData ColInfo
 
 checkColInfo :: ColInfo -> ColInfo
-checkColInfo i@(ColInfo {bounds=(l,u), count, stype}) =
-  if l <= u && count > 0 && withinBounds (l,u) stype
+checkColInfo i@(ColInfo {bounds=(l,u), count, stype, trailing_zeros}) =
+  if l <= u && count > 0 && withinBounds (l,u) stype && trailing_zeros >=0
   then i
   else i -- error $ "info does not pass validation: " ++ show i ++ "\ntype bounds: " ++ (show $  boundsOf stype)
 
@@ -262,10 +265,10 @@ getSTypeOfMType mtype = case mtype of
 
 
 addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
-addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount) =
+addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing_zeros) =
   do let StorageInfo {mtype}  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
      let stype = getSTypeOfMType mtype
-     let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype }
+     let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype, trailing_zeros }
      plain <- NameTable.insert (Name [tab,col]) colinfo nametab
      if elem (Name[tab,col]) constraints
        then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
