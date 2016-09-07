@@ -1,7 +1,8 @@
 module Vdl (vdlFromVexps) where
 
+--import qualified Control.Monad.Reader as R
+import Data.Foldable(foldl')
 import Config
-import Control.Monad(foldM)
 import Name(Name(..))
 --import Data.Int
 import Debug.Trace
@@ -167,30 +168,30 @@ makeload n =
              , inname
              , vec = completeW $ (Load n, Nothing) }
 
-voodooFromVexpMemo :: MemoTable -> V.Vexp -> Either String (MemoTable, Voodoo)
+voodooFromVexpMemo :: MemoTable -> V.Vexp -> (MemoTable, Voodoo)
 voodooFromVexpMemo s vexp@(V.Vexp vx info _ _ _ _) =
   case HMap.lookup vexp s of
-    Nothing -> do (s',r) <- voodooFromVxNoMemo s vx
-                  let ans = (r, Just info)
-                  let s'' = HMap.insert vexp ans s'
-                  return (s'', ans)
-    Just ans -> return (s, ans)
+    Nothing -> let (s',r) = voodooFromVxNoMemo s vx
+                   ans = (r, Just info)
+                   s'' = HMap.insert vexp ans s'
+               in  (s'', ans)
+    Just ans -> (s, ans)
 
-voodooFromVxNoMemo :: MemoTable -> V.Vx -> Either String (MemoTable, VoodooMinus)
+voodooFromVxNoMemo :: MemoTable -> V.Vx -> (MemoTable, VoodooMinus)
 
-voodooFromVxNoMemo st (V.Load n) = return $ (st, makeload n)
+voodooFromVxNoMemo st (V.Load n) = (st, makeload n)
 
 voodooFromVxNoMemo s (V.RangeV {V.rmin, V.rstep, V.rref}) =
-  do (s',v) <- voodooFromVexpMemo s rref
-     return $ (s', RangeV {rmin, rstep, rvec=completeW v})
+  let (s',v) = voodooFromVexpMemo s rref
+  in (s', RangeV {rmin, rstep, rvec=completeW v})
 
 voodooFromVxNoMemo s (V.RangeC {V.rmin, V.rstep, V.rcount}) =
-  return $ (s, RangeC {rmin, rstep, rcount })
+  (s, RangeC {rmin, rstep, rcount })
 
 voodooFromVxNoMemo s (V.Binop { V.binop, V.left, V.right}) =
-  do (s', l) <- voodooFromVexpMemo s left
-     (s'', r) <- voodooFromVexpMemo s' right
-     let (t,_) = case binop of
+  let (s', l) = voodooFromVexpMemo s left
+      (s'', r) = voodooFromVexpMemo s' right
+      (t,_) = case binop of
               V.Gt -> l >. r
               V.Eq -> l ==. r
               V.Mul -> l *. r
@@ -209,61 +210,62 @@ voodooFromVxNoMemo s (V.Binop { V.binop, V.left, V.right}) =
               V.BitOr -> (l |. r)
               V.BitAnd -> (l &. r)
               V.Mod -> error "implement this?"
-     return $ (s'',t)
+  in (s'',t)
 
 voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
-  do (s', source) <- voodooFromVexpMemo s shsource
-     (s'', positions) <- voodooFromVexpMemo s' shpos
-     return $ (s'', case shop of
-                  V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
-                  V.Scatter -> let scatterfold = case source of
-                                     (RangeV {rmin=0,rstep=1},_) -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
-                                     _ -> completeW $ pos_ source
-                               in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions })
+  let (s', source) = voodooFromVexpMemo s shsource
+      (s'', positions) = voodooFromVexpMemo s' shpos
+      scatter = case shop of
+        V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
+        V.Scatter -> let scatterfold = case source of
+                           (RangeV {rmin=0,rstep=1},_) -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
+                           _ -> completeW $ pos_ source
+                     in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions }
+  in (s'', scatter)
 
 voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern, V.lcol }) =
-  do (s', newldata) <- voodooFromVexpMemo s ldata
-     let ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
-     return $ (s', Like {ldata=completeW newldata, ldict=completeW (ldict, Nothing), lpattern})
+  let (s', newldata)  = voodooFromVexpMemo s ldata
+      ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
+  in (s', Like {ldata=completeW newldata, ldict=completeW (ldict, Nothing), lpattern})
 
 voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
 
 voodooFromVxNoMemo s (V.VShuffle { V.varg }) =
-  do (s', newarg) <- voodooFromVexpMemo s varg
-     return $ (s', VShuffle $ completeW newarg)
+  let (s', newarg) = voodooFromVexpMemo s varg
+  in (s', VShuffle $ completeW newarg)
 
 voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
-  do (s', arg1) <- voodooFromVexpMemo s fgroups
-     (s'', arg2) <- voodooFromVexpMemo s' fdata
-     let op = case foldop of
-               V.FSum -> FoldSum
-               V.FMax -> FoldMax
-               V.FMin -> FoldMin
-               V.FSel -> FoldSelect
-     return $ (s'', Binary { op, arg1=completeW arg1, arg2=completeW arg2 })
+  let (s', arg1) = voodooFromVexpMemo s fgroups
+      (s'', arg2) = voodooFromVexpMemo s' fdata
+      op = case foldop of
+        V.FSum -> FoldSum
+        V.FMax -> FoldMax
+        V.FMin -> FoldMin
+        V.FSel -> FoldSelect
+  in (s'', Binary { op, arg1=completeW arg1, arg2=completeW arg2 })
 
 voodooFromVxNoMemo s (V.Partition {V.pdata, V.pivots}) =
-  do (s', arg1) <- voodooFromVexpMemo s pdata
-     (s'', arg2) <- voodooFromVexpMemo s' pivots
-     return $ (s'', Binary {op=Partition, arg1=completeW arg1, arg2=completeW arg2 })
+  let (s', arg1) = voodooFromVexpMemo s pdata
+      (s'', arg2) = voodooFromVexpMemo s' pivots
+  in (s'', Binary {op=Partition, arg1=completeW arg1, arg2=completeW arg2 })
 
-voodoosFromVexps :: [V.Vexp] -> Either String [Voodoo]
+voodoosFromVexps :: [V.Vexp] -> [Voodoo]
 voodoosFromVexps vexps =
-  do let solve (s, res) v = do (s', v') <- voodooFromVexpMemo s v
-                               return (s', v':res)
-     (_, res) <- foldM solve (HMap.empty,[]) vexps
-     return $ map (\r -> ((MaterializeCompact . completeW) r, Nothing)) res
+  let solve (s, res) v =  let (s', v') = voodooFromVexpMemo s v
+                          in  (s', v':res)
+      (_, ans)  = foldl' solve (HMap.empty,[]) vexps
+  in map (\r -> ((MaterializeCompact . completeW) r, Nothing)) ans
 
-vrefsFromVoodoos :: [Voodoo] -> Either String Log
+vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =
-  do let log0 = [(0, Load $ Name ["dummy"], Nothing)]
-     let state0 = ((HMap.empty, log0), undefined)
-     ((_, finalLog),_) <- foldM process state0 vecs
-     let post = tail $ reverse $ finalLog -- remove dummy, reverse
+  let log0 = [(0, Load $ Name ["dummy"], Nothing)]
+      state0 = ((HMap.empty, log0), undefined)
+      ((_, finalLog),_) = foldl' process state0 vecs
+      post = tail $ reverse $ finalLog -- remove dummy, reverse
      --let tr = "\n--Vref output:\n" ++ groom post
      --return $ trace tr post
-     return $ trace (show $ length post) post
-       where process (state, _) v  = memVrefFromVoodoo state v
+  in trace (show $ length post) post
+  where process (state, _) v  = memVrefFromVoodoo state v
 
 type LookupTable = HMap.HashMap Voodoo Int
 type Log = [(Int, Vref, Maybe ColInfo)]
@@ -274,56 +276,56 @@ addToLog log (v,info) = let (n, _, _) = head log
                  in ((n+1, v, info) : log, n+1)
 
 --used to remember common expressions from before
-memVrefFromVoodoo :: State -> Voodoo -> Either String (State, Int)
+memVrefFromVoodoo :: State -> Voodoo -> (State, Int)
 memVrefFromVoodoo state@(tab, log) vd@(vdminus, info) =
   case HMap.lookup vd tab of
-    Nothing -> do ((tab', log'), vref) <- vrefFromVoodoo state vdminus
-                  let (log'', iden) = addToLog log' (vref, info)
-                  let tab'' = HMap.insert vd iden tab'
-                    in return $ ((tab'', log''), iden)
-    Just iden -> Right ((tab, log), iden) -- nothing changes
+    Nothing -> let ((tab', log'), vref) = vrefFromVoodoo state vdminus
+                   (log'', iden) = addToLog log' (vref, info)
+                   tab'' = HMap.insert vd iden tab'
+               in ((tab'', log''), iden)
+    Just iden -> ((tab, log), iden) -- nothing changes
 
-vrefFromVoodoo :: State -> VoodooMinus -> Either String (State, Vref)
+vrefFromVoodoo :: State -> VoodooMinus -> (State, Vref)
 
-vrefFromVoodoo state (Load n) = return $ (state, Load n)
+vrefFromVoodoo state (Load n) = (state, Load n)
 
 vrefFromVoodoo state (RangeC {rmin,rstep,rcount} ) =
-  return $ (state, RangeC {rmin,rstep,rcount})
+  (state, RangeC {rmin,rstep,rcount})
 
 vrefFromVoodoo state (RangeV  {rmin,rstep,rvec=W (rvec,_)}) =
-  do (state', n') <- memVrefFromVoodoo state rvec
-     return $ (state', RangeV { rmin,rstep, rvec= n' })
+  let (state', n') = memVrefFromVoodoo state rvec
+  in (state', RangeV { rmin,rstep, rvec= n' })
 
 vrefFromVoodoo state (Scatter {scattersource=W (scattersource,_)
                               , scatterfold=W (scatterfold,_)
                               , scatterpos=W (scatterpos,_) }) =
-  do (state', n') <- memVrefFromVoodoo state scattersource
-     (state'', n'') <- memVrefFromVoodoo state' scatterfold
-     (state''', n''') <- memVrefFromVoodoo state'' scatterpos
-     return $ (state''', Scatter {scattersource= n', scatterfold= n'', scatterpos= n'''})
+  let (state', n') = memVrefFromVoodoo state scattersource
+      (state'', n'') = memVrefFromVoodoo state' scatterfold
+      (state''', n''') = memVrefFromVoodoo state'' scatterpos
+  in (state''', Scatter {scattersource= n', scatterfold= n'', scatterpos= n'''})
 
 vrefFromVoodoo state (Project {outname, inname, vec=W (vec,_)}) =
-  do (state', n') <- memVrefFromVoodoo state vec
-     return $ (state', Project { outname, inname, vec=n' })
+  let (state', n') = memVrefFromVoodoo state vec
+  in (state', Project { outname, inname, vec=n' })
 
 
 vrefFromVoodoo state (Binary { op, arg1=W (arg1,_) , arg2=W (arg2,_) }) =
-  do (state', n1) <- memVrefFromVoodoo state arg1
-     (state'', n2) <- memVrefFromVoodoo state' arg2
-     return $ (state'', Binary { op, arg1=n1, arg2=n2})
+  let (state', n1) = memVrefFromVoodoo state arg1
+      (state'', n2) = memVrefFromVoodoo state' arg2
+  in  (state'', Binary { op, arg1=n1, arg2=n2})
 
 vrefFromVoodoo state (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
-  do (state', n1) <- memVrefFromVoodoo state ldata
-     (state'', n2) <- memVrefFromVoodoo state' ldict
-     return $ (state'', Like { ldata=n1, ldict=n2, lpattern})
+  let (state', n1) = memVrefFromVoodoo state ldata
+      (state'', n2) = memVrefFromVoodoo state' ldict
+  in (state'', Like { ldata=n1, ldict=n2, lpattern})
 
 vrefFromVoodoo state (VShuffle { varg=W(varg,_)}) =
-  do (state', n1) <- memVrefFromVoodoo state varg
-     return $ (state', VShuffle {varg=n1})
+  let  (state', n1) = memVrefFromVoodoo state varg
+  in (state', VShuffle {varg=n1})
 
 vrefFromVoodoo state (MaterializeCompact {mout=W (mout,_)}) =
-  do (state', n') <- memVrefFromVoodoo state mout
-     return $ (state', MaterializeCompact n' )
+  let (state', n') = memVrefFromVoodoo state mout
+  in (state', MaterializeCompact n' )
 
 {- now a list of strings -}
 toList :: Vref -> [String]
@@ -387,8 +389,8 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: Config -> [V.Vexp] -> Either String Vdl
+vdlFromVexps :: Config -> [V.Vexp] -> Vdl
 vdlFromVexps conf vexps =
-  do voodoos <- voodoosFromVexps vexps
-     vrefs <- vrefsFromVoodoos voodoos
-     return $ Vdl $ dumpVref conf vrefs
+  let voodoos = voodoosFromVexps vexps
+      vrefs = vrefsFromVoodoos voodoos
+  in Vdl $ dumpVref conf vrefs

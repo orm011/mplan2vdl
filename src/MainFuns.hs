@@ -177,7 +177,5 @@ compile apply_passes push_fk_joins planstring config =
      let passes = if apply_passes then
                    (Vl.algebraicIdentitiesPass . Vl.loweringPass . Vl.redundantRangePass)  else (\x -> x)
      let vexps' =  passes vexps
-     vdl <- case Vdl.vdlFromVexps config vexps' of
-                  Left err -> Left $ "(at Vdl stage)" ++ err
-                  other -> other
+     let vdl = Vdl.vdlFromVexps config vexps'
      return $ (C.pack $ show vdl)
