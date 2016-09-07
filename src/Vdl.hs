@@ -378,9 +378,11 @@ printLine config (iden, vref, info) =
         Just x -> "   ;; " ++ show x
   in (join "," $ (show iden) : strs) ++ (if show_metadata config then dispinfo else "")
 
-dumpVref ::Config -> Log -> String
-dumpVref conf tuples = let lns = map (printLine conf) tuples
-                       in join "\n" lns
+dumpVref :: Log -> R.Reader Config String
+dumpVref tuples =
+  do config <- R.ask
+     let lns = map (printLine config) tuples
+     return $ join "\n" lns
 
 
 -- forces the printer to use our custom format rather than
@@ -391,7 +393,6 @@ instance Show Vdl where
 
 vdlFromVexps :: [V.Vexp] -> R.Reader Config Vdl
 vdlFromVexps vexps =
-  do config <- R.ask
-     let voodoos = voodoosFromVexps vexps
-     let vrefs = vrefsFromVoodoos voodoos
-     return $ Vdl $ dumpVref config vrefs
+  let voodoos = voodoosFromVexps vexps
+      log  = vrefsFromVoodoos voodoos
+  in Vdl <$> dumpVref log
