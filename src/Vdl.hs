@@ -1,6 +1,6 @@
 module Vdl (vdlFromVexps) where
 
---import qualified Control.Monad.Reader as R
+import qualified Control.Monad.Reader as R
 import Data.Foldable(foldl')
 import Config
 import Name(Name(..))
@@ -389,8 +389,9 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: Config -> [V.Vexp] -> Vdl
-vdlFromVexps conf vexps =
-  let voodoos = voodoosFromVexps vexps
-      vrefs = vrefsFromVoodoos voodoos
-  in Vdl $ dumpVref conf vrefs
+vdlFromVexps :: [V.Vexp] -> R.Reader Config Vdl
+vdlFromVexps vexps =
+  do config <- R.ask
+     let voodoos = voodoosFromVexps vexps
+     let vrefs = vrefsFromVoodoos voodoos
+     return $ Vdl $ dumpVref config vrefs

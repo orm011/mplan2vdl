@@ -1,5 +1,6 @@
 module MainFuns (main) where
 
+import Control.Monad.Reader (runReader)
 import System.Environment (getProgName,getArgs)
 import qualified System.Exit
 import System.IO (hPutStrLn, stderr, stdin)
@@ -177,5 +178,5 @@ compile apply_passes push_fk_joins planstring config =
      let passes = if apply_passes then
                    (Vl.algebraicIdentitiesPass . Vl.loweringPass . Vl.redundantRangePass)  else (\x -> x)
      let vexps' =  passes vexps
-     let vdl = Vdl.vdlFromVexps config vexps'
+     let vdl = runReader (Vdl.vdlFromVexps vexps') config
      return $ (C.pack $ show vdl)
