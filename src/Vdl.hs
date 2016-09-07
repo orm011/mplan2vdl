@@ -1,6 +1,6 @@
 module Vdl (vdlFromVexps) where
 
-import qualified Control.Monad.Reader as R
+import Control.Monad.Reader hiding (join)
 import Data.Foldable(foldl')
 import Config
 import Name(Name(..))
@@ -370,19 +370,19 @@ toList (VShuffle {varg}) =
 toList (MaterializeCompact x) =
   ["MaterializeCompact","Id " ++ show x]
 
-printLine :: Config -> (Int, Vref, Maybe ColInfo) -> String
-printLine config (iden, vref, info) =
-  let strs = toList vref
-      dispinfo = case info of
-        Nothing -> ""
-        Just x -> "   ;; " ++ show x
-  in (join "," $ (show iden) : strs) ++ (if show_metadata config then dispinfo else "")
+printLine :: (Int, Vref, Maybe ColInfo) -> Reader Config String
+printLine (iden, vref, info) =
+  do display <- asks show_metadata
+     let strs = toList vref
+     let dispinfo = case info of
+           Nothing -> ""
+           Just x -> "  ;; " ++ show x
+     let meta = if display then dispinfo else ""
+     return $ (join "," $ (show iden) : strs) ++ meta
 
-dumpVref :: Log -> R.Reader Config String
-dumpVref tuples =
-  do config <- R.ask
-     let lns = map (printLine config) tuples
-     return $ join "\n" lns
+dumpVref :: Log -> Reader Config String
+dumpVref tuples = let lns = mapM printLine tuples
+                  in  join "\n" <$> lns
 
 
 -- forces the printer to use our custom format rather than
@@ -391,7 +391,7 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: [V.Vexp] -> R.Reader Config Vdl
+vdlFromVexps :: [V.Vexp] -> Reader Config Vdl
 vdlFromVexps vexps =
   let voodoos = voodoosFromVexps vexps
       log  = vrefsFromVoodoos voodoos
