@@ -309,7 +309,7 @@ inferMetadata arg@Binop { binop
     let count = min c1 c2
         bounds = inferBounds arg
         trailing_zeros' = case binop of
-          BitShift -> Debug.Trace.traceShow  ("ltrail-upper" :: String) (ltrail - upper) -- in a bitshift
+          BitShift -> (ltrail - upper) 
           _ -> 0
     in ColInfo {bounds, count, stype=lefttype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
          -- until we need more precision, we're conservative on the trailing zeros...
@@ -351,8 +351,8 @@ inferBounds Binop { binop
                    --    -- shift right is like division (shrinks numbers neg and pos)
                    --    -- both can happen in a single call to shift...
                    let mshift (a,b) = let shfmask = (fromInteger $ toInteger $ abs b)
-                                      in if b < 0 then (a `shiftR` shfmask)
-                                         else a `shiftL` shfmask
+                                      in if b < 0 then (a `shiftL` shfmask)
+                                         else a `shiftR` shfmask
                        allpairs = [(l1,l2), (l1,u2), (u1,l2), (u1,u2)]
                        extremes = map mshift allpairs
                    in (minimum extremes, maximum extremes)
@@ -1178,9 +1178,12 @@ xform fn vexps = let merge (accm,accl) vexp  = let (newm,newv) = transform fn ve
 transform :: (Vx -> Maybe Vexp) -> Vexp -> Memoized -> (Memoized, Vexp)
 transform fn vexp@(Vexp {vx}) mp  =
   case Map.lookup vexp mp of
-    Nothing -> let (mp', ans) = transformVx fn vx mp
-                   mp'' = Map.insert vexp ans mp'
-               in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
+    Nothing ->
+      let (mp', ans) = case vx of
+            Load _ -> (mp, vexp) -- hack: we cannot deduce info for load without the config, so just keep it.
+            _ ->  transformVx fn vx mp
+          mp'' = Map.insert vexp ans mp'
+      in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
     Just x -> (mp, x)
 
 transformVx :: (Vx -> Maybe Vexp) -> Vx -> Memoized -> (Memoized, Vexp)
