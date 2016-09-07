@@ -277,9 +277,10 @@ addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing
        then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
        else return $ plain
 
-makeConfig :: AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Either String Config
-makeConfig aggregation_strategy boundslist storagelist tables dictlist =
-  do let dictionary = makeDictionary dictlist
+makeConfig :: Bool -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Either String Config
+makeConfig metadata aggregation_strategy boundslist storagelist tables dictlist =
+  do let show_metadata = metadata
+     let dictionary = makeDictionary dictlist
      let constraints = foldMap getTableConstraints tables
      let tspecs = NameTable.fromList $ foldMap getTspecs tables
      let storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
@@ -294,7 +295,7 @@ makeConfig aggregation_strategy boundslist storagelist tables dictlist =
      let partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
      let pktable = map pkpair tables
-     return $ Config { aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+     return $ Config { show_metadata, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
                        tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -345,6 +346,7 @@ makeFKEntries Table { name, fkeys } =
 data AggStrategy = AggHierarchical Integer | AggSerial | AggShuffle deriving (Show, Eq, Data, Typeable)
 
 data Config =  Config  { aggregation_strategy :: AggStrategy
+                       , show_metadata :: Bool
                        , dictionary :: HashMap C.ByteString Integer
                        , colinfo :: NameTable ColInfo
                        , fkrefs :: Map FKCols (FKJoinOrder,Name)

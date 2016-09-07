@@ -36,6 +36,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , storagefile :: String
                             , schemafile :: String
                             , dictionaryfile :: String
+                            , metadata :: Bool
                             , dot :: Bool
                             , apply_cleanup_passes::Bool
                             , push_joins :: Bool
@@ -58,6 +59,7 @@ cmdTemplate = Mplan2Vdl
         ,AggHierarchical 13 &= help "2-level hierarchical aggregation. use together with the grain size argument."
         ,AggShuffle &= help "parallel agg with shuffle operator"]
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for --agghierarchical (default 8192). Ignored otherwise" &= name "g"
+  , metadata = False &= typ "Bool" &= help "show inferred metadata in output"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -137,7 +139,7 @@ main = do
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                config <- makeConfig strat boundslist storagelist tables dictlist
+                config <- makeConfig (metadata cmdargs) strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage
@@ -175,7 +177,7 @@ compile apply_passes push_fk_joins planstring config =
      let passes = if apply_passes then
                    (Vl.algebraicIdentitiesPass . Vl.loweringPass . Vl.redundantRangePass)  else (\x -> x)
      let vexps' =  passes vexps
-     vdl <- case Vdl.vdlFromVexps vexps' of
+     vdl <- case Vdl.vdlFromVexps config vexps' of
                   Left err -> Left $ "(at Vdl stage)" ++ err
                   other -> other
      return $ (C.pack $ show vdl)

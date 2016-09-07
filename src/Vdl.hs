@@ -1,6 +1,6 @@
 module Vdl (vdlFromVexps) where
 
-import Config(ColInfo)
+import Config
 import Control.Monad(foldM)
 import Name(Name(..))
 --import Data.Int
@@ -368,17 +368,17 @@ toList (VShuffle {varg}) =
 toList (MaterializeCompact x) =
   ["MaterializeCompact","Id " ++ show x]
 
-printLine :: (Int, Vref, Maybe ColInfo) -> String
-printLine (iden, vref, info) =
+printLine :: Config -> (Int, Vref, Maybe ColInfo) -> String
+printLine config (iden, vref, info) =
   let strs = toList vref
       dispinfo = case info of
         Nothing -> ""
         Just x -> "   ;; " ++ show x
-  in (join "," $ (show iden) : strs) ++ dispinfo
+  in (join "," $ (show iden) : strs) ++ (if show_metadata config then dispinfo else "")
 
-dumpVref :: Log -> String
-dumpVref tuples = let lns = map printLine tuples
-                  in join "\n" lns
+dumpVref ::Config -> Log -> String
+dumpVref conf tuples = let lns = map (printLine conf) tuples
+                       in join "\n" lns
 
 
 -- forces the printer to use our custom format rather than
@@ -387,8 +387,8 @@ data Vdl = Vdl String
 instance Show Vdl where
   show (Vdl s) = s
 
-vdlFromVexps :: [V.Vexp] -> Either String Vdl
-vdlFromVexps vexps =
+vdlFromVexps :: Config -> [V.Vexp] -> Either String Vdl
+vdlFromVexps conf vexps =
   do voodoos <- voodoosFromVexps vexps
      vrefs <- vrefsFromVoodoos voodoos
-     return $ Vdl $ dumpVref vrefs
+     return $ Vdl $ dumpVref conf vrefs
