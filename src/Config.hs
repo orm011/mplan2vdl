@@ -130,6 +130,7 @@ data SType  = -- limited to the storage types we actually have?
   | SInt64    -- 2's compliment unsigned?
   deriving (Eq,Show,Generic,Data)
 instance NFData SType
+instance Hashable SType
 
 sizeOf :: SType -> Integer
 sizeOf (SDecimal {}) = 8
@@ -236,6 +237,8 @@ data ColInfo = ColInfo
   , count::Integer
   , stype::SType
   } deriving (Eq,Show,Generic)
+
+instance Hashable ColInfo
 
 data StorageInfo = StorageInfo
   { mtype :: MType

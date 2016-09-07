@@ -1,5 +1,6 @@
 module Vdl (vdlFromVexps) where
 
+import Config(ColInfo)
 import Control.Monad(foldM)
 import Name(Name(..))
 --import Data.Int
@@ -38,7 +39,7 @@ instance (NFData a) => NFData (Vd a)
 instance (Hashable a) => Hashable (Vd a)
 
 -- int is memoized hash
-data W = W (Vd W, SHA1) deriving (Show,Generic)-- used so that it can recurse for the tree view
+data W = W (Voodoo, SHA1) deriving (Show,Generic)-- used so that it can recurse for the tree view
 instance Hashable W where
   hashWithSalt s (W (_,b)) = hashWithSalt s (show b)
 
@@ -47,22 +48,23 @@ instance Eq W where
   -- use memoized hashes and hope for  the best
 
 sha1vd :: Voodoo -> SHA1
-sha1vd vd@(Load _) = sha1 $ C.pack $ show vd
-sha1vd vd@RangeC{} = sha1 $ C.pack $ show vd
+sha1vd vd@(Load _, _) = sha1 $ C.pack $ show vd
+sha1vd vd@(RangeC{},_) = sha1 $ C.pack $ show vd
 sha1vd vd = sha1hack vd
 
 completeW :: Voodoo -> W
 completeW vd = W (vd, sha1vd vd)
 
-type Voodoo = Vd W
+type VoodooMinus = Vd W
+type Voodoo = (Vd W, Maybe ColInfo)
 
 type Vref = Vd Int -- used for ref version that can be printed as a series of expressions
 
 const_ :: Integer -> Voodoo -> Voodoo
-const_ k v  = RangeV { rmin=k, rstep=0, rvec=completeW v }
+const_ k v  = (RangeV { rmin=k, rstep=0, rvec=completeW v }, Nothing)
 
 pos_ :: Voodoo -> Voodoo
-pos_ v  = RangeV { rmin=0, rstep=1, rvec=completeW v }
+pos_ v  = (RangeV { rmin=0, rstep=1, rvec=completeW v }, Nothing)
 
 data Voodop =
   LogicalAnd
@@ -104,22 +106,22 @@ instance Hashable Voodop
 -- convenience expression library to translate more complex
 -- all have type Voodoo -> Voodoo -> Voodoo
 (>.) :: Voodoo -> Voodoo -> Voodoo
-a >.  b = Binary { op=Greater, arg1=completeW a, arg2=completeW b }
+a >.  b = (Binary { op=Greater, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (==.) :: Voodoo -> Voodoo -> Voodoo
-a ==. b = Binary { op=Equals, arg1=completeW a, arg2=completeW b }
+a ==. b = (Binary { op=Equals, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (<.) :: Voodoo -> Voodoo -> Voodoo
-a <.  b = Binary { op=Greater, arg1=completeW b, arg2=completeW a } --notice argument swap
+a <.  b = (Binary { op=Greater, arg1=completeW b, arg2=completeW a }, Nothing) --notice argument swap
 
 (||.) :: Voodoo -> Voodoo -> Voodoo
-a ||. b = Binary { op=LogicalOr, arg1=completeW a, arg2=completeW b }
+a ||. b = (Binary { op=LogicalOr, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (>>.) :: Voodoo -> Voodoo -> Voodoo
-a >>. b = Binary { op=BitShift, arg1=completeW a, arg2=completeW b }
+a >>. b = (Binary { op=BitShift, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (&&.) :: Voodoo -> Voodoo -> Voodoo
-a &&. b = Binary { op=LogicalAnd, arg1=completeW a, arg2=completeW b }
+a &&. b = (Binary { op=LogicalAnd, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (<=.) :: Voodoo -> Voodoo -> Voodoo
 a <=. b = (a <. b) ||. (a ==. b)
@@ -128,22 +130,22 @@ a <=. b = (a <. b) ||. (a ==. b)
 a >=. b = (a >. b) ||. (a ==. b)
 
 (+.) :: Voodoo -> Voodoo -> Voodoo
-a +. b = Binary { op=Add, arg1=completeW a, arg2=completeW b }
+a +. b =( Binary { op=Add, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (-.) :: Voodoo -> Voodoo -> Voodoo
-a -. b = Binary { op=Subtract, arg1=completeW a, arg2=completeW b }
+a -. b =( Binary { op=Subtract, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (*.) :: Voodoo -> Voodoo -> Voodoo
-a *. b = Binary { op=Multiply, arg1=completeW a, arg2=completeW b }
+a *. b = (Binary { op=Multiply, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (/.) :: Voodoo -> Voodoo -> Voodoo
-a /. b = Binary { op=Divide, arg1=completeW a, arg2=completeW b }
+a /. b = (Binary { op=Divide, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (|.) :: Voodoo -> Voodoo -> Voodoo
-a |. b = Binary { op=BitwiseOr, arg1=completeW a, arg2=completeW b }
+a |. b = (Binary { op=BitwiseOr, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (&.) :: Voodoo -> Voodoo -> Voodoo
-a &. b = Binary { op=BitwiseAnd, arg1=completeW a, arg2=completeW b }
+a &. b = (Binary { op=BitwiseAnd, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
 cond ?. (a,b) = ((const_ 1 a  -. negcond) *. a) +. (negcond *. b)
@@ -156,24 +158,25 @@ a !=. b = (const_ 1 a) -. (a ==. b)
 
 type MemoTable = HMap.HashMap V.Vexp Voodoo
 
-makeload :: Name -> Voodoo
+makeload :: Name -> VoodooMinus
 makeload n =
   let inname = (case n of
                    Name (_:s:rest) -> Name $ s:rest
                    _ -> error  "need longer keypath to be consistent with ./Driver keypaths")
   in Project { outname=Name ["val"]
              , inname
-             , vec = completeW $ Load n }
+             , vec = completeW $ (Load n, Nothing) }
 
 voodooFromVexpMemo :: MemoTable -> V.Vexp -> Either String (MemoTable, Voodoo)
-voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _) =
+voodooFromVexpMemo s vexp@(V.Vexp vx info _ _ _ _) =
   case HMap.lookup vexp s of
     Nothing -> do (s',r) <- voodooFromVxNoMemo s vx
-                  let s'' = HMap.insert vexp r s'
-                  return (s'',r)
-    Just r -> return (s, r)
+                  let ans = (r, Just info)
+                  let s'' = HMap.insert vexp ans s'
+                  return (s'', ans)
+    Just ans -> return (s, ans)
 
-voodooFromVxNoMemo :: MemoTable -> V.Vx -> Either String (MemoTable, Voodoo)
+voodooFromVxNoMemo :: MemoTable -> V.Vx -> Either String (MemoTable, VoodooMinus)
 
 voodooFromVxNoMemo st (V.Load n) = return $ (st, makeload n)
 
@@ -187,7 +190,7 @@ voodooFromVxNoMemo s (V.RangeC {V.rmin, V.rstep, V.rcount}) =
 voodooFromVxNoMemo s (V.Binop { V.binop, V.left, V.right}) =
   do (s', l) <- voodooFromVexpMemo s left
      (s'', r) <- voodooFromVexpMemo s' right
-     let t = case binop of
+     let (t,_) = case binop of
               V.Gt -> l >. r
               V.Eq -> l ==. r
               V.Mul -> l *. r
@@ -214,14 +217,14 @@ voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
      return $ (s'', case shop of
                   V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
                   V.Scatter -> let scatterfold = case source of
-                                     RangeV {rmin=0,rstep=1} -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
+                                     (RangeV {rmin=0,rstep=1},_) -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
                                      _ -> completeW $ pos_ source
                                in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions })
 
 voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern, V.lcol }) =
   do (s', newldata) <- voodooFromVexpMemo s ldata
      let ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
-     return $ (s', Like {ldata=completeW newldata, ldict=completeW ldict, lpattern})
+     return $ (s', Like {ldata=completeW newldata, ldict=completeW (ldict, Nothing), lpattern})
 
 voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
 
@@ -249,11 +252,11 @@ voodoosFromVexps vexps =
   do let solve (s, res) v = do (s', v') <- voodooFromVexpMemo s v
                                return (s', v':res)
      (_, res) <- foldM solve (HMap.empty,[]) vexps
-     return $ map (MaterializeCompact . completeW) res
+     return $ map (\r -> ((MaterializeCompact . completeW) r, Nothing)) res
 
 vrefsFromVoodoos :: [Voodoo] -> Either String Log
 vrefsFromVoodoos vecs =
-  do let log0 = [(0, Load $ Name ["dummy"])]
+  do let log0 = [(0, Load $ Name ["dummy"], Nothing)]
      let state0 = ((HMap.empty, log0), undefined)
      ((_, finalLog),_) <- foldM process state0 vecs
      let post = tail $ reverse $ finalLog -- remove dummy, reverse
@@ -263,24 +266,24 @@ vrefsFromVoodoos vecs =
        where process (state, _) v  = memVrefFromVoodoo state v
 
 type LookupTable = HMap.HashMap Voodoo Int
-type Log = [(Int, Vref)]
+type Log = [(Int, Vref, Maybe ColInfo)]
 type State = (LookupTable, Log)
 
-addToLog :: Log -> Vref -> (Log, Int)
-addToLog log v = let (n, _) = head log
-                 in ((n+1, v) : log, n+1)
+addToLog :: Log -> (Vref, Maybe ColInfo) -> (Log, Int)
+addToLog log (v,info) = let (n, _, _) = head log
+                 in ((n+1, v, info) : log, n+1)
 
 --used to remember common expressions from before
 memVrefFromVoodoo :: State -> Voodoo -> Either String (State, Int)
-memVrefFromVoodoo state@(tab, log) vd =
+memVrefFromVoodoo state@(tab, log) vd@(vdminus, info) =
   case HMap.lookup vd tab of
-    Nothing -> do ((tab', log'), vref) <- vrefFromVoodoo state vd
-                  let (log'', iden) = addToLog log' vref
+    Nothing -> do ((tab', log'), vref) <- vrefFromVoodoo state vdminus
+                  let (log'', iden) = addToLog log' (vref, info)
                   let tab'' = HMap.insert vd iden tab'
                     in return $ ((tab'', log''), iden)
     Just iden -> Right ((tab, log), iden) -- nothing changes
 
-vrefFromVoodoo :: State -> Voodoo -> Either String (State, Vref)
+vrefFromVoodoo :: State -> VoodooMinus -> Either String (State, Vref)
 
 vrefFromVoodoo state (Load n) = return $ (state, Load n)
 
@@ -365,14 +368,18 @@ toList (VShuffle {varg}) =
 toList (MaterializeCompact x) =
   ["MaterializeCompact","Id " ++ show x]
 
-printVd :: [(Int, [String])] -> String
-printVd prs = join "\n" $ map makeline prs
-  where makeline (iden, strs) =  join "," $ (show iden) : strs
+printLine :: (Int, Vref, Maybe ColInfo) -> String
+printLine (iden, vref, info) =
+  let strs = toList vref
+      dispinfo = case info of
+        Nothing -> ""
+        Just x -> "   ;; " ++ show x
+  in (join "," $ (show iden) : strs) ++ dispinfo
 
 dumpVref :: Log -> String
-dumpVref prs = let (ids, vrefs) = unzip prs
-                   lsts = map toList vrefs
-               in printVd $ zip ids lsts
+dumpVref tuples = let lns = map printLine tuples
+                  in join "\n" lns
+
 
 -- forces the printer to use our custom format rather than
 -- a default

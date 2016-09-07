@@ -309,7 +309,7 @@ inferMetadata arg@Binop { binop
     let count = min c1 c2
         bounds = inferBounds arg
         trailing_zeros' = case binop of
-          BitShift -> Debug.Trace.traceShowId (ltrail - upper) -- in a bitshift
+          BitShift -> Debug.Trace.traceShow  ("ltrail-upper" :: String) (ltrail - upper) -- in a bitshift
           _ -> 0
     in ColInfo {bounds, count, stype=lefttype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
          -- until we need more precision, we're conservative on the trailing zeros...
@@ -953,13 +953,13 @@ makeCompositeKey :: NonEmpty Vexp -> Vexp
 makeCompositeKey (firstvexp :| rest) =
   let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
       out = foldl' composeKeys shifted rest
-      maxval = maxForWidth out
+      maxval = traceShow out $ maxForWidth out
       maxvalV = const_ maxval out
   in  out &. maxvalV  --mask used as a hint to Voodoo (to infer size)
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
-shiftToZero arg@Vexp { info=ColInfo {bounds=(vmin,_), trailing_zeros} }
+shiftToZero arg@Vexp { info=ColInfo { bounds=(vmin,_), trailing_zeros } }
   = if vmin == 0 && trailing_zeros == 0 then arg
     else let norm@Vexp { info=ColInfo {bounds=(vmin', _), trailing_zeros=t'} } = (arg >>. const_ trailing_zeros arg)
              ret@Vexp {info=ColInfo {bounds=(vmin'', _) }} = norm -. const_ vmin' norm
@@ -988,7 +988,7 @@ composeKeys l r =
       oldbits = getBitWidth sleft
       deltabits = getBitWidth sright
       newbits = oldbits + deltabits
-  in assert (newbits < 65) $
+  in traceShow (sleft, sright, oldbits, deltabits) $ assert (newbits < 65) $
      (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
