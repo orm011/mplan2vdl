@@ -103,13 +103,13 @@ lookup n@(Name lst) tab@(NameTable nt) =
       else notfound
     Nothing -> notfound
 
-insert :: Name -> v -> NameTable v -> Either String (NameTable v)
+insert :: Name -> v -> NameTable v -> NameTable v
 insert n@(Name lst) val (NameTable nt) =
   let sc = show $ map (Name . fst) $ Map.toAscList nt
-      reversed = reverse lst in
-  case Map.lookup reversed nt of
-    Just  _ -> Left $ printf "Scope %s already has %s" sc $ show n
-    Nothing -> Right $ NameTable $ Map.insert reversed val nt
+      reversed = reverse lst
+  in case Map.lookup reversed nt of
+    Just  _ -> error $ printf "Scope %s already has %s" sc $ show n
+    Nothing -> NameTable $ Map.insert reversed val nt
 
 -- does not check for collisions.
 insertWeak :: Name -> v -> NameTable v -> NameTable v

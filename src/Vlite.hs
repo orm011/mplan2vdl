@@ -12,20 +12,21 @@ module Vlite( vexpsFromMplan
             , pos_
             , complete) where
 
+
 import Config
 import qualified Mplan as M
 import Mplan(BinaryOp(..))
 import Name(Name(..))
 import qualified Name as NameTable
-import Control.Monad(foldM)
+--import Control.Monad(foldM)
 import Data.List (foldl',(\\))
-import Data.Either
 import Prelude hiding (lookup) {- confuses with Map.lookup -}
 import GHC.Generics
 import Control.DeepSeq(NFData)
 import Data.Int
+import Data.Either
 --import qualified Error as E
-import Error(check)
+--import Error(check)
 import Data.Bits
 import Debug.Trace
 import Text.Groom
@@ -60,6 +61,8 @@ data FoldOp = FSum | FMax | FMin | FSel
 instance NFData FoldOp
 instance Hashable FoldOp
 
+(|>) :: a -> (a -> b) -> b
+(|>) x f = f x
 
 -- a hacky implementation of sha1 for Vx variants
 sha1vx :: Vx -> SHA1 -- trying to not be as weak as the plain hash
@@ -416,7 +419,7 @@ inferUniqueness Fold { foldop=FSel } = Unique
 --inferUniqueness (Load _) -- would need to pass config for ths
 inferUniqueness _ = Any
 
-vexpsFromMplan :: M.RelExpr -> Config -> Either String [Vexp]
+vexpsFromMplan :: M.RelExpr -> Config -> [Vexp]
 vexpsFromMplan r c  = solve' c r
 
 outputName :: (M.ScalarExpr, Maybe Name) -> Maybe Name
@@ -428,15 +431,12 @@ outputName _ = Nothing
 -- as a lookup friendly map
 data Env = Env [Vexp] (NameTable Vexp)
 
-makeEnv :: [Vexp] -> Either String Env
-makeEnv lst =
-  do tbl <- makeTable lst
-     return $ Env lst tbl
-  where makeTable pairs = foldM maybeadd NameTable.empty pairs
-        maybeadd env Vexp { name=Nothing } = Right env
+makeEnv :: [Vexp] -> Env
+makeEnv lst = Env lst (makeTable lst)
+  where makeTable pairs = foldl' maybeadd NameTable.empty pairs
+        maybeadd env Vexp { name=Nothing } = env
         maybeadd env vexp@Vexp { name=(Just newalias)} =
           NameTable.insert newalias vexp env
-
 
 makeEnvWeak :: [Vexp] -> Env
 makeEnvWeak lst =
@@ -453,15 +453,15 @@ of the operator, so it only makes sense to use this in internal nodes
 whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
-solve :: Config -> M.RelExpr -> Either String Env
-solve config relexp = (solve' config relexp) >>= (makeEnv . checkVecs)
+solve :: Config -> M.RelExpr -> Env
+solve config relexp = solve' config relexp |> checkVecs |> makeEnv
   where checkVecs vexplist =
           let sizes = map (count . info) vexplist
               minsize = minimum sizes
               maxsize = maximum sizes
           in assert (minsize == maxsize) vexplist
 
-solve' :: Config -> M.RelExpr -> Either String [Vexp]
+solve' :: Config -> M.RelExpr -> [Vexp]
 
 {- Table is a Special case. It gets vexprs for all the output columns.
 
@@ -475,8 +475,8 @@ todo: using the table schema we can resolve % names before
 -}
 solve' config M.Table { M.tablename
                       , M.tablecolumns } =
-  return $ do (colnam, alias) <- tablecolumns
-              return $ loadAs config tablename colnam alias
+  do (colnam, alias) <- tablecolumns
+     return $ loadAs config tablename colnam alias
 
 {- Project: not dealing with ordered queries right now
 note. project affects the name scope in the following ways
@@ -502,15 +502,15 @@ but could be the topmost result, so we must return it as well.
 as (vexpr .., Nothing)
 -}
 solve' config M.Project { M.child, M.projectout, M.order = [] } =
-  do (Env list0 _) <- solve config child -- either monad -- used for reading
-     (_ , solved) <- foldM foldFun (list0,[]) projectout
-     return $ solved
-     where addEntry (list0, acclist) tup = (list0, tup : acclist) -- adds output to acclist
-           foldFun lsts@(list0, acclist) arg@(expr, _) =
-             do asenv <- return $ makeEnvWeak $ list0 ++ acclist-- use both lists for name resolution
-                 -- allow collisions b/c they do happen .
-                anon  <- fromScalar asenv expr --either monad
-                return $ addEntry lsts $ anon {name=outputName arg}
+  let addEntry (listz, acclist) tup = (listz, tup : acclist) -- adds output to acclist
+      foldFun lsts@(list0, acclist) arg@(expr, _) =
+        let asenv  = makeEnvWeak $ list0 ++ acclist-- use both lists for name resolution
+           -- allow collisions b/c they do happen .
+            anon  = fromScalar asenv expr --either monad
+        in addEntry lsts $ anon {name=outputName arg}
+      (Env l0 _) = solve config child -- either monad -- used for reading
+      (_ , solved) =  foldl' foldFun (l0,[]) projectout
+  in solved
 
 
 -- important cases to consider:
@@ -518,46 +518,48 @@ solve' config M.Project { M.child, M.projectout, M.order = [] } =
 solve' config M.GroupBy { M.child,
                           M.inputkeys,
                           M.outputaggs } =
-  do (Env list0@(refv:_) nt)  <- solve config child --either monad
-     let (keys,aliases) = unzip inputkeys
-     let keyvecs  = map (\n -> snd $ (NameTable.lookup_err n nt)) keys
-     let keyaliases = do (v,malias) <- zip keyvecs aliases -- list monad
-                         case malias of
-                           Nothing -> []
-                           n -> [v { name=n }]
-     let list1 = list0 ++ keyaliases
-     let gbkeys = case keyvecs of
-           [] -> let z@(Vexp {info=ColInfo{bounds}}) = zeros_ refv
-                 in assert (bounds == (0,0)) $ z :| []
-           a : rest -> a :| rest
-     let gkey@Vexp { info=ColInfo {bounds=(gmin, _)} } =
-           let ans@Vexp {info=ColInfo{bounds}} = makeCompositeKey gbkeys
-           in assert (inputkeys /= [] || bounds == (0,0) ) ans
-     let solveSingleAgg env pr@(agg, _) =
-           do anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage }  <- solveAgg config env gkey agg
-              let outalias = case pr of
+  case solve config child of --either monad
+    (Env list0@(refv:_) nt) ->
+      let (keys,aliases) = unzip inputkeys
+          keyvecs  = map (\n -> snd $ (NameTable.lookup_err n nt)) keys
+          keyaliases = do (v,malias) <- zip keyvecs aliases -- list monad
+                          case malias of
+                            Nothing -> []
+                            n -> [v { name=n }]
+          list1 = list0 ++ keyaliases
+          gbkeys = case keyvecs of
+            [] -> let z@(Vexp {info=ColInfo{bounds}}) = zeros_ refv
+                  in assert (bounds == (0,0)) $ z :| []
+            a : rest -> a :| rest
+          gkey@Vexp { info=ColInfo {bounds=(gmin, _)} } =
+            let ans@Vexp {info=ColInfo{bounds}} = makeCompositeKey gbkeys
+            in assert (inputkeys /= [] || bounds == (0,0) ) ans
+          solveSingleAgg env pr@(agg, _) =
+              let anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage } = solveAgg config env gkey agg
+                  outalias = case pr of
                     (M.GDominated n, Nothing) -> Just n
                     (_, alias) -> alias
                     _ -> Nothing
-              let out_uniqueness = case (keys, pr) of
+                  out_uniqueness = case (keys, pr) of
                     ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
                       | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
                     _ -> orig_uniqueness
-              let out_lineage = case orig_lineage of
+                  out_lineage = case orig_lineage of
                     None -> None
                     Pure { col, mask=orig_mask@Vexp{quant=mask_uniqueness}} ->
                       let out_mask_quant = if out_uniqueness == Unique
                                            then Unique
                                            else mask_uniqueness
                       in Pure {col, mask=orig_mask {quant=out_mask_quant}}
-              return $ anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }
-     let addEntry (x, acclist) tup = (x, tup : acclist) -- adds output to acclist
-     let foldFun lsts@(x, acclist) arg =
-           do let asenv = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
-              ans@Vexp {info=ColInfo{count} } <- solveSingleAgg asenv arg --either monad
-              return $ addEntry lsts $ assert (inputkeys /= [] || count == 1) $  ans
-     (_, final) <- assert (gmin == 0) $ foldM  foldFun (list1,[]) outputaggs
-     return $ final
+              in anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }
+          addEntry (x, acclist) tup = (x, tup : acclist) -- adds output to acclist
+          foldFun lsts@(x, acclist) arg =
+            let asenv = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
+                ans@Vexp {info=ColInfo{count} } = solveSingleAgg asenv arg --either monad
+            in addEntry lsts $ assert (inputkeys /= [] || count == 1) $  ans
+          (_, final) = assert (gmin == 0) $ foldl' foldFun (list1,[]) outputaggs
+      in final
+    Env [] _ -> error "empty env"
 
 
 
@@ -567,9 +569,9 @@ solve' config M.Join { M.leftch
                      , M.conds
                      , M.joinvariant
                      } =
-  do sleft@(Env colsleft _) <- solve config leftch
-     sright@(Env colsright _) <- solve config rightch
-     case separateFKJoinable config (N.toList conds) sleft sright of
+  let sleft@(Env colsleft _) = solve config leftch
+      sright@(Env colsright _) = solve config rightch
+  in case separateFKJoinable config (N.toList conds) sleft sright of
        ([jspec@FKJoinSpec{joinorder}],[]) -> case joinorder of
          FactDim -> handleGatherJoin config sleft sright joinvariant jspec
          DimFact -> handleGatherJoin config sright sleft joinvariant jspec
@@ -577,23 +579,23 @@ solve' config M.Join { M.leftch
        ([], [M.Binop{ M.binop
                    , M.left=leftexpr
                    , M.right=rightexpr }])
-         | Right keycol_left <- sc sleft leftexpr
-         , Right keycol_right <- sc sright rightexpr
+         | keycol_left <- sc sleft leftexpr
+         , keycol_right <- sc sright rightexpr
          , (1, [_]) <- (count $ info keycol_left, colsleft)
            -> let broadcastcol_left = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_right, shsource=keycol_left } -- left is val
                   boolean = complete $ Binop {binop, left=broadcastcol_left, right=keycol_right}
                   gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-              in return $ gatherAll colsright gathermask
+              in gatherAll colsright gathermask
        ([], [M.Binop{ M.binop
                    , M.left=leftexpr
                    , M.right=rightexpr }])
-         | Right keycol_left <- sc sleft leftexpr
-         , Right keycol_right <- sc sright rightexpr
+         | keycol_left <- sc sleft leftexpr
+         , keycol_right <- sc sright rightexpr
          , (1,[_]) <- (count $ info keycol_right, colsright)
            ->  let broadcastcol_right = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_left, shsource=keycol_right } -- right is val
                    boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
                    gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-               in return $ gatherAll colsleft gathermask
+               in gatherAll colsleft gathermask
        ([_],more@[extra]) -> -- single condition on each side. could do more on the right but need to AND them.
          if joinvariant == M.Plain
          then solve' config M.Select { M.child=M.Join {M.leftch=leftch, M.rightch=rightch, M.conds=N.fromList (N.toList conds \\ more), M.joinvariant=joinvariant}
@@ -604,18 +606,17 @@ solve' config M.Join { M.leftch
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
                        } =
-  do childenv@(Env childcols _) <- solve config child -- either monad
-     fdata  <- sc childenv predicate
-     let fgroups = pos_ fdata
-     let idx = complete $ Fold {foldop=FSel, fgroups, fdata}
-     return $ do unfiltered@Vexp { name=preserved }  <- childcols -- list monad
-                 return $ let sel = complete $ Shuffle { shop=Gather
-                                                       , shsource=unfiltered
-                                                       , shpos=idx }
-                          in ( sel {name=preserved} )
+  let childenv@(Env childcols _) = solve config child -- either monad
+      fdata  = sc childenv predicate
+      fgroups = pos_ fdata
+      idx = complete $ Fold {foldop=FSel, fgroups, fdata}
+  in do unfiltered@Vexp { name=preserved }  <- childcols -- list monad
+        return $ let sel = complete $ Shuffle { shop=Gather
+                                              , shsource=unfiltered
+                                              , shpos=idx }
+                 in ( sel {name=preserved} )
 
-solve' _ r_  = Left $ "unsupported M.rel:  " ++ groom r_
-
+solve' _ r_  = error $ "unsupported M.rel:  " ++ groom r_
 
 getRefVector :: Config -> Name -> Vexp
 getRefVector config tablename =
@@ -743,7 +744,7 @@ classifyExpr config partials joinenv arg@M.Binop{ M.binop=M.Eq
             , (RightChild, Vexp{lineage=Pure{col=rightcol, mask=rightmask}, quant=rightquant}) )
           -> processPartials config partials (leftcol, leftmask, leftquant) (rightcol,rightmask, rightquant) arg
         ( (RightChild, Vexp{lineage=Pure{col=rightcol, mask=rightmask}, quant=rightquant})
-            , (LeftChild, Vexp{lineage=Pure{col=leftcol, mask=leftmask}, quant=leftquant}) )
+          , (LeftChild, Vexp{lineage=Pure{col=leftcol, mask=leftmask}, quant=leftquant}) )
           -> processPartials config partials (leftcol, leftmask, leftquant) (rightcol, rightmask, rightquant) arg
         _ -> Nothing
   in case mpartials of
@@ -785,7 +786,7 @@ processPartials config partials (leftcol, leftmask, leftquant) (rightcol,rightma
 
 {- makes a vector from a scalar expression, given a context with existing
 defintiions -}
-fromScalar ::  Env -> M.ScalarExpr  -> Either String Vexp
+fromScalar ::  Env -> M.ScalarExpr  -> Vexp
 fromScalar = sc
 
 {- notes about tmp naming in Monet:
@@ -796,16 +797,16 @@ fromScalar = sc
 eg [L1 as L1]. This means we cannot just use a map in those cases, since
 a search for L1 should potentially mean L1.L1.
 -}
--- sc' :: Env -> M.ScalarExpr -> Either String Vexp
+-- sc' :: Env -> M.ScalarExpr -> Vexp
 -- sc' env expr =
 --   do vx <- sc env expr
 --      return $ getInfo vx
 
-sc ::  Env -> M.ScalarExpr -> Either String Vexp
+sc ::  Env -> M.ScalarExpr -> Vexp
 sc (Env _ env) (M.Ref refname)  =
   case (NameTable.lookup refname env) of
-    Right (_, v) -> Right v
-    Left s -> Left s
+    Right (_, v) -> v
+    Left s -> error s
 
 
 sc env (M.Cast {M.mtype = MDouble, M.arg}) = sc env arg -- ignore this cast. it is use only prior to averages etc. note C may not do the right thing.
@@ -816,95 +817,91 @@ sc env (M.Cast {M.mtype = MDouble, M.arg}) = sc env arg -- ignore this cast. it 
 -- We need the input type bc, for example Decimal(10,2) -> Decimal(10,3) = *10
 -- but Decimal(10,1) -> Decimal(10,3) = * 100. Right now, that input type is not explicitly given.
 sc env cast@(M.Cast { M.mtype, M.arg }) =
-  do vexp@Vexp{info=ColInfo{stype=inputtype}} <- sc env arg
-     let outputtype = getSTypeOfMType mtype
-     let outrep@Vexp{info} = case (inputtype,outputtype) of
-           (a,b) | a == b -> vexp
-         -- semantic cast of int to decimal: eg. 1 -> 1.0 which is repr as 10
-           (intt, SDecimal {scale})
-             | intt == SInt64 || intt == SInt32
-               -> let factor = (10 ^ scale)
-                  in const_ factor vexp *. vexp
+  let vexp@Vexp{info=ColInfo{stype=inputtype}} = sc env arg
+      outputtype = getSTypeOfMType mtype
+      outrep@Vexp{info} = case (inputtype,outputtype) of
+        (a,b) | a == b -> vexp
+        -- semantic cast of int to decimal: eg. 1 -> 1.0 which is repr as 10
+        (intt, SDecimal {scale})
+          | intt == SInt64 || intt == SInt32
+            -> let factor = (10 ^ scale)
+               in const_ factor vexp *. vexp
          -- adjust the type so a future cast is not wrong
-           (SDecimal {scale}, intt) -- cast from decimal to int i assume is lossy.
-             | intt == SInt64 || intt == SInt32
-               -> let factor = (10 ^ scale)
-                  in vexp /. (const_ factor vexp)
-           (SDecimal {scale=sfrom}, SDecimal{scale=sto}) ->
-             if sto == sfrom then vexp
-             else let factor = (10 ^ abs (sto - sfrom))
-                  in if sto > sfrom
-                     then vexp *. const_ factor vexp
-                     else vexp /. const_ factor vexp
-           _ -> error $  "unsupported type cast: from: " ++ show inputtype ++ " to: " ++ show outputtype ++ " in: " ++ show cast
-     return $ outrep {info=info{stype=outputtype}}
+        (SDecimal {scale}, intt) -- cast from decimal to int i assume is lossy.
+          | intt == SInt64 || intt == SInt32
+            -> let factor = (10 ^ scale)
+               in vexp /. (const_ factor vexp)
+        (SDecimal {scale=sfrom}, SDecimal{scale=sto}) ->
+          if sto == sfrom then vexp
+          else let factor = (10 ^ abs (sto - sfrom))
+               in if sto > sfrom
+                  then vexp *. const_ factor vexp
+                  else vexp /. const_ factor vexp
+        _ -> error $  "unsupported type cast: from: " ++ show inputtype ++ " to: " ++ show outputtype ++ " in: " ++ show cast
+  in outrep {info=info{stype=outputtype}}
      -- makes sure the new type is okay. this ensures future casts don't
      -- multiply things by more than needed.
 
 
 sc env (M.Binop { M.binop, M.left, M.right }) =
-  do l <- sc env left
-     r <- sc env right
-     return $ complete $ Binop {binop, left=l, right=r}
+  let l = sc env left
+      r = sc env right
+  in complete $ Binop {binop, left=l, right=r}
 
 sc env M.In { M.left, M.set } =
-  do sleft  <- sc env left
-     sset <- mapM (sc env) set
-     let eqs = map (==. sleft) sset
-     let (first,rest) = case eqs of
-           [] -> error "list is empty here"
-           a:b -> (a,b)
-     return $ foldl' (||.) first rest
+  let sleft  = sc env left
+      sset = map (sc env) set
+      eqs = map (==. sleft) sset
+      (first,rest) = case eqs of
+        [] -> error "list is empty here"
+        a:b -> (a,b)
+  in foldl' (||.) first rest
 
 sc (Env (vref : _ ) _) (M.Literal st n)
-  = return $ typedconst_ n vref st
+  = typedconst_ n vref st
 
 sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
   --a day count from 0000-01-01)
-  do dateval <- sc env arg
-     let v365 = const_ 365 dateval
-     return $ dateval /. v365
+  let dateval = sc env arg
+      v365 = const_ 365 dateval
+  in dateval /. v365
 
 --example use of isnull. In all the contexts of TPCH queries i saw, the isnull is called on
 --a column or derived column that is statically known to not be null, so we just remove that.
 {- sys.ifthenelse(sys.isnull(sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])), boolean "false", sys.=(all_nations.nation NOT NULL, char(25)[char(6) "BRAZIL"])) -}
 sc env (M.IfThenElse { M.if_=M.Unary { M.unop=M.IsNull
-                                     , M.arg=oper1 } , M.then_=M.Literal _  0, M.else_=oper2 } )=
-  do check (oper1,oper2) (\(a,b) -> a == b) "different use of isnull than expected"
-     sc env oper1 --just return the guarded operator.
+                                     , M.arg=oper1 } , M.then_=M.Literal _  0, M.else_=oper2 }) | (oper1 == oper2) = sc env oper1 --just return the guarded operator.
 
 -- note: for max and min, the actual possible bounds are more restrictive.
 -- for now, I don't care.
 sc env (M.IfThenElse { M.if_=mif_, M.then_=mthen_, M.else_=melse_ })=
-  do if_ <- sc env mif_
-     then_ <- sc env mthen_
-     else_ <- sc env melse_
-     return $ if_ ?.(then_,else_)
+  let if_ = sc env mif_
+      then_ = sc env mthen_
+      else_ = sc env melse_
+  in  if_ ?.(then_,else_)
 
 sc env (M.Like { M.ldata, M.lpattern }) =
-  do sldata@Vexp {lineage} <- sc env ldata
-     return $ case lineage of
-       Pure {col} -> complete $ Like { ldata=sldata, lpattern, lcol=col }
-       None -> error "cannot apply like expressions without knowing lineage"
+  let sldata@Vexp {lineage} = sc env ldata
+  in case lineage of
+    Pure {col} -> complete $ Like { ldata=sldata, lpattern, lcol=col }
+    None -> error "cannot apply like expressions without knowing lineage"
 
 sc env (M.Unary { M.unop=M.Neg, M.arg }) =
-  do slarg <- sc env arg
-     return $ ones_ slarg -. slarg
+  let slarg =  sc env arg
+  in ones_ slarg -. slarg
 
 sc _ e = error $ "unhandled mplan scalar expression: " ++ show e -- clean this up. requires non empty list
 
-solveAgg :: Config -> Env -> Vexp -> M.GroupAgg -> Either String Vexp
+solveAgg :: Config -> Env -> Vexp -> M.GroupAgg -> Vexp
 
-solveAgg _ (Env [] _) _ _  = Left $"empty input for group by"
+solveAgg _ (Env [] _) _ _  = error "empty input for group by"
 
 -- average case dealt with by rewriting tp sum, count and finally using division.
 solveAgg config env gkeyvec (M.GAvg expr) =
-  do gsums@Vexp { info=ColInfo { count=cgsums } } <- solveAgg config env gkeyvec (M.GFold M.FSum expr)
-     gcounts@Vexp { info=ColInfo { bounds=(minc,_ ), count=cgcounts} } <- solveAgg config env gkeyvec M.GCount
-     check (cgsums,cgcounts) (\(a,b) -> a == b) "counts should match"
-     check minc (== 1) $ "minimum count is always 1 but here it is " ++ show minc
-     return $ gsums /. gcounts
+  let gsums@Vexp { info=ColInfo { count=cgsums } } = solveAgg config env gkeyvec (M.GFold M.FSum expr)
+      gcounts@Vexp { info=ColInfo { bounds=(minc,_ ), count=cgcounts} } = solveAgg config env gkeyvec M.GCount
+  in assert (cgsums == cgcounts && minc == 1) gsums /. gcounts
 
 -- all keys in a column dominated by groups are equal to their max
 -- so deal with this as if it were a max
@@ -917,26 +914,26 @@ solveAgg config env gkeyvec (M.GCount) =
   in solveAgg config env gkeyvec rewrite
 
 solveAgg config env gkeyvec (M.GFold op expr) =
-  do scattermask <- getScatterMask gkeyvec
-     let sortedGroups = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gkeyvec}
-     gdata <- sc env expr
-     let sortedData = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gdata}
-     let foldop = case op of
-           M.FSum -> FSum
-           M.FMax -> FMax
-           M.FMin -> FMin
-     make2LevelFold config foldop sortedGroups sortedData
+  let scattermask = getScatterMask gkeyvec
+      sortedGroups = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gkeyvec}
+      gdata = sc env expr
+      sortedData = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gdata}
+      foldop = case op of
+        M.FSum -> FSum
+        M.FMax -> FMax
+        M.FMin -> FMin
+  in make2LevelFold config foldop sortedGroups sortedData
 
 -- scatter mask for a group by
-getScatterMask :: Vexp -> Either String Vexp
+getScatterMask :: Vexp -> Vexp
 getScatterMask pdata@Vexp { info=ColInfo {bounds=(pdatamin, pdatamax)} } =
   if pdatamax == pdatamin
-  then return $ pos_ pdata -- pivots would be empty. unclear semantics.
+  then pos_ pdata -- pivots would be empty. unclear semantics.
   else let pivots = complete $ RangeC { rmin=pdatamin
                                  , rstep=1
                                  , rcount=pdatamax-pdatamin
                                  }
-       in return $ complete $ Partition { pivots, pdata }
+       in complete $ Partition { pivots, pdata }
 
 maxForWidth :: Vexp -> Integer
 maxForWidth vec =
@@ -992,28 +989,29 @@ composeKeys l r =
      (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
-make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Either String Vexp
+make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Vexp
 make2LevelFold config foldop fgroups fdata =
-  Right $ complete $ case aggregation_strategy config of
-  AggSerial -> Fold {foldop, fgroups, fdata}
-  AggShuffle -> Fold {foldop, fgroups=complete $ VShuffle{varg=fgroups}, fdata}
-  AggHierarchical gsz ->
-      let pos = pos_ fgroups
-          log_gsize = const_ gsz fgroups
-          ones = ones_ fgroups
+  let ans = case aggregation_strategy config of
+        AggSerial -> Fold {foldop, fgroups, fdata}
+        AggShuffle -> Fold {foldop, fgroups=complete $ VShuffle{varg=fgroups}, fdata}
+        AggHierarchical gsz ->
+          let pos = pos_ fgroups
+              log_gsize = const_ gsz fgroups
+              ones = ones_ fgroups
           -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) | 1 = 01010101...
           -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) | 1 = 00110011
           -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) | 1 ...
-          level1par = (pos >>. log_gsize) &. ones
-          level1groups = composeKeys fgroups level1par
-          level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
-          level2results = Fold { foldop, fgroups, fdata=level1results }
-      in assert (getBitWidth level1par == 1) level2results
+              level1par = (pos >>. log_gsize) &. ones
+              level1groups = composeKeys fgroups level1par
+              level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
+              level2results = Fold { foldop, fgroups, fdata=level1results }
+          in assert (getBitWidth level1par == 1) level2results
+  in complete $ ans
 
 
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 
-handleGatherJoin :: Config -> Env -> Env -> M.JoinVariant -> JoinSpec -> Either String [Vexp]
+handleGatherJoin :: Config -> Env -> Env -> M.JoinVariant -> JoinSpec -> [Vexp]
 handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJoinSpec{joinorder=whichisleft})   =
  let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config jspec
      selectmask = complete $ Fold { foldop=FSel
@@ -1024,7 +1022,7 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
        a:b -> (a,b)
        _ -> error "unexpected empty"
      joined_dimcols = gatherAll dimcols clean_gathermask
- in return $ case joinvariant of
+ in case joinvariant of
    M.Plain ->  cleaned_factcols ++ joined_dimcols
    M.LeftSemi -> case whichisleft of
      FactDim -> cleaned_factcols
@@ -1050,7 +1048,7 @@ handleGatherJoin _ (Env leftcols _) (Env rightcols _) joinvariant  (SelfJoinSpec
           (_,_) -> error $ "TODO: handle case where both children of this self join have been modified (but one is unique)"
       cleaned_factcols = factcols -- no need to clean.
       joined_dimcols  = gatherAll dimcols gathermask
-  in return $ case joinvariant of
+  in case joinvariant of
     M.Plain -> cleaned_factcols ++ joined_dimcols
     _ -> error $ "TODO: not a plain selfjoin: " ++ show joinvariant
 

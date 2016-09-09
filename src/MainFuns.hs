@@ -140,7 +140,7 @@ main = do
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                config <- makeConfig (metadata cmdargs) strat boundslist storagelist tables dictlist
+                let config  = makeConfig (metadata cmdargs) strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage
@@ -172,9 +172,7 @@ compile apply_passes push_fk_joins planstring config =
                       (M.fuseSelects . M.pushFKJoins)
                       else (\x -> x)
      let mplan' = rel_passes mplan
-     vexps <- case Vl.vexpsFromMplan mplan' config of
-                  Left err -> Left $ "(at Vlite stage)" ++ err
-                  other -> other
+     let vexps = Vl.vexpsFromMplan mplan' config 
      let passes = if apply_passes then
                    (Vl.algebraicIdentitiesPass . Vl.loweringPass . Vl.redundantRangePass)  else (\x -> x)
      let vexps' =  passes vexps

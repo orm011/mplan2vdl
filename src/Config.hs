@@ -22,13 +22,14 @@ module Config ( Config(..)
               , getSTypeOfMType
               ) where
 
+import Data.Foldable
 import Data.Data
 import Data.Int
 import Name as NameTable
 --import Data.Int
 import SchemaParser(Table(..),Key(..))
 import qualified Data.Vector as V
-import Control.Monad(foldM)
+--import Control.Monad(foldM)
 import Control.DeepSeq(NFData)
 import GHC.Generics
 import Control.Exception.Base
@@ -267,36 +268,36 @@ getSTypeOfMType mtype = case mtype of
   ow -> error $ "we don't expect reading this type from the monet columns/queries at the moment: " ++ (show ow)
 
 
-addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec -> Either String (NameTable ColInfo)
+addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec -> NameTable ColInfo
 addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing_zeros) =
-  do let StorageInfo {mtype}  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
-     let stype = getSTypeOfMType mtype
-     let colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype, trailing_zeros }
-     plain <- NameTable.insert (Name [tab,col]) colinfo nametab
-     if elem (Name[tab,col]) constraints
-       then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
-       else return $ plain
+  let StorageInfo {mtype}  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
+      stype = getSTypeOfMType mtype
+      colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype, trailing_zeros }
+      plain = NameTable.insert (Name [tab,col]) colinfo nametab
+  in if elem (Name[tab,col]) constraints
+     then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
+     else plain
 
-makeConfig :: Bool -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Either String Config
+makeConfig :: Bool -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
 makeConfig metadata aggregation_strategy boundslist storagelist tables dictlist =
-  do let show_metadata = metadata
-     let dictionary = makeDictionary dictlist
-     let constraints = foldMap getTableConstraints tables
-     let tspecs = NameTable.fromList $ foldMap getTspecs tables
-     let storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
-     colinfo <- foldM (addEntry constraints storagemap) NameTable.empty boundslist
-     let allrefs = foldMap makeFKEntries tables
-     let straighten qual (a,b) = case qual of
-           FactDim -> (a,b)
-           DimFact -> (b,a)
-     let make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,N.map (straighten qual) nelist))) nelist
-     let partialfks = Map.fromList $ foldMap make_partials allrefs
-     let allpkeys = map makePKeys tables -- sort the non-empty lists
-     let partialpks = Map.fromList $
+  let show_metadata = metadata
+      dictionary = makeDictionary dictlist
+      constraints = foldMap getTableConstraints tables
+      tspecs = NameTable.fromList $ foldMap getTspecs tables
+      storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
+      colinfo =  foldl' (addEntry constraints storagemap) NameTable.empty boundslist
+      allrefs = foldMap makeFKEntries tables
+      straighten qual (a,b) = case qual of
+        FactDim -> (a,b)
+        DimFact -> (b,a)
+      make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,N.map (straighten qual) nelist))) nelist
+      partialfks = Map.fromList $ foldMap make_partials allrefs
+      allpkeys = map makePKeys tables -- sort the non-empty lists
+      partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
-     let pktable = map pkpair tables
-     return $ Config { show_metadata, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
-                       tablePKeys=Map.fromList pktable, partialfks, partialpks }
+      pktable = map pkpair tables
+  in Config { show_metadata, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+              tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
 pkpair Table{name, pkey=PKey{pkconstraint}} = (name, concatName name pkconstraint)
