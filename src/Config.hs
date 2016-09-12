@@ -208,20 +208,23 @@ resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
         f "DATE" [] = MDate
         f name _ = error $ "unsupported typespec: " ++ show name
 
-toKeyPair :: (NameTable TypeSpec) -> StorageRec -> (Name, StorageInfo)
+toKeyPair :: (NameTable TypeSpec) -> StorageRec -> [ (Name, StorageInfo) ]
 toKeyPair ns (_,tab,col,typstring,_,colcount,bytewidth,colsize,_,_,_,_) =
-  let name = Name [tab,col]
-      tspec = if typstring /= "oid"
-              then snd $ (NameTable.lookup_err name ns)
-              else TypeSpec { tname="oid", tparams=[] }
-      mtype = resolveTypeSpec tspec
-      storagesize = colsize `quot` colcount
-      off = colsize `rem` colcount
-      matches = (case mtype of
-                    MChar _ -> True
-                    MVarchar _ -> True
-                    _ -> storagesize == bytewidth )
-  in assert (matches &&  (off == 0)) (name, StorageInfo{mtype,storagesize})
+      do let name = Name [tab,col]
+         tspec <- if typstring /= "oid"
+                  then
+                    case NameTable.lookup name ns of
+                      Left _ -> []
+                      Right  (_,b) -> [b]
+                  else [TypeSpec { tname="oid", tparams=[] }]
+         let mtype = resolveTypeSpec tspec
+         let storagesize = colsize `quot` colcount
+         let off = colsize `rem` colcount
+         let matches = (case mtype of
+                           MChar _ -> True
+                           MVarchar _ -> True
+                           _ -> storagesize == bytewidth )
+         return $ assert (matches &&  (off == 0))  (name, StorageInfo{mtype,storagesize})
 
 -- holds the names of the matching columns for an fk.
 -- the order matters, watch out. left is fact, right is dim.
@@ -284,7 +287,7 @@ makeConfig metadata aggregation_strategy boundslist storagelist tables dictlist 
       dictionary = makeDictionary dictlist
       constraints = foldMap getTableConstraints tables
       tspecs = NameTable.fromList $ foldMap getTspecs tables
-      storagemap = NameTable.fromList $ map (toKeyPair tspecs)  (V.toList storagelist)
+      storagemap = NameTable.fromList $ foldMap (toKeyPair tspecs)  (V.toList storagelist)
       colinfo =  foldl' (addEntry constraints storagemap) NameTable.empty boundslist
       allrefs = foldMap makeFKEntries tables
       straighten qual (a,b) = case qual of
