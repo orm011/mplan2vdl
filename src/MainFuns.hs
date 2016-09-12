@@ -74,7 +74,7 @@ checkInput msg f  = if f
 iscomment :: B.ByteString -> Bool
 iscomment ln = let stripped = C.dropWhile (== ' ') ln
                in (C.isPrefixOf "#" stripped) || ( C.isPrefixOf "%" stripped)
-                  || ( C.isPrefixOf "--" stripped)
+                  || ( C.isPrefixOf "--" stripped) || (C.isPrefixOf "[" stripped)
 
 filterComments :: B.ByteString -> B.ByteString
 filterComments alltext =
