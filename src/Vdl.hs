@@ -360,7 +360,7 @@ toList (Scatter { scattersource, scatterfold, scatterpos } ) =
         id3 = "Id " ++ show scatterpos
 
 toList (Like { ldata, ldict, lpattern } ) =
-  ["Like", "val",id1, "val",id2,"character", C.unpack lpattern]
+  ["Like", "val",id1, "val",id2,"val", C.unpack lpattern]
   where id1 = "Id " ++ show ldata
         id2 = "Id " ++ show ldict
 
