@@ -4,6 +4,6 @@ set -e # stop on first error
 DIR=$(dirname $1)
 BASE=$(basename $1)
 
-./mplan2vdl --dot -b $DIR/bounds.csv -s  $DIR/schema.msqldump -t $DIR/storage.csv  $1 > /tmp/$BASE.dot
+./tpch10run --dot  $1 > /tmp/$BASE.dot
 dot -Tpdf /tmp/$BASE.dot > /tmp/$BASE.pdf
 evince /tmp/$BASE.pdf
