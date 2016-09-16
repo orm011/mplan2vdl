@@ -914,7 +914,7 @@ solveAgg config env gkeyvec (M.GCount) =
   in solveAgg config env gkeyvec rewrite
 
 solveAgg config env gkeyvec (M.GFold op expr) =
-  let scattermask = getScatterMask gkeyvec
+  let (scattermask,sparsity) = getScatterMask config gkeyvec
       sortedGroups = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gkeyvec}
       gdata = sc env expr
       sortedData = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gdata}
@@ -922,18 +922,37 @@ solveAgg config env gkeyvec (M.GFold op expr) =
         M.FSum -> FSum
         M.FMax -> FMax
         M.FMin -> FMin
-  in make2LevelFold config foldop sortedGroups sortedData
+  in make2LevelFold sparsity config foldop sortedGroups sortedData
+
+data Sparsity = Sparse | Dense deriving (Show,Eq);
+
+getSparsity :: (Integer,Integer) -> Integer -> Double -> Sparsity
+getSparsity (minbound,maxbound) counts threshold =
+  let domain_size = (maxbound - minbound + 1)
+      data_int = quot domain_size counts
+      remainder = rem domain_size counts
+      data_frac = ( (fromInteger remainder)::Double) / ((fromInteger counts)::Double)
+      (thresh_int, thresh_frac) = properFraction threshold
+  in if (data_int, data_frac) > (thresh_int, thresh_frac)
+     then Sparse else Dense
 
 -- scatter mask for a group by
-getScatterMask :: Vexp -> Vexp
-getScatterMask pdata@Vexp { info=ColInfo {bounds=(pdatamin, pdatamax)} } =
-  if pdatamax == pdatamin
-  then pos_ pdata -- pivots would be empty. unclear semantics.
-  else let pivots = complete $ RangeC { rmin=pdatamin
-                                 , rstep=1
-                                 , rcount=pdatamax-pdatamin
-                                 }
-       in complete $ Partition { pivots, pdata }
+getScatterMask :: Config -> Vexp -> (Vexp, Sparsity)
+getScatterMask config predata@Vexp{ info=ColInfo {bounds=(pdatamin, pdatamax), count}}  =
+   if pdatamax == pdatamin
+   then (pos_ predata, Dense) -- pivots would be empty. unclear semantics.
+   else let aggstrategy = aggregation_strategy config
+            threshold = sparsity_threshold config
+            pivots = complete $ RangeC { rmin=pdatamin
+                                       , rstep=1
+                                       , rcount=pdatamax-pdatamin+1
+                                       }
+            is_sparse = getSparsity (pdatamin,pdatamax) count threshold
+            pdata = case (aggstrategy, is_sparse) of
+              (AggShuffle,_) -> complete $ VShuffle {varg=predata}
+              (_,Sparse) -> complete $ VShuffle{varg=predata}
+              _ -> predata
+        in (complete $ Partition { pivots, pdata }, is_sparse)
 
 maxForWidth :: Vexp -> Integer
 maxForWidth vec =
@@ -989,24 +1008,28 @@ composeKeys l r =
      (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
-make2LevelFold :: Config -> FoldOp -> Vexp -> Vexp -> Vexp
-make2LevelFold config foldop fgroups fdata =
-  let ans = case aggregation_strategy config of
-        AggSerial -> Fold {foldop, fgroups, fdata}
-        AggShuffle -> Fold {foldop, fgroups=complete $ VShuffle{varg=fgroups}, fdata}
-        AggHierarchical gsz ->
-          let pos = pos_ fgroups
-              log_gsize = const_ gsz fgroups
-              ones = ones_ fgroups
-              -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) & 1 = 01010101...
-              -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) & 1 = 00110011
-              -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) & 1 ...
-              level1par = (pos >>. log_gsize) &. ones
-              level1groups = composeKeys fgroups level1par
-              level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
-              level2results = Fold { foldop, fgroups, fdata=level1results }
-          in assert (traceShow (getBitWidth level1par) (getBitWidth level1par <= 1)) level2results
-  in complete $ ans
+make2LevelFold :: Sparsity -> Config -> FoldOp -> Vexp -> Vexp -> Vexp
+make2LevelFold sparsity config foldop fgroups fdata =
+  let plain = Fold {foldop, fgroups, fdata} in
+  case sparsity of
+    Dense ->
+      let ans = case aggregation_strategy config of
+            AggSerial -> plain
+            AggShuffle -> plain -- shuffle already done
+            AggHierarchical gsz ->
+              let pos = pos_ fgroups
+                  log_gsize = const_ gsz fgroups
+                  ones = ones_ fgroups
+                  -- example: grainsize = 1. then log_gsize = 0. want 01010101... formula gives (pos >> 0) & 1 = 01010101...
+                  -- example: grainsize = 2. then log_gisze = 1. want 00110011... formulate gives (pos >> 1) & 1 = 00110011
+                  -- example: grainsize = 4. then log_gisze = 2. want 00001111... formulate gives (pos >> 2) & 1 ...
+                  level1par = (pos >>. log_gsize) &. ones
+                  level1groups = composeKeys fgroups level1par
+                  level1results = complete $ Fold { foldop, fgroups=level1groups, fdata }
+                  level2results = Fold { foldop, fgroups, fdata=level1results }
+              in assert (getBitWidth level1par <= 1) level2results
+      in complete $ ans
+    Sparse -> complete $ plain -- shuffle already done
 
 
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)

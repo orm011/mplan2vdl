@@ -281,8 +281,8 @@ addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing
      then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
      else plain
 
-makeConfig :: Bool -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
-makeConfig metadata aggregation_strategy boundslist storagelist tables dictlist =
+makeConfig :: Double -> Bool -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
+makeConfig sparsity_threshold metadata aggregation_strategy boundslist storagelist tables dictlist =
   let show_metadata = metadata
       dictionary = makeDictionary dictlist
       constraints = foldMap getTableConstraints tables
@@ -299,7 +299,7 @@ makeConfig metadata aggregation_strategy boundslist storagelist tables dictlist 
       partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
       pktable = map pkpair tables
-  in Config { show_metadata, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+  in Config { sparsity_threshold, show_metadata, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
               tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -349,7 +349,8 @@ makeFKEntries Table { name, fkeys } =
 
 data AggStrategy = AggHierarchical Integer | AggSerial | AggShuffle deriving (Show, Eq, Data, Typeable)
 
-data Config =  Config  { aggregation_strategy :: AggStrategy
+data Config =  Config  { sparsity_threshold :: Double
+                       , aggregation_strategy :: AggStrategy
                        , show_metadata :: Bool
                        , dictionary :: HashMap C.ByteString Integer
                        , colinfo :: NameTable ColInfo

@@ -43,6 +43,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , push_joins :: Bool
                             , agg_strategy :: AggStrategy
                             , grainsize :: Int
+                            , sparsity :: Double
                             } deriving (Show, Data, Typeable)
 
 cmdTemplate :: Mplan2Vdl
@@ -61,6 +62,7 @@ cmdTemplate = Mplan2Vdl
         ,AggShuffle &= help "parallel agg with shuffle operator"]
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for --agghierarchical (default 8192). Ignored otherwise" &= name "g"
   , metadata = False &= typ "Bool" &= help "show inferred metadata in output"
+  , sparsity = 1.0 &= typ "Double" &= help "threshold for (max - min + 1)/count: aggregations with more sparsity get a shuffle oper added always rather than the default strategy"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -133,6 +135,7 @@ main = do
   mboundslist <- readBoundsFile $ boundsfile cmdargs
   mstoragelist <- readStorageFile $ storagefile cmdargs
   mdictlist <- readDictionaryFile $ dictionaryfile cmdargs
+  let threshold  = sparsity cmdargs
   let strat = case agg_strategy cmdargs of
         AggHierarchical _ -> AggHierarchical (grainsizelg)
         x -> x
@@ -140,7 +143,7 @@ main = do
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                let config  = makeConfig (metadata cmdargs) strat boundslist storagelist tables dictlist
+                let config  = makeConfig threshold (metadata cmdargs) strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage
