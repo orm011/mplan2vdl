@@ -56,8 +56,22 @@ sha1vd vd = sha1hack vd
 completeW :: Voodoo -> W
 completeW vd = W (vd, sha1vd vd)
 
+--printable format for metadata
+data Metadata = Metadata { databounds::(Integer,Integer)
+                         , sizebound::Integer
+                         , name::C.ByteString }
+  deriving (Eq,Show,Generic)
+instance Hashable Metadata
+
+getMetadata :: V.Vexp -> Metadata
+getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name=nm} =
+  let name = case nm of
+        Nothing -> ""
+        Just n -> C.pack $ show n
+  in Metadata {databounds=bounds, sizebound=count, name}
+
 type VoodooMinus = Vd W
-type Voodoo = (Vd W, Maybe ColInfo)
+type Voodoo = (Vd W, Maybe Metadata)
 
 type Vref = Vd Int -- used for ref version that can be printed as a series of expressions
 
@@ -169,10 +183,10 @@ makeload n =
              , vec = completeW $ (Load n, Nothing) }
 
 voodooFromVexpMemo :: MemoTable -> V.Vexp -> (MemoTable, Voodoo)
-voodooFromVexpMemo s vexp@(V.Vexp vx info _ _ _ _) =
+voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _) =
   case HMap.lookup vexp s of
     Nothing -> let (s',r) = voodooFromVxNoMemo s vx
-                   ans = (r, Just info)
+                   ans = (r, Just $ getMetadata vexp)
                    s'' = HMap.insert vexp ans s'
                in  (s'', ans)
     Just ans -> (s, ans)
@@ -268,10 +282,10 @@ vrefsFromVoodoos vecs =
   where process (state, _) v  = memVrefFromVoodoo state v
 
 type LookupTable = HMap.HashMap Voodoo Int
-type Log = [(Int, Vref, Maybe ColInfo)]
+type Log = [(Int, Vref, Maybe Metadata)]
 type State = (LookupTable, Log)
 
-addToLog :: Log -> (Vref, Maybe ColInfo) -> (Log, Int)
+addToLog :: Log -> (Vref, Maybe Metadata) -> (Log, Int)
 addToLog log (v,info) = let (n, _, _) = head log
                  in ((n+1, v, info) : log, n+1)
 
@@ -370,7 +384,7 @@ toList (VShuffle {varg}) =
 toList (MaterializeCompact x) =
   ["MaterializeCompact","Id " ++ show x]
 
-printLine :: (Int, Vref, Maybe ColInfo) -> Reader Config String
+printLine :: (Int, Vref, Maybe Metadata) -> Reader Config String
 printLine (iden, vref, info) =
   do display <- asks show_metadata
      let strs = toList vref

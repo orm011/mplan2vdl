@@ -1,5 +1,6 @@
 module Vlite( vexpsFromMplan
             , Vexp(..)
+            , UniqueSpec(..)
             , Vx(..)
             , BinaryOp(..)
             , ShOp(..)
@@ -97,6 +98,7 @@ instance Show Vx where
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
+instance Hashable UniqueSpec
 
 data Lineage = Pure {col::Name, mask::Vexp} | None  deriving (Generic)
 instance Show Lineage where
