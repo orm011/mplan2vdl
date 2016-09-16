@@ -926,15 +926,12 @@ solveAgg config env gkeyvec (M.GFold op expr) =
 
 data Sparsity = Sparse | Dense deriving (Show,Eq);
 
+
+-- todo: rename this to 'isLargeGroupTable'
 getSparsity :: (Integer,Integer) -> Integer -> Double -> Sparsity
-getSparsity (minbound,maxbound) counts threshold =
+getSparsity (minbound,maxbound) _ _ =
   let domain_size = (maxbound - minbound + 1)
-      data_int = quot domain_size counts
-      remainder = rem domain_size counts
-      data_frac = ( (fromInteger remainder)::Double) / ((fromInteger counts)::Double)
-      (thresh_int, thresh_frac) = properFraction threshold
-  in if (data_int, data_frac) > (thresh_int, thresh_frac)
-     then Sparse else Dense
+  in if domain_size > 32000 then Sparse else Dense
 
 -- scatter mask for a group by
 getScatterMask :: Config -> Vexp -> (Vexp, Sparsity)
