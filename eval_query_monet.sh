@@ -7,4 +7,4 @@ cat \
 | grep -v "optimizer_stats()" \
 | cat <(echo -n 'plan ') - \
 | sed 's/plan//g' \
-| mclient -f csv tpch10 -
+| mclient $@ tpch01 -

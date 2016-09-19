@@ -1,3 +1,0 @@
-#!/bin/bash
-DIR=tests/tpch10noorder/
-./mplan2vdl +RTS -xc -RTS -b $DIR/bounds.csv -s $DIR/schema.msqldump -t $DIR/storage.csv --dictionary $DIR/dictionary.csv $@

@@ -13,7 +13,7 @@ for test in $(ls $DIR/*plan)
 do
     COUNT=$((COUNT+1))
     FILE=$(basename $test)
-    COMMAND="./tpch10run $@ $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err"
+    COMMAND="./tpch1run $@ $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err"
     #echo $COMMAND
     eval $COMMAND
     EXIT_STATUS=$?
