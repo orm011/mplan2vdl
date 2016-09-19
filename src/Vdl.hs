@@ -3,7 +3,7 @@ module Vdl (vdlFromVexps) where
 import Control.Monad.Reader hiding (join)
 import Data.Foldable(foldl')
 import Config
-import Name(Name(..))
+import Name(Name(..), get_last)
 --import Data.Int
 import Debug.Trace
 --import Text.Groom
@@ -59,16 +59,13 @@ completeW vd = W (vd, sha1vd vd)
 --printable format for metadata
 data Metadata = Metadata { databounds::(Integer,Integer)
                          , sizebound::Integer
-                         , name::C.ByteString }
+                         , name::Maybe Name }
   deriving (Eq,Show,Generic)
 instance Hashable Metadata
 
 getMetadata :: V.Vexp -> Metadata
-getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name=nm} =
-  let name = case nm of
-        Nothing -> ""
-        Just n -> C.pack $ show n
-  in Metadata {databounds=bounds, sizebound=count, name}
+getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name} =
+  Metadata {databounds=bounds, sizebound=count, name}
 
 type VoodooMinus = Vd W
 type Voodoo = (Vd W, Maybe Metadata)
@@ -268,7 +265,9 @@ voodoosFromVexps vexps =
   let solve (s, res) v =  let (s', v') = voodooFromVexpMemo s v
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
-  in map (\r -> ((MaterializeCompact . completeW) r, Nothing)) ans
+      rename_value vec@(_, meta@(Just (Metadata { name=Just nm }))) = (Project { outname=get_last nm, inname=Name ["val"], vec=completeW vec }, meta)
+      rename_value vec@(_, _) = vec -- in case not found
+  in map (\r -> ((MaterializeCompact .  completeW . rename_value) r, Nothing)) ans
 
 vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =

@@ -8,6 +8,7 @@ module Name (Name(..)
             ,lookup_err
             ,fromList
             ,toList
+            ,get_last
             ) where
 
 --import Data.String.Utils(join)
@@ -49,6 +50,10 @@ data Name = Name [B.ByteString] deriving (Eq, Generic, Ord, Data)
 instance Hashable Name
 instance Show Name where
   show (Name lst) = C.unpack (C.intercalate "." lst)
+
+-- gets the last piece of the name as a single name
+get_last :: Name -> Name
+get_last (Name segs) = Name [last segs]
 
 type Map = Map.Map
 instance NFData Name
