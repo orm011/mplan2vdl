@@ -314,7 +314,7 @@ inferMetadata arg@Binop { binop
     let count = min c1 c2
         bounds = inferBounds arg
         trailing_zeros' = case binop of
-          BitShift -> (ltrail - upper) 
+          BitShift -> (ltrail - upper)
           _ -> 0
     in ColInfo {bounds, count, stype=lefttype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
          -- until we need more precision, we're conservative on the trailing zeros...

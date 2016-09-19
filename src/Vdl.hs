@@ -3,7 +3,7 @@ module Vdl (vdlFromVexps) where
 import Control.Monad.Reader hiding (join)
 import Data.Foldable(foldl')
 import Config
-import Name(Name(..), get_last)
+import Name(Name(..), get_last, concat_name)
 --import Data.Int
 import Debug.Trace
 --import Text.Groom
@@ -14,6 +14,7 @@ import qualified Vlite as V
 import Data.Hashable
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.ByteString.Lazy.Char8 as C
+
 --import Data.List (foldl')
 --import Config
 import Prelude hiding (log)
@@ -59,13 +60,17 @@ completeW vd = W (vd, sha1vd vd)
 --printable format for metadata
 data Metadata = Metadata { databounds::(Integer,Integer)
                          , sizebound::Integer
-                         , name::Maybe Name }
+                         , name::Maybe Name
+                         , origin::Maybe Name}
   deriving (Eq,Show,Generic)
 instance Hashable Metadata
 
 getMetadata :: V.Vexp -> Metadata
-getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name} =
-  Metadata {databounds=bounds, sizebound=count, name}
+getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name, V.lineage} =
+  let origin = case lineage of
+        V.Pure{ V.col } -> Just col
+        V.None -> Nothing
+  in Metadata {databounds=bounds, sizebound=count, name, origin}
 
 type VoodooMinus = Vd W
 type Voodoo = (Vd W, Maybe Metadata)
@@ -265,7 +270,13 @@ voodoosFromVexps vexps =
   let solve (s, res) v =  let (s', v') = voodooFromVexpMemo s v
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
-      rename_value vec@(_, meta@(Just (Metadata { name=Just nm }))) = (Project { outname=get_last nm, inname=Name ["val"], vec=completeW vec }, meta)
+      rename_value vec@(_, meta@(Just (Metadata { name, origin }))) =
+        let outname = case (name,origin) of
+              (Just n, Just y) -> (concat_name (get_last n) y)
+              (Just n, Nothing) -> get_last n
+              (Nothing, Just y) -> (concat_name (Name ["val"]) y)
+              (_,_) -> Name ["val"]
+        in (Project { outname, inname=Name ["val"], vec=completeW vec }, meta)
       rename_value vec@(_, _) = vec -- in case not found
   in map (\r -> ((MaterializeCompact .  completeW . rename_value) r, Nothing)) ans
 

@@ -8,6 +8,7 @@ module Name (Name(..)
             ,lookup_err
             ,fromList
             ,toList
+            ,concat_name
             ,get_last
             ) where
 
@@ -51,6 +52,9 @@ instance Hashable Name
 instance Show Name where
   show (Name lst) = C.unpack (C.intercalate "." lst)
 
+concat_name :: Name -> Name -> Name
+concat_name (Name a) (Name b) = Name (a++b)
+
 -- gets the last piece of the name as a single name
 get_last :: Name -> Name
 get_last (Name segs) = Name [last segs]
@@ -63,7 +67,6 @@ data NameTable v = NameTable (Map [B.ByteString] v)
 instance Show (NameTable t) where
   show (NameTable m) = let (revnames,_) = unzip (Map.toList m)
                        in show $ map (Name . reverse) revnames
-
 
 fromList :: [(Name,a)] -> NameTable a
 fromList prs = foldl' (\tab (n,a) -> insertWeak n a tab) empty prs
