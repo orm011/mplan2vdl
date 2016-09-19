@@ -56,7 +56,7 @@ resolveCharLiteral config ch = case HashMap.lookup ch (dictionary config) of
 resolveDateString :: B.ByteString -> Integer
 resolveDateString datestr =
   diffDays day zero
-  where zero = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
+  where zero = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" "0001-01-01") :: Day
         day = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" (C.unpack datestr)) :: Day
 
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic, Data)
