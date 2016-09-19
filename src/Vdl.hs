@@ -8,7 +8,7 @@ import Name(Name(..), get_last, concat_name)
 import Debug.Trace
 --import Text.Groom
 import GHC.Generics
-import Data.String.Utils(join)
+import Data.String.Utils(join, replace)
 import Control.DeepSeq(NFData)
 import qualified Vlite as V
 import Data.Hashable
@@ -271,11 +271,14 @@ voodoosFromVexps vexps =
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
       rename_value vec@(_, meta@(Just (Metadata { name, origin }))) =
-        let outname = case (name,origin) of
+        let catted = case (name,origin) of
               (Just n, Just y) -> (concat_name (get_last n) y)
               (Just n, Nothing) -> get_last n
               (Nothing, Just y) -> (concat_name (Name ["val"]) y)
               (_,_) -> Name ["val"]
+            disp = show catted
+            newname = replace ("."::String) "__" disp
+            outname = Name [C.pack newname]
         in (Project { outname, inname=Name ["val"], vec=completeW vec }, meta)
       rename_value vec@(_, _) = vec -- in case not found
   in map (\r -> ((MaterializeCompact .  completeW . rename_value) r, Nothing)) ans
