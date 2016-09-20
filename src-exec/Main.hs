@@ -1,6 +1,6 @@
 module Main where
 
-import qualified MainFuns(main)
+import qualified MainFuns(mainf)
 
 main:: IO ()
-main = MainFuns.main
+main = MainFuns.mainf

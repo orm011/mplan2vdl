@@ -573,7 +573,7 @@ solve' config M.Join { M.leftch
                      } =
   let sleft@(Env colsleft _) = solve config leftch
       sright@(Env colsright _) = solve config rightch
-  in case separateFKJoinable config (N.toList conds) sleft sright of
+  in case traceShowId (separateFKJoinable config (N.toList conds) sleft sright) of
        ([jspec@FKJoinSpec{joinorder}],[]) -> case joinorder of
          FactDim -> handleGatherJoin config sleft sright joinvariant jspec
          DimFact -> handleGatherJoin config sright sleft joinvariant jspec
@@ -964,13 +964,17 @@ maxForWidth vec =
   in assert (width < 65) $ --"about to shift by 32 or more"
      (1 `shiftL` (fromInteger width)) - 1
 
+addSizeHint :: Vexp -> Vexp -- returns an equivalnet vector with a bitmask hint for the voodoo backend
+addSizeHint vec =
+  let maxval = maxForWidth vec
+      maxvalV = const_ maxval vec
+  in  vec &. maxvalV
+
 makeCompositeKey :: NonEmpty Vexp -> Vexp
 makeCompositeKey (firstvexp :| rest) =
   let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
       out = foldl' composeKeys shifted rest
-      maxval = traceShow out $ maxForWidth out
-      maxvalV = const_ maxval out
-  in  out &. maxvalV  --mask used as a hint to Voodoo (to infer size)
+  in addSizeHint out
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
@@ -1034,8 +1038,8 @@ make2LevelFold sparsity config foldop fgroups fdata =
 data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 
 handleGatherJoin :: Config -> Env -> Env -> M.JoinVariant -> JoinSpec -> [Vexp]
-handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJoinSpec{joinorder=whichisleft})   =
- let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config jspec
+handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJoinSpec{joinorder=whichisleft}) =
+ let JoinIdx {selectmask=selectboolean, gathermask} = traceShowId $ deduceMasks config jspec
      selectmask = complete $ Fold { foldop=FSel
                                   , fgroups=pos_ selectboolean
                                   , fdata= selectboolean
@@ -1046,9 +1050,14 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
      joined_dimcols = gatherAll dimcols clean_gathermask
  in case joinvariant of
    M.Plain ->  cleaned_factcols ++ joined_dimcols
-   M.LeftSemi -> case whichisleft of
+   M.LeftSemi -> case whichisleft of -- semantics: left side
      FactDim -> cleaned_factcols
-     DimFact -> joined_dimcols
+     DimFact -> let scattermask = addSizeHint gathermask
+                    qualified = traceShow selectmask $ complete $ Shuffle {shop=Scatter, shsource=const_ 1 scattermask, shpos=scattermask} -- TODO: only true if there is no select mask.
+                    dimcolsselectmask = complete $ Fold { foldop=FSel
+                                                        , fgroups=pos_ qualified
+                                                        , fdata=qualified }
+                in gatherAll dimcols dimcolsselectmask
    M.LeftOuter -> case whichisleft of
      FactDim -> error "left outer join on the fact side" -- this can be implemented
      DimFact -> error "left outer join on the dim side" -- looks a bit tougher to implement

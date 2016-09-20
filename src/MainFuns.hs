@@ -1,4 +1,4 @@
-module MainFuns (main) where
+module MainFuns (mainf) where
 
 import Control.Monad.Reader (runReader)
 import System.Environment (getProgName,getArgs)
@@ -120,8 +120,8 @@ readDictionaryFile dname =
      return $ ( decode NoHeader dictf)
 
 
-main :: IO ()
-main = do
+mainf :: IO ()
+mainf = do
   gargs <-  getArgs
   hPutStrLn stderr (show gargs)
   cmdargs <- cmdArgs cmdTemplate
