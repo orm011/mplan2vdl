@@ -347,7 +347,7 @@ inferBounds Binop { binop
               in  (minimum divs, maximum divs) -- TODO double check reasoning here.
        Min -> (min l1 l2, min u1 u2) -- this is true, right?
        Max -> (max l1 l2, max u1 u2)
-       Mod -> (0, u2) -- assuming mods are always positive
+       Mod -> (0, u2-1) -- assuming mods are always positive
        BitAnd -> if (l1 >= 0 && l2 >= 0)
                  then let mx = min (maxForWidth left) (maxForWidth right)
                       in (0,mx) -- precision could be improved.

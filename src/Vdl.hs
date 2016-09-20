@@ -96,6 +96,7 @@ data Voodop =
   | Greater
   | Multiply
   | Divide
+  | Modulo
   | FoldSelect
   | FoldMax
   | FoldSum
@@ -158,6 +159,9 @@ a *. b = (Binary { op=Multiply, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (/.) :: Voodoo -> Voodoo -> Voodoo
 a /. b = (Binary { op=Divide, arg1=completeW a, arg2=completeW b }, Nothing)
+
+(%.) :: Voodoo -> Voodoo -> Voodoo
+a %. b = (Binary { op=Modulo, arg1=completeW a, arg2=completeW b }, Nothing)
 
 (|.) :: Voodoo -> Voodoo -> Voodoo
 a |. b = (Binary { op=BitwiseOr, arg1=completeW a, arg2=completeW b }, Nothing)
@@ -226,7 +230,7 @@ voodooFromVxNoMemo s (V.Binop { V.binop, V.left, V.right}) =
               V.Neq ->  (l !=. r)
               V.BitOr -> (l |. r)
               V.BitAnd -> (l &. r)
-              V.Mod -> error "implement this?"
+              V.Mod -> (l %. r)
   in (s'',t)
 
 voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
