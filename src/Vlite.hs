@@ -113,6 +113,7 @@ data Vexp = Vexp { vx::Vx
                  , name::Maybe Name
                  , memoized_hash::SHA1
                  , quant::UniqueSpec
+                 , comment::C.ByteString
                  } deriving (Show,Generic)
 
 instance Hashable Vexp where
@@ -216,7 +217,8 @@ complete vx =
       name = case vx of
         Shuffle {shsource=Vexp{name=orig_name}} -> orig_name -- preserve name for scatter and gather.
         _ -> Nothing
-  in Vexp { vx, info, lineage, name, memoized_hash, quant }
+      comment = ""
+  in Vexp { vx, info, lineage, name, memoized_hash, quant, comment }
 
 
 checkLineage :: Lineage -> Lineage
@@ -625,7 +627,7 @@ getRefVector config tablename =
   let pkname = lookupPkey config tablename
       (_,pkinfo) = NameTable.lookup_err pkname (colinfo config)
       pkvx=Load pkname
-  in Vexp{vx=pkvx, info=pkinfo, lineage=None, memoized_hash=sha1vx pkvx, quant=Unique, name=Nothing} -- this vector is used only for the ref part of other columns
+  in Vexp{vx=pkvx, info=pkinfo, lineage=None, memoized_hash=sha1vx pkvx, quant=Unique, name=Nothing, comment="ref vector"} -- this vector is used only for the ref part of other columns
 
 loadAs :: Config -> Name -> Name -> Maybe Name -> Vexp
 loadAs config tablename colname alias =
@@ -638,7 +640,7 @@ loadAs config tablename colname alias =
     Name [_,_] -> let (_,clinfo) = NameTable.lookup_err colname (colinfo config)
                       clquant = if (isPkey config (colname:|[]) /= Nothing) then Unique else Any
                       clvx=Load colname
-                  in Vexp {vx=clvx, info=clinfo, quant=clquant, lineage=Pure {col=colname, mask}, memoized_hash=sha1vx clvx, name=outname} -- this is just for type compatiblity.
+                  in Vexp {vx=clvx, info=clinfo, quant=clquant, lineage=Pure {col=colname, mask}, memoized_hash=sha1vx clvx, name=outname, comment=""} -- this is just for type compatiblity.
     Name _ -> error "unexpected name"
 
 
@@ -663,7 +665,7 @@ separateFKJoinable config conds (Env _ leftEnv) (Env _ rightEnv) =
         if kp == pcols
         then case isFKRef config kp of
           Just (whichl, joinidx) ->
-            let final = FKJoinSpec {factmask=pfactmask, dimmask=pdimmask, factunique=quant, joinorder=pjoinorder, joinidx}
+            let final = FKJoinSpec {factmask=pfactmask {comment="factmask"}, dimmask=pdimmask{comment="dimmmask"}, factunique=quant, joinorder=pjoinorder, joinidx}
             in assert (whichl == FactDim) $ Left final
                 --because we keep fact on left, then at this point lookup should alwasy by left child. Who was the actual
                 --left child is kept in the joinorder field.
@@ -967,7 +969,7 @@ maxForWidth vec =
 addSizeHint :: Vexp -> Vexp -- returns an equivalnet vector with a bitmask hint for the voodoo backend
 addSizeHint vec =
   let maxval = maxForWidth vec
-      maxvalV = const_ maxval vec
+      maxvalV = (const_ maxval vec){comment="size hint for voodoo backend"}
   in  vec &. maxvalV
 
 makeCompositeKey :: NonEmpty Vexp -> Vexp
@@ -1040,10 +1042,10 @@ data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 handleGatherJoin :: Config -> Env -> Env -> M.JoinVariant -> JoinSpec -> [Vexp]
 handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJoinSpec{joinorder=whichisleft}) =
  let JoinIdx {selectmask=selectboolean, gathermask} = traceShowId $ deduceMasks config jspec
-     selectmask = complete $ Fold { foldop=FSel
+     selectmask = (complete $ Fold { foldop=FSel
                                   , fgroups=pos_ selectboolean
                                   , fdata= selectboolean
-                                  }
+                                  }) {comment="selectmask"}
      (clean_gathermask, cleaned_factcols) = case gatherAll (gathermask:factcols) selectmask of
        a:b -> (a,b)
        _ -> error "unexpected empty"
@@ -1052,8 +1054,8 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
    M.Plain ->  cleaned_factcols ++ joined_dimcols
    M.LeftSemi -> case whichisleft of -- semantics: left side
      FactDim -> cleaned_factcols
-     DimFact -> let scattermask = addSizeHint gathermask
-                    qualified = traceShow selectmask $ complete $ Shuffle {shop=Scatter, shsource=const_ 1 scattermask, shpos=scattermask} -- TODO: only true if there is no select mask.
+     DimFact -> let scattermask = (addSizeHint gathermask){comment="DimFactSemiJoin scattermask"}
+                    qualified = (complete $ Shuffle {shop=Scatter, shsource=const_ 1 scattermask, shpos=scattermask}) -- TODO: only true if there is no select mask.
                     dimcolsselectmask = complete $ Fold { foldop=FSel
                                                         , fgroups=pos_ qualified
                                                         , fdata=qualified }
@@ -1092,6 +1094,7 @@ deduceMasks config (FKJoinSpec { factmask=fprime_fact_idx, factunique=quantf, di
                              , name =  Nothing
                              , memoized_hash = sha1vx vx
                              , quant=Any
+                             , comment=""
                              }
       -- fprime col tracks some fk col FK.
       -- FK is in one to one correspondance with the fact_dim_idx_name,
@@ -1205,13 +1208,13 @@ xform fn vexps = let merge (accm,accl) vexp  = let (newm,newv) = transform fn ve
                  in reverse outr
 
 transform :: (Vx -> Maybe Vexp) -> Vexp -> Memoized -> (Memoized, Vexp)
-transform fn vexp@(Vexp {vx, name}) mp  =
+transform fn vexp@(Vexp {vx, name, comment}) mp  =
   case Map.lookup vexp mp of
     Nothing ->
       let (mp', anon) = case vx of
             Load _ -> (mp, vexp) -- hack: we cannot deduce info for load without the config, so just keep it.
             _ ->  transformVx fn vx mp
-          ans = anon {name=name} -- try to preserve names across optimizations
+          ans = anon {name=name, comment=comment} -- try to preserve names across optimizations
           mp'' = Map.insert vexp ans mp'
       in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
     Just x -> (mp, x)

@@ -61,16 +61,17 @@ completeW vd = W (vd, sha1vd vd)
 data Metadata = Metadata { databounds::(Integer,Integer)
                          , sizebound::Integer
                          , name::Maybe Name
-                         , origin::Maybe Name}
+                         , origin::Maybe Name
+                         , comment::C.ByteString}
   deriving (Eq,Show,Generic)
 instance Hashable Metadata
 
 getMetadata :: V.Vexp -> Metadata
-getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name, V.lineage} =
+getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name, V.lineage, V.comment} =
   let origin = case lineage of
         V.Pure{ V.col } -> Just col
         V.None -> Nothing
-  in Metadata {databounds=bounds, sizebound=count, name, origin}
+  in Metadata {databounds=bounds, sizebound=count, name, origin, comment}
 
 type VoodooMinus = Vd W
 type Voodoo = (Vd W, Maybe Metadata)
@@ -185,7 +186,7 @@ makeload n =
              , vec = completeW $ (Load n, Nothing) }
 
 voodooFromVexpMemo :: MemoTable -> V.Vexp -> (MemoTable, Voodoo)
-voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _) =
+voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _ _) =
   case HMap.lookup vexp s of
     Nothing -> let (s',r) = voodooFromVxNoMemo s vx
                    ans = (r, Just $ getMetadata vexp)
