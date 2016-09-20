@@ -950,6 +950,7 @@ getScatterMask config predata@Vexp{ info=ColInfo {bounds=(pdatamin, pdatamax), c
                                        }
             is_sparse = getSparsity (pdatamin,pdatamax) count threshold
             pdata = case (aggstrategy, is_sparse) of
+              (AggSerial,_) -> predata
               (AggShuffle,_) -> complete $ VShuffle {varg=predata}
               (_,Sparse) -> complete $ VShuffle{varg=predata}
               _ -> predata
