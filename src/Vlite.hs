@@ -72,6 +72,11 @@ sha1vx vx@(Load _) = sha1 $ C.pack (show vx)
 sha1vx vx@(RangeC {}) = sha1 $ C.pack (show vx)
 sha1vx vx = sha1hack vx
 
+scatteredTo :: Vexp -> Vexp -> Vexp
+values `scatteredTo` positions =
+  let shpos = addScatterSizeHint positions
+  in complete $ Shuffle { shop=Scatter, shsource=values, shpos }
+
 data Vx =
   Load Name
   | RangeV { rmin :: Integer, rstep :: Integer, rref::Vexp }
@@ -921,10 +926,10 @@ solveAgg config env gkeyvec (M.GCount) =
   in solveAgg config env gkeyvec rewrite
 
 solveAgg config env gkeyvec (M.GFold op expr) =
-  let (scattermask,sparsity) = getScatterMask config gkeyvec
-      sortedGroups = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gkeyvec}
+  let (scattermask, sparsity) = getScatterMask config gkeyvec
+      sortedGroups = gkeyvec `scatteredTo` scattermask
       gdata = sc env expr
-      sortedData = complete $ Shuffle {shop=Scatter, shpos=scattermask, shsource=gdata}
+      sortedData = gdata `scatteredTo` scattermask
       foldop = case op of
         M.FSum -> FSum
         M.FMax -> FMax
@@ -1064,8 +1069,8 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
    M.Plain ->  cleaned_factcols ++ joined_dimcols
    M.LeftSemi -> case whichisleft of -- semantics: left side
      FactDim -> cleaned_factcols
-     DimFact -> let scattermask = (addScatterSizeHint gathermask){comment="DimFactSemiJoin scattermask"}
-                    qualified = (complete $ Shuffle {shop=Scatter, shsource=const_ 1 scattermask, shpos=scattermask}) -- TODO: only true if there is no select mask.
+     DimFact -> let scattermask = gathermask{comment="dim semijoin fact scattermask"}
+                    qualified = (ones_ scattermask) `scatteredTo` scattermask
                     dimcolsselectmask = complete $ Fold { foldop=FSel
                                                         , fgroups=pos_ qualified
                                                         , fdata=qualified }
@@ -1119,14 +1124,8 @@ deduceMasks config (FKJoinSpec { factmask=fprime_fact_idx, factunique=quantf, di
     Vexp { quant=Unique } -> -- scattering back only works for columns with unique entries
       let ones = ones_ dimprime_dim_idx
           pos = pos_ dimprime_dim_idx
-          dim_dimprime_valid = complete $ Shuffle { shop=Scatter
-                                         , shsource=ones
-                                         , shpos=dimprime_dim_idx
-                                         }
-          dim_dimprime_idx = complete $ Shuffle { shop=Scatter
-                                      , shsource=pos
-                                      , shpos=dimprime_dim_idx
-                                      }
+          dim_dimprime_valid = ones `scatteredTo` dimprime_dim_idx
+          dim_dimprime_idx = pos `scatteredTo` dimprime_dim_idx
           fprime_dimprime_valid = complete $ Shuffle  { shop=Gather
                                                       , shsource=dim_dimprime_valid
                                                       , shpos=fprime_dim_idx
