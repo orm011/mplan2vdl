@@ -1,0 +1,4 @@
+#!/bin/bash
+DIR=$1
+shift
+./mplan2vdl +RTS -xc -RTS -b $DIR/bounds.csv -s $DIR/schema.msqldump -t $DIR/storage.csv --dictionary $DIR/dictionary.csv $@
