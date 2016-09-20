@@ -195,6 +195,9 @@ a +. b = makeBinop Add a b
 (/.) :: Vexp -> Vexp -> Vexp
 a /. b = makeBinop Div a b
 
+(%.) :: Vexp -> Vexp -> Vexp
+a %. b = makeBinop Mod a b
+
 makeBinop :: BinaryOp -> Vexp -> Vexp -> Vexp
 makeBinop binop left right = complete $ Binop {binop, left, right}
 
@@ -973,6 +976,12 @@ addSizeHint vec =
       maxvalV = (const_ maxval vec){comment="size hint for voodoo backend"}
   in  vec &. maxvalV
 
+addScatterSizeHint :: Vexp -> Vexp
+addScatterSizeHint vec@Vexp{info=ColInfo {bounds=(vmin,vmax)}} =
+  let maxvalV = assert (vmin >= 0) (const_ vmax vec){comment="scatter size hint for voodoo backend"}
+  in  vec %. maxvalV
+
+
 makeCompositeKey :: NonEmpty Vexp -> Vexp
 makeCompositeKey (firstvexp :| rest) =
   let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
@@ -1055,7 +1064,7 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
    M.Plain ->  cleaned_factcols ++ joined_dimcols
    M.LeftSemi -> case whichisleft of -- semantics: left side
      FactDim -> cleaned_factcols
-     DimFact -> let scattermask = (addSizeHint gathermask){comment="DimFactSemiJoin scattermask"}
+     DimFact -> let scattermask = (addScatterSizeHint gathermask){comment="DimFactSemiJoin scattermask"}
                     qualified = (complete $ Shuffle {shop=Scatter, shsource=const_ 1 scattermask, shpos=scattermask}) -- TODO: only true if there is no select mask.
                     dimcolsselectmask = complete $ Fold { foldop=FSel
                                                         , fgroups=pos_ qualified
