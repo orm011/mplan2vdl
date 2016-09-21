@@ -72,10 +72,13 @@ sha1vx vx@(Load _) = sha1 $ C.pack (show vx)
 sha1vx vx@(RangeC {}) = sha1 $ C.pack (show vx)
 sha1vx vx = sha1hack vx
 
-scatteredTo :: Vexp -> Vexp -> Vexp
-values `scatteredTo` positions =
+scatteredToWithHint :: Vexp -> Vexp -> Vexp
+values `scatteredToWithHint` positions =
   let shpos = addScatterSizeHint positions
   in complete $ Shuffle { shop=Scatter, shsource=values, shpos }
+
+scatteredTo :: Vexp -> Vexp -> Vexp
+values `scatteredTo` positions = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions }
 
 data Vx =
   Load Name
@@ -1070,7 +1073,7 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
    M.LeftSemi -> case whichisleft of -- semantics: left side
      FactDim -> cleaned_factcols
      DimFact -> let scattermask = gathermask{comment="dim semijoin fact scattermask"}
-                    qualified = (ones_ scattermask) `scatteredTo` scattermask
+                    qualified = (ones_ scattermask) `scatteredToWithHint` scattermask
                     dimcolsselectmask = complete $ Fold { foldop=FSel
                                                         , fgroups=pos_ qualified
                                                         , fdata=qualified }
