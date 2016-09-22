@@ -75,7 +75,7 @@ Leaf
   { Leaf { source=$3, columns=$6 }  }
 
 Node
-: IdentifierListNE '(' NodeListNE ')' BracketListNE { Node { relop = (C.intercalate " " $1), children = $3, arg_lists = $5 } }
+: IdentifierListNE '(' NodeListNE ')' BracketListNE { Node { relop = (C.intercalate " " $1), location=(0,0), children = $3, arg_lists = $5 } }
 
 IdentifierListNE
 : identifier { [$1] }
@@ -276,6 +276,7 @@ instance NFData ScalarExpr
 
 data Rel = Node { relop :: B.ByteString {- relational op like join -}
                 , children :: [Rel]
+                , location :: (Integer,Integer) -- start and end
                 , arg_lists :: [[Expr]]  }
            | Leaf { source :: Name, columns :: [Expr] }
              {-table scan -}
