@@ -98,6 +98,7 @@ resolveBinopOpcode nm =
     Name ["and"] -> Right LogAnd
     Name [">"] -> Right Gt
     Name ["<>"] -> Right Neq
+    Name ["scale_down"] -> Right Div
     _ -> Left $ E.unexpected "binary function" nm
 
 
