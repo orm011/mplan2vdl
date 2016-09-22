@@ -284,7 +284,7 @@ voodoosFromVexps vexps =
             disp = show catted
             newname = replace ("."::String) "__" disp
             outname = Name [C.pack newname]
-        in (Project { outname, inname=Name ["val"], vec=completeW vec }, meta)
+        in (Project { outname, inname=Name ["val"], vec=completeW vec }, fmap (\m -> m {comment="rename for output"}) meta)
       rename_value vec@(_, _) = vec -- in case not found
   in map (\r -> ((MaterializeCompact .  completeW . rename_value) r, Nothing)) ans
 

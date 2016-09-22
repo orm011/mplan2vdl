@@ -462,12 +462,18 @@ makeEnvWeak lst =
         maybeadd env vexp@Vexp { name=(Just newalias) } =
           NameTable.insertWeak newalias vexp env
 
+addComment :: C.ByteString -> [Vexp] -> [Vexp]
+addComment str exps  =
+  map (\e -> e {comment=C.intercalate " " [(comment e),  str]}) exps
+
 {- helper function that makes a lookup table from the output of a previous
 operator. the lookup table loses information about the anonymous outputs
 of the operator, so it only makes sense to use this in internal nodes
 whose vectors will be consumed by other operators, but not on the
 top level operator, which may return anonymous columns which we will need to
 keep around -}
+
+
 solve :: Config -> M.RelExpr -> Env
 solve config relexp = solve' config relexp |> checkVecs |> makeEnv
   where checkVecs vexplist =
@@ -610,13 +616,14 @@ solve' config M.Join { M.leftch
            ->  let broadcastcol_right = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_left, shsource=keycol_right } -- right is val
                    boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
                    gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-               in gatherAll colsleft gathermask
+               in addComment "join output" $ gatherAll colsleft gathermask
        ([_],more@[extra]) -> -- single condition on each side. could do more on the right but need to AND them.
          if joinvariant == M.Plain
          then solve' config M.Select { M.child=M.Join {M.leftch=leftch, M.rightch=rightch, M.conds=N.fromList (N.toList conds \\ more), M.joinvariant=joinvariant}
                                      , M.predicate=extra }
          else error "can only do this rewrite for plain joins" -- left outer joins would be wrong.
        ow -> error $ "not handling this join case right now: " ++ show ow
+
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate
@@ -1265,6 +1272,7 @@ transformVx fn vx mp =
         Nothing -> complete $ prelim -- pattern does not match anything.
         Just x -> x
   in (outmp, xformPrelim)
+
 
 {-
 Diagram to understand the join deduce masks code:
