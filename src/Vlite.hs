@@ -887,8 +887,8 @@ sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
   --a day count from 0000-01-01)
   let dateval = sc env arg
-      v365243 = const_ 365243 dateval -- Monet seems to account for leap years....
-  in dateval*.(const_ 1000 dateval) /. v365243
+      v365243 = const_ 365243 dateval -- we are approximating dates.  a more accurate formula requires one more digit and pushes us over the 32 bits.
+  in (dateval -. const_ 1 dateval)*.(const_ 1000 dateval) /. v365243 -- so we substract 1 instead, and  makes 1996-12-31 map to 1996 and 1997-01-01 to 1997.
 
 --example use of isnull. In all the contexts of TPCH queries i saw, the isnull is called on
 --a column or derived column that is statically known to not be null, so we just remove that.
