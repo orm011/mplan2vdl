@@ -552,11 +552,11 @@ solve' config M.GroupBy { M.child,
             [] -> let z@(Vexp {info=ColInfo{bounds}}) = zeros_ refv
                   in assert (bounds == (0,0)) $ z :| []
             a : rest -> a :| rest
-          gkey@Vexp { info=ColInfo {bounds=(gmin, _)} } =
+          gkey@Vexp { info=ColInfo {bounds=(gmin, _)}}  =
             let ans@Vexp {info=ColInfo{bounds}} = makeCompositeKey gbkeys
-            in assert (inputkeys /= [] || bounds == (0,0) ) ans
-          solveSingleAgg env pr@(agg, _) =
-              let anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage } = solveAgg config env gkey agg
+            in assert (inputkeys /= [] || bounds == (0,0) ) (ans{comment="groupBy key"})
+          solveSingleAgg env after_env pr@(agg, _) = -- before columns must be groups. after ones are already grouped
+              let anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage } = solveAgg config env after_env gkey agg
                   outalias = case pr of
                     (M.GDominated n, Nothing) -> Just n
                     (_, alias) -> alias
@@ -575,11 +575,12 @@ solve' config M.GroupBy { M.child,
               in anon {name=outalias, quant=out_uniqueness, lineage=out_lineage }
           addEntry (x, acclist) tup = (x, tup : acclist) -- adds output to acclist
           foldFun lsts@(x, acclist) arg =
-            let asenv = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
-                ans@Vexp {info=ColInfo{count} } = solveSingleAgg asenv arg --either monad
+            let env = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
+                after_env = makeEnv acclist
+                ans@Vexp {info=ColInfo{count} } = solveSingleAgg env after_env arg --either monad
             in addEntry lsts $ assert (inputkeys /= [] || count == 1) $  ans
           (_, final) = assert (gmin == 0) $ foldl' foldFun (list1,[]) outputaggs
-      in final
+      in addComment "groupBy output" final
     Env [] _ -> error "empty env"
 
 
@@ -915,27 +916,29 @@ sc env (M.Unary { M.unop=M.Neg, M.arg }) =
 
 sc _ e = error $ "unhandled mplan scalar expression: " ++ show e -- clean this up. requires non empty list
 
-solveAgg :: Config -> Env -> Vexp -> M.GroupAgg -> Vexp
+solveAgg :: Config -> Env -> Env -> Vexp -> M.GroupAgg -> Vexp
 
-solveAgg _ (Env [] _) _ _  = error "empty input for group by"
+solveAgg _ (Env [] _) _ _ _  = error "empty input env for group by"
 
 -- average case dealt with by rewriting tp sum, count and finally using division.
-solveAgg config env gkeyvec (M.GAvg expr) =
-  let gsums@Vexp { info=ColInfo { count=cgsums } } = solveAgg config env gkeyvec (M.GFold M.FSum expr)
-      gcounts@Vexp { info=ColInfo { bounds=(minc,_ ), count=cgcounts} } = solveAgg config env gkeyvec M.GCount
+solveAgg config env after gkeyvec (M.GAvg expr) =
+  let gsums@Vexp { info=ColInfo { count=cgsums } } = solveAgg config env after gkeyvec (M.GFold M.FSum expr)
+      gcounts@Vexp { info=ColInfo { bounds=(minc,_ ), count=cgcounts} } = solveAgg config env after gkeyvec M.GCount
   in assert (cgsums == cgcounts && minc == 1) gsums /. gcounts
 
 -- all keys in a column dominated by groups are equal to their max
 -- so deal with this as if it were a max
-solveAgg config env gkeyvec (M.GDominated nm) =
-  solveAgg config env gkeyvec (M.GFold M.FMax (M.Ref nm))
+solveAgg config env after@(Env _ aftert) gkeyvec (M.GDominated nm) =
+  case NameTable.lookup nm aftert of
+    Right (_, v) -> v -- this is already a grouped column, just return it.
+    Left _ -> solveAgg config env after  gkeyvec (M.GFold M.FMax (M.Ref nm))
 
 -- count is rewritten to summing a one for every row
-solveAgg config env gkeyvec (M.GCount) =
+solveAgg config env after gkeyvec (M.GCount) =
   let rewrite = (M.GFold M.FSum (M.Literal SInt64 1))
-  in solveAgg config env gkeyvec rewrite
+  in solveAgg config env after gkeyvec rewrite
 
-solveAgg config env gkeyvec (M.GFold op expr) =
+solveAgg config env _ gkeyvec (M.GFold op expr) =
   let (scattermask, sparsity) = getScatterMask config gkeyvec
       sortedGroups = gkeyvec `scatteredTo` scattermask
       gdata = sc env expr
@@ -951,7 +954,7 @@ data Sparsity = Sparse | Dense deriving (Show,Eq);
 
 -- todo: rename this to 'isLargeGroupTable'
 getSparsity :: (Integer,Integer) -> Integer -> Double -> Sparsity
-getSparsity (minbound,maxbound) _ _ =
+getSparsity (minbound, maxbound) _ _ =
   let domain_size = (maxbound - minbound + 1)
   in if domain_size > 32000 then Sparse else Dense
 
