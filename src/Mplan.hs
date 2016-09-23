@@ -52,12 +52,18 @@ resolveCharLiteral config ch = case HashMap.lookup ch (dictionary config) of
   Nothing -> error $  "not found in dictionary: " ++ (C.unpack ch)
   Just x -> trace (",," ++ C.unpack ch ++"," ++ show x)  $ x
 
+parseDate :: C.ByteString -> Day
+parseDate datestr =
+  parseTimeOrError True defaultTimeLocale "%Y-%m-%d" (C.unpack datestr)
+
 {- assumes date is formatted properly: todo. error handling for tis -}
+dayCount :: Day -> Integer
+dayCount day =
+  let zero = parseDate "0000-01-01"
+  in diffDays day zero
+
 resolveDateString :: B.ByteString -> Integer
-resolveDateString datestr =
-  diffDays day zero
-  where zero = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" "0000-01-01") :: Day
-        day = (parseTimeOrError True defaultTimeLocale "%Y-%m-%d" (C.unpack datestr)) :: Day
+resolveDateString datestr = dayCount $ parseDate datestr
 
 data OrderSpec = Asc | Desc deriving (Eq,Show, Generic, Data)
 instance NFData OrderSpec
@@ -342,6 +348,32 @@ sc :: Config -> P.ScalarExpr -> Either String ScalarExpr
 sc _ P.Ref { P.rname  } = Right $ Ref rname
 
 
+-- reweites things like
+-- sys.sql_add(date "1996-01-01", month_interval "3")
+-- sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000") that show up in tpch mplans.
+-- into a date literal that then gets handled like other plain date literals
+sc config P.Call { P.fname = Name [op]
+                 , P.args = [ P.Expr { P.expr=P.Literal {P.tspec=TypeSpec {tname="date"}, P.stringRep=datestr} },
+                              P.Expr { P.expr=P.Literal {P.tspec=TypeSpec {tname}, P.stringRep=intervalstr} }
+                            ]
+                 }
+  | (tname `elem` ["month_interval","sec_interval"]) && (op `elem` ["sql_add", "sql_sub"]) =
+     let date = parseDate datestr
+         rawnum = readIntLiteral intervalstr
+         num = case op of
+           "sql_sub" -> -rawnum
+           "sql_add" -> rawnum
+           _ -> error "unknown date interval op"
+         outdate = case tname of
+           "month_interval" -> addGregorianMonthsRollOver num date
+           "sec_interval" ->  let kMillisInDay = (1000*60*60*24) --days, hours, minutes and seconds all reprd as millisecs
+                                  days = num `quot` kMillisInDay
+                              in addDays days date
+           _ -> error "unknown interval type"
+         stringRep = C.pack $ show outdate
+         newexpr = traceShowId $ P.Literal {P.tspec=TypeSpec {tname="date", tparams=[]}, P.stringRep}
+     in sc config newexpr
+
 -- TODO: doublecheck this is correct
 -- (see query 17 for an example plan using it)
 sc config P.Call { P.fname=Name ["identity"]
@@ -407,7 +439,6 @@ sc config P.Cast { P.tspec
   do let mtype = resolveTypeSpec tspec
      arg <- sc config parg
      return $ Cast { mtype, arg }
-
 
 sc config arg@P.Literal { P.tspec, P.stringRep } =
   do let mtype = resolveTypeSpec tspec
