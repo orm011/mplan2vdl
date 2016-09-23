@@ -321,15 +321,22 @@ inferMetadata Partition
 
 
 inferMetadata arg@Binop { binop
-                        , left=Vexp { info=ColInfo {count=c1 , stype=lefttype, trailing_zeros=ltrail } }
-                        , right=Vexp { info=ColInfo {count=c2, bounds=(_, upper)} }
+                        , left=Vexp { info=ColInfo {count=c1 , stype=ltype, trailing_zeros=ltrail } }
+                        , right=Vexp { info=ColInfo {count=c2, stype=rtype, bounds=(_, upper)} }
                         } =
     let count = min c1 c2
         bounds = inferBounds arg
         trailing_zeros' = case binop of
           BitShift -> (ltrail - upper)
           _ -> 0
-    in ColInfo {bounds, count, stype=lefttype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
+        stype = case (binop,ltype,rtype) of
+          (Mul,SDecimal{precision=lp, scale=ls},SDecimal{precision=rp,scale=rs}) -> SDecimal{precision=lp + rp, scale=ls + rs}
+          (Mul,SDecimal{},_) -> ltype
+          (Mul,_,SDecimal{}) -> rtype
+          (Div,SDecimal{},_) -> error "implement decimal point tracking for division on the left"
+          (Div,_,SDecimal{}) -> error "implement decimal point tracking for division on the right"
+          _ -> ltype
+    in ColInfo {bounds, count, stype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
          -- until we need more precision, we're conservative on the trailing zeros...
 
 inferBounds :: Vx -> (Integer, Integer)
