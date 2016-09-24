@@ -14,35 +14,30 @@ module Config ( Config(..)
               , StorageRec
               , DictRec
               , FKJoinOrder(..)
-              , MType(..)
-              , SType(..)
-              , resolveTypeSpec
-              , sizeOf
-              , bitwidthOf
-              , getSTypeOfMType
               ) where
+
+import Types
+import Name as NameTable
+import SchemaParser(Table(..),Key(..))
 
 import Data.Foldable
 import Data.Data
-import Data.Int
-import Name as NameTable
---import Data.Int
-import SchemaParser(Table(..),Key(..))
 import qualified Data.Vector as V
---import Control.Monad(foldM)
 import Control.DeepSeq(NFData)
 import GHC.Generics
 import Control.Exception.Base
 import qualified Data.Map.Strict as Map
---import qualified Data.Set as Set
 import Data.List.NonEmpty(NonEmpty(..))
 import qualified Data.List.NonEmpty as N
 import qualified Data.ByteString.Lazy as B
 import Data.Hashable
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.HashMap.Strict as HashMap
+
 type HashMap = HashMap.HashMap
 type Map = Map.Map
+
+
 --type Set = Set.Set
 
 
@@ -82,131 +77,12 @@ type DictRec = ( C.ByteString -- schema
                )
 
 
---- repr info from Monet tpch001
--- sql>select distinct "type","columnsize"/"count" as rep_size from storage where "schema"='sys' and ("table"='lineitem' or "table"='orders' or "table"='customer' or "table"='partsupp' or "table"='supplier' or "table"='part' or "table"='nation' or "table"='region') order by "type","rep_size";
--- +---------+----------+
--- | type    | rep_size |
--- +=========+==========+
--- | char    |        1 |
--- | char    |        2 |
--- | date    |        4 |
--- | decimal |        8 |
--- | int     |        4 |
--- | oid     |        8 |
--- | varchar |        2 |
--- | varchar |        4 |
--- +---------+----------+
-
---- repr info from Monet tpch10
--- select distinct "type","columnsize"/"count" as rep_size from storage where "schema"='sys' and ("table"='lineitem' or "table"='orders' or "table"='customer' or "table"='partsupp' or "table"='supplier' or "table"='part' or "table"='nation' or "table"='region') order by "type","rep_size";
--- +---------+----------+
--- | type    | rep_size |
--- +=========+==========+
--- | char    |        1 |
--- | char    |        2 |
--- | char    |        4 |
--- | date    |        4 |
--- | decimal |        8 |
--- | int     |        4 |
--- | oid     |        8 |
--- | varchar |        2 |
--- | varchar |        4 |
--- +---------+----------+
-
-
--- these are storage types used in monet tpch.
--- for different tables, other types may show up.
---- right now, we immediately convert literals to the types they are used with
--- (eg, dates, millisecs, months to days.)
--- Date gets stored as integer startig from 0 (4 bytes)
--- Char and Varchar get treated the same way here.
--- Decimal is needed here in order to correctly do conversions between decimals.
---Precision is the number of digits in a number.
--- Scale is the number of digits to the right of the decimal point in a number.
--- For example, the number 123.45 has a precision of 5 and a scale of 2.
-
-data SType  = -- limited to the storage types we actually have?
-  SDecimal {precision::Integer, scale::Integer}  -- as an integer?. 1<=P<=18. 0<=S<=P.
-  | SInt32   -- 2's compliment?
-  | SInt64    -- 2's compliment unsigned?
-  deriving (Eq,Show,Generic,Data)
-instance NFData SType
-instance Hashable SType
-
-sizeOf :: SType -> Integer
-sizeOf (SDecimal {}) = 8
-sizeOf SInt32 = 4
-sizeOf SInt64 = 8
-bitwidthOf :: SType -> Integer
-bitwidthOf t = 8 * sizeOf t
-
-boundsOf :: SType -> (Integer, Integer)
-boundsOf stype = case stype of
-  SDecimal {} -> ( toInteger (minBound :: Int64 )
-                 , toInteger (maxBound :: Int64 ) )
-  SInt32 -> ( toInteger (minBound :: Int32 )
-            , toInteger (maxBound :: Int32 ) )
-  SInt64 -> ( toInteger (minBound :: Int64 )
-            , toInteger (maxBound :: Int64 ) )
-
-withinBounds :: (Integer,Integer) -> SType -> Bool
-withinBounds (l,u) stype =
-  let (ll,uu) = boundsOf stype
-  in (ll <= l && l <= u && u <= uu)
-
--- these are more general monet types that show
--- up as literals in tpch plans, but not as columns in storage.
--- we convert them as soon as possible to the stypes that fit them
--- so that we only need to think about fewer types.
-data MType =
-  MTinyint
-  | MInt
-  | MBigInt
-  | MSmallint
-  | MDate
-  | MMillisec
-  | MMonth
-  | MDouble
-  | MOid
-  | MChar Integer
-  | MVarchar Integer
-  | MDecimal Integer Integer
-  | MSecInterval Integer
-  | MMonthInterval
-  | MBoolean
-  deriving (Eq, Show, Generic, Data)
-instance NFData MType
-instance Hashable MType
-
 
 makeDictionary :: V.Vector DictRec -> (HashMap C.ByteString Integer)
 makeDictionary vec =
   let merge mp (_,_,str,i) = HashMap.insert str i mp
   in V.foldl' merge HashMap.empty vec
 
-resolveTypeSpec :: TypeSpec -> MType
-resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
-  where f "int" [] = MInt
-        f "tinyint" [] = MTinyint
-        f "smallint" [] = MSmallint
-        f "bigint" [] = MBigInt
-        f "date" []  = MDate
-        f "char" [len] =  MChar len
-        f "char" [] = MChar (-1) -- beh
-        f "varchar" [maxlength] =  MVarchar maxlength
-        f "decimal" [precision,scale] = MDecimal precision scale
-        f "sec_interval" [_] = MMillisec -- they use millisecs to express their seconds
-        f "month_interval" [] = MMonth
-        f "double" [] = MDouble -- used for averages even if columns arent doubles
-        f "boolean" [] = MBoolean
-        f "oid" [] = MOid -- used in storage files
-        -- capitalized forms come from schema file.
-        f "INTEGER" [] = MInt
-        f "CHAR" [len] = MChar len
-        f "DECIMAL" [precision,scale] = MDecimal precision scale
-        f "VARCHAR" [maxlength] = MVarchar maxlength
-        f "DATE" [] = MDate
-        f name _ = error $ "unsupported typespec: " ++ show name
 
 toKeyPair :: (NameTable TypeSpec) -> StorageRec -> [ (Name, StorageInfo) ]
 toKeyPair ns (_,tab,col,typstring,_,colcount,bytewidth,colsize,_,_,_,_) =
@@ -235,8 +111,6 @@ type PKCols = NonEmpty Name
 -- don't overflow.
 data ColInfo = ColInfo
   { bounds::(Integer,Integer)
-    -- bounds on element values
-    --this is a bound on the array size (num elts) needed to hold it
   , trailing_zeros::Integer -- largest power of two known to divide all values in column
   , count::Integer
   , stype::SType
@@ -256,20 +130,6 @@ checkColInfo i@(ColInfo {bounds=(l,u), count, stype, trailing_zeros}) =
   if l <= u && count > 0 && withinBounds (l,u) stype && trailing_zeros >=0
   then i
   else i -- error $ "info does not pass validation: " ++ show i ++ "\ntype bounds: " ++ (show $  boundsOf stype)
-
-getSTypeOfMType :: MType -> SType
-getSTypeOfMType mtype = case mtype of
-  MInt -> SInt32
-  MDate -> SInt32
-  MOid -> SInt64
-  MChar _ -> SInt64
-  MVarchar _ -> SInt64
-  MDecimal precision scale  -> SDecimal {precision, scale}
-  MSmallint -> SInt32
-  MTinyint -> SInt32
-  MBigInt -> SInt64
-  ow -> error $ "we don't expect reading this type from the monet columns/queries at the moment: " ++ (show ow)
-
 
 addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec -> NameTable ColInfo
 addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing_zeros) =

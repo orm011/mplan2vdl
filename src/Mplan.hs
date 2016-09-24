@@ -8,24 +8,19 @@ module Mplan( mplanFromParseTree
             , GroupAgg(..)
             , FoldOp(..)
             , JoinVariant(..)
-            , MType(..)) where
+            ) where
 
 import qualified Parser as P
+import Types
 import Name(Name(..),TypeSpec(..))
+
 import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Data.Hashable
 import Control.Exception.Base
---import Data.Int
---import Data.Monoid(mappend)
 import Debug.Trace
---import Control.Monad(foldM, mapM, void)
---import qualified Data.Map.Strict as Map
 import Data.Time.Format
---import Data.Time.Calendar
---import Data.Time
---import Dict(dictEncode)
 import Data.Data
 import Data.Generics.Uniplate.Data
 import Config
@@ -34,10 +29,7 @@ import Error(check)
 import Data.List(foldl')
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
---import qualified Data.List.NonEmpty as N
 import Data.List.NonEmpty(NonEmpty(..))
---import qualified Data.Map.Strict as Map
---type Map = Map.Map
 import qualified Data.HashMap.Strict as HashMap
 
 isJoinIdx :: P.Attr -> [Name]

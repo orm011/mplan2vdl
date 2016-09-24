@@ -16,6 +16,7 @@ module Vlite( vexpsFromMplan
 
 import Control.Monad.Reader
 import Config
+import Types
 import qualified Mplan as M
 import Mplan(BinaryOp(..))
 import Name(Name(..))
@@ -243,7 +244,6 @@ checkLineage l =
         _ -> error "lineage vector should not itself have lineage or name"
 
 inferMetadata :: Vx -> ColInfo
-
 -- typeNeeded :: (Integer,Integer) -> SType
 -- typeNeeded (lower,upper) =
 --   if lower < (toInteger  (minBound :: Int32))

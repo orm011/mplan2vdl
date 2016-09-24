@@ -30,6 +30,7 @@ library
                      , SchemaParser
   other-modules:       Error
                        Sha
+                       Types
   build-depends:       base >= 4.7 && <5
                      , MissingH
                      , containers
