@@ -336,7 +336,12 @@ inferMetadata arg@Binop { binop
           (Mul,_,SDecimal{}) -> rtype
           (Div, SDecimal{}, SInt32) -> ltype
           (Div, SDecimal{}, SInt64) -> ltype
-          (Div,_,SDecimal{}) -> error "implement decimal point tracking for division on the right"
+          (Div, SDecimal{precision=lp, scale=ls},
+           SDecimal{precision=rp, scale=rs}) ->
+            let diff = ls - rs
+            in if diff >= 0
+               then SDecimal {precision = max lp rp, scale=diff} -- why max?
+               else error "implement case there numerator has smaller precision (need to also modify operation)"
           _ -> ltype
     in ColInfo {bounds, count, stype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
          -- until we need more precision, we're conservative on the trailing zeros...
