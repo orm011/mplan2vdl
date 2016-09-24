@@ -1021,7 +1021,8 @@ makeCompositeKey (firstvexp :| rest) =
   do offset <- asks gboffset
      let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
      let out = foldl' composeKeys shifted rest
-     return $ addSizeHint $ out +. const_ offset out
+     let plusoffset@Vexp{info=originfo@ColInfo{bounds=(_,mx)}} = (out +. const_ offset out)
+     return $ addSizeHint $ plusoffset {info=originfo {bounds=(0,mx)}} -- override the lower bound.
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
