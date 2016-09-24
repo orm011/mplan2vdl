@@ -97,6 +97,7 @@ data Voodop =
   | Multiply
   | Divide
   | Modulo
+  | FoldChoose
   | FoldSelect
   | FoldMax
   | FoldSum
@@ -259,6 +260,7 @@ voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
   let (s', arg1) = voodooFromVexpMemo s fgroups
       (s'', arg2) = voodooFromVexpMemo s' fdata
       op = case foldop of
+        V.FChoose -> FoldChoose
         V.FSum -> FoldSum
         V.FMax -> FoldMax
         V.FMin -> FoldMin

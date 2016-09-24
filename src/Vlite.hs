@@ -58,7 +58,7 @@ data ShOp = Gather | Scatter
 instance NFData ShOp
 instance Hashable ShOp
 
-data FoldOp = FSum | FMax | FMin | FSel
+data FoldOp = FSum | FMax | FMin | FSel | FChoose
   deriving (Eq, Show, Generic)
 instance NFData FoldOp
 instance Hashable FoldOp
@@ -308,6 +308,7 @@ inferMetadata Fold { foldop
             in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype, trailing_zeros }
     FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, stype, trailing_zeros }
     FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, trailing_zeros }
+    FChoose -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, trailing_zeros }
     FSel -> error "use different handler for select (should be above this one)"
 
 -- the result of partition is a list of indices that, for each pdata
