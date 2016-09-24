@@ -569,7 +569,7 @@ solve' config M.GroupBy { M.child,
             a : rest -> a :| rest
           gkey@Vexp { info=ColInfo {bounds=(gmin, _)}}  =
             let ans@Vexp {info=ColInfo{bounds}} = runReader (makeCompositeKey gbkeys) config
-            in assert (inputkeys /= [] || bounds == (0,0) ) (ans{comment="groupBy key"})
+            in assert (True || inputkeys /= [] || bounds == (0,0) ) (ans{comment="groupBy key"})
           solveSingleAgg env after_env pr@(agg, _) = -- before columns must be groups. after ones are already grouped
               let anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage } = solveAgg config env after_env gkey agg
                   outalias = case pr of
@@ -593,7 +593,7 @@ solve' config M.GroupBy { M.child,
             let env = makeEnvWeak $ x ++ acclist-- use both lists for name resolution
                 after_env = makeEnv acclist
                 ans@Vexp {info=ColInfo{count} } = solveSingleAgg env after_env arg --either monad
-            in addEntry lsts $ assert (inputkeys /= [] || count == 1) $  ans
+            in addEntry lsts $ assert (True || inputkeys /= [] || count == 1) $  ans
           (_, final) = assert (gmin == 0) $ foldl' foldFun (list1,[]) outputaggs
       in addComment "groupBy output" final
     Env [] _ -> error "empty env"
@@ -1021,7 +1021,10 @@ makeCompositeKey (firstvexp :| rest) =
   do offset <- asks gboffset
      let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
      let out = foldl' composeKeys shifted rest
-     let plusoffset@Vexp{info=originfo@ColInfo{bounds=(_,mx)}} = (out +. const_ offset out)
+     let plusoffset@Vexp{info=originfo@ColInfo{bounds=(_,mx)}} =
+           if offset > 0
+           then (out +. const_ offset out){comment="offset added by goffset"}
+           else out
      return $ addSizeHint $ plusoffset {info=originfo {bounds=(0,mx)}} -- override the lower bound.
 
 --- makes the vector min be at 0 if it isnt yet.
