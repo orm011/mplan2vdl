@@ -36,6 +36,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , boundsfile :: String
                             , storagefile :: String
                             , schemafile :: String
+                            , goffset :: Integer
                             , dictionaryfile :: String
                             , metadata :: Bool
                             , dot :: Bool
@@ -63,6 +64,7 @@ cmdTemplate = Mplan2Vdl
   , grainsize = 8192 &= typ "POWER OF 2" &= help "Grain size for --agghierarchical (default 8192). Ignored otherwise" &= name "g"
   , metadata = False &= typ "Bool" &= help "show inferred metadata in output"
   , sparsity = 1.0 &= typ "Double" &= help "threshold for (max - min + 1)/count: aggregations with more sparsity get a shuffle oper added always rather than the default strategy"
+  , goffset = (0::Integer) &= typ "Integer" &= help "offset for synthesized group-by keys. defaults to 0"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -143,7 +145,7 @@ mainf = do
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                let config  = makeConfig threshold (metadata cmdargs) strat boundslist storagelist tables dictlist
+                let config  = makeConfig threshold (metadata cmdargs) (goffset cmdargs) strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage

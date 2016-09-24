@@ -14,6 +14,7 @@ module Vlite( vexpsFromMplan
             , complete) where
 
 
+import Control.Monad.Reader
 import Config
 import qualified Mplan as M
 import Mplan(BinaryOp(..))
@@ -567,7 +568,7 @@ solve' config M.GroupBy { M.child,
                   in assert (bounds == (0,0)) $ z :| []
             a : rest -> a :| rest
           gkey@Vexp { info=ColInfo {bounds=(gmin, _)}}  =
-            let ans@Vexp {info=ColInfo{bounds}} = makeCompositeKey gbkeys
+            let ans@Vexp {info=ColInfo{bounds}} = runReader (makeCompositeKey gbkeys) config
             in assert (inputkeys /= [] || bounds == (0,0) ) (ans{comment="groupBy key"})
           solveSingleAgg env after_env pr@(agg, _) = -- before columns must be groups. after ones are already grouped
               let anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage } = solveAgg config env after_env gkey agg
@@ -1015,11 +1016,12 @@ addScatterSizeHint vec@Vexp{info=ColInfo {bounds=(vmin,vmax)}} =
   in  vec %. maxvalV
 
 
-makeCompositeKey :: NonEmpty Vexp -> Vexp
+makeCompositeKey :: NonEmpty Vexp -> Reader Config Vexp
 makeCompositeKey (firstvexp :| rest) =
-  let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
-      out = foldl' composeKeys shifted rest
-  in addSizeHint out
+  do offset <- asks gboffset
+     let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
+     let out = foldl' composeKeys shifted rest
+     return $ addSizeHint $ out +. const_ offset out
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
