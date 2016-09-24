@@ -419,7 +419,7 @@ inferLineage Fold { foldop
                   , fgroups
                   , fdata = Vexp { lineage = Pure {col, mask=lineagev} }
                   }
-  | (foldop == FMin) || (foldop == FMax) =
+  | (foldop == FMin) || (foldop == FMax) || (foldop==FChoose) =
       Pure {col, mask=complete $ Fold {foldop, fgroups, fdata=lineagev} }
 
 inferLineage _ = None
@@ -574,11 +574,11 @@ solve' config M.GroupBy { M.child,
           solveSingleAgg env after_env pr@(agg, _) = -- before columns must be groups. after ones are already grouped
               let anon@Vexp{ quant=orig_uniqueness, lineage=orig_lineage } = solveAgg config env after_env gkey agg
                   outalias = case pr of
-                    (M.GDominated n, Nothing) -> Just n
+                    (M.GFold M.FChoose  (M.Ref n), Nothing) -> Just n
                     (_, alias) -> alias
                     _ -> Nothing
                   out_uniqueness = case (keys, pr) of
-                    ([gbk], (M.GDominated n, _)) -- if there is a single gb key the output version of that col is unique
+                    ([gbk], (M.GFold M.FChoose (M.Ref n), _)) -- if there is a single gb key the output version of that col is unique
                       | n == gbk -> Unique  -- right now, we only do this when the input key has a lineage. but it neednt.
                     _ -> orig_uniqueness
                   out_lineage = case orig_lineage of
@@ -943,28 +943,29 @@ solveAgg config env after gkeyvec (M.GAvg expr) =
       gcounts@Vexp { info=ColInfo { bounds=(minc,_ ), count=cgcounts} } = solveAgg config env after gkeyvec M.GCount
   in assert (cgsums == cgcounts && minc == 1) gsums /. gcounts
 
--- all keys in a column dominated by groups are equal to their max
--- so deal with this as if it were a max
-solveAgg config env after@(Env _ aftert) gkeyvec (M.GDominated nm) =
-  case NameTable.lookup nm aftert of
-    Right (_, v) -> v -- this is already a grouped column, just return it.
-    Left _ -> solveAgg config env after  gkeyvec (M.GFold M.FMax (M.Ref nm))
-
 -- count is rewritten to summing a one for every row
 solveAgg config env after gkeyvec (M.GCount) =
   let rewrite = (M.GFold M.FSum (M.Literal SInt64 1))
   in solveAgg config env after gkeyvec rewrite
 
-solveAgg config env _ gkeyvec (M.GFold op expr) =
-  let (scattermask, sparsity) = getScatterMask config gkeyvec
-      sortedGroups = gkeyvec `scatteredTo` scattermask
-      gdata = sc env expr
-      sortedData = gdata `scatteredTo` scattermask
-      foldop = case op of
-        M.FSum -> FSum
-        M.FMax -> FMax
-        M.FMin -> FMin
-  in make2LevelFold sparsity config foldop sortedGroups sortedData
+solveAgg config env (Env _ aftermap) gkeyvec g@(M.GFold op expr) =
+  let defaultSolution =
+        let (scattermask, sparsity) = getScatterMask config gkeyvec
+            sortedGroups = gkeyvec `scatteredTo` scattermask
+            gdata = sc env expr
+            sortedData = gdata `scatteredTo` scattermask
+            foldop = case op of
+              M.FSum -> FSum
+              M.FMax -> FMax
+              M.FMin -> FMin
+              M.FChoose -> FChoose
+        in make2LevelFold sparsity config foldop sortedGroups sortedData
+  in case g of
+    (M.GFold M.FChoose (M.Ref nm)) ->
+      case NameTable.lookup nm aftermap of
+        Right (_, v) -> v -- this is already a grouped column, just return it instead of the aggregated version
+        Left _ -> defaultSolution
+    _ -> defaultSolution
 
 data Sparsity = Sparse | Dense deriving (Show,Eq);
 

@@ -135,12 +135,12 @@ data ScalarExpr =
   deriving (Eq, Show, Generic, Data)
 instance NFData ScalarExpr
 
-
-data FoldOp = FSum | FMax | FMin  deriving (Eq,Show,Generic,Data)
+-- fchoose for dominating.
+data FoldOp = FSum | FMax | FMin | FChoose  deriving (Eq,Show,Generic,Data)
 instance NFData FoldOp
 
 -- GCount is count(*) rows on a table
-data GroupAgg = GDominated Name |  GAvg ScalarExpr | GCount | GFold FoldOp ScalarExpr deriving (Eq,Show,Generic,Data)
+data GroupAgg = GAvg ScalarExpr | GCount | GFold FoldOp ScalarExpr deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
 solveGroupOutput :: Config -> P.Expr -> Either String (GroupAgg, Maybe Name)
@@ -151,7 +151,7 @@ solveGroupOutput _ P.Expr
   = let outname = case alias of
           Nothing -> Just rname
           Just _ -> alias
-    in Right $ (GDominated rname, outname)
+    in Right $ (GFold FChoose (Ref rname), outname)
 
 
 -- this is count(*). counts everything. equal to a sum of 1s.
