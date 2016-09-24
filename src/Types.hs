@@ -11,13 +11,13 @@ module Types( MType(..)
 
 import Name as NameTable
 
---import Data.Char
+import Data.Char
 import Data.Data
 import Data.Hashable
 import Data.Int
 
 import GHC.Generics
---import qualified Data.ByteString.Lazy.Char8 as C
+import qualified Data.ByteString.Lazy.Char8 as C
 
 import Control.DeepSeq(NFData)
 --- repr info from Monet tpch001
@@ -139,11 +139,12 @@ getSTypeOfMType mtype = case mtype of
 
 
 resolveTypeSpec :: TypeSpec -> MType
-resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
+resolveTypeSpec TypeSpec { tname, tparams } = f (C.map toLower tname) tparams
   where f "int" [] = MInt
         f "tinyint" [] = MTinyint
         f "smallint" [] = MSmallint
         f "bigint" [] = MBigInt
+        f "integer" [] = MInt
         f "date" []  = MDate
         f "char" [len] =  MChar len
         f "char" [] = MChar (-1) -- beh
@@ -155,9 +156,4 @@ resolveTypeSpec TypeSpec { tname, tparams } = f tname tparams
         f "boolean" [] = MBoolean
         f "oid" [] = MOid -- used in storage files
         -- capitalized forms come from schema file.
-        f "INTEGER" [] = MInt
-        f "CHAR" [len] = MChar len
-        f "DECIMAL" [precision,scale] = MDecimal precision scale
-        f "VARCHAR" [maxlength] = MVarchar maxlength
-        f "DATE" [] = MDate
         f name _ = error $ "unsupported typespec: " ++ show name
