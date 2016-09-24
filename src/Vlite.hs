@@ -331,9 +331,11 @@ inferMetadata arg@Binop { binop
           _ -> 0
         stype = case (binop,ltype,rtype) of
           (Mul,SDecimal{precision=lp, scale=ls},SDecimal{precision=rp,scale=rs}) -> SDecimal{precision=lp + rp, scale=ls + rs}
-          (Mul,SDecimal{},_) -> ltype
+          (Mul,SDecimal{},SInt32) -> ltype
+          (Mul,SDecimal{},SInt64) -> ltype
           (Mul,_,SDecimal{}) -> rtype
-          (Div,SDecimal{},_) -> error "implement decimal point tracking for division on the left"
+          (Div, SDecimal{}, SInt32) -> ltype
+          (Div, SDecimal{}, SInt64) -> ltype
           (Div,_,SDecimal{}) -> error "implement decimal point tracking for division on the right"
           _ -> ltype
     in ColInfo {bounds, count, stype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
