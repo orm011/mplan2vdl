@@ -137,7 +137,7 @@ getSTypeOfMType mtype = case mtype of
   MBigInt -> SInt64
   ow -> error $ "we don't expect reading this type from the monet columns/queries at the moment: " ++ (show ow)
 
-
+-- capitalized forms come from schema file.
 resolveTypeSpec :: TypeSpec -> MType
 resolveTypeSpec TypeSpec { tname, tparams } = f (C.map toLower tname) tparams
   where f "int" [] = MInt
@@ -155,5 +155,4 @@ resolveTypeSpec TypeSpec { tname, tparams } = f (C.map toLower tname) tparams
         f "double" [] = MDouble -- used for averages even if columns arent doubles
         f "boolean" [] = MBoolean
         f "oid" [] = MOid -- used in storage files
-        -- capitalized forms come from schema file.
         f name _ = error $ "unsupported typespec: " ++ show name
