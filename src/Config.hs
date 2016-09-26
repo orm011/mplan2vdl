@@ -114,6 +114,7 @@ data ColInfo = ColInfo
   , trailing_zeros::Integer -- largest power of two known to divide all values in column
   , count::Integer
   , stype::SType
+  , dtype::(DType,C.ByteString)
   } deriving (Eq,Show,Generic)
 
 instance Hashable ColInfo
@@ -135,7 +136,8 @@ addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec ->
 addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing_zeros) =
   let StorageInfo {mtype}  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
       stype = getSTypeOfMType mtype
-      colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype, trailing_zeros }
+      dtype = (getDTypeOfMType mtype,"from storage file")
+      colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype, trailing_zeros, dtype }
       plain = NameTable.insert (Name [tab,col]) colinfo nametab
   in if elem (Name[tab,col]) constraints
      then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well

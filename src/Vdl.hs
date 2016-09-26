@@ -1,5 +1,7 @@
 module Vdl (vdlFromVexps) where
 
+import Types
+
 import Control.Monad.Reader hiding (join)
 import Data.Foldable(foldl')
 import Config
@@ -61,17 +63,23 @@ completeW vd = W (vd, sha1vd vd)
 data Metadata = Metadata { databounds::(Integer,Integer)
                          , sizebound::Integer
                          , name::Maybe Name
+                         , displaytype::DType
                          , origin::Maybe Name
                          , comment::C.ByteString}
   deriving (Eq,Show,Generic)
 instance Hashable Metadata
 
 getMetadata :: V.Vexp -> Metadata
-getMetadata V.Vexp {V.info=ColInfo {bounds, count}, V.name, V.lineage, V.comment} =
+getMetadata V.Vexp {V.info=ColInfo {bounds, count, dtype=(dt,notes)}, V.name, V.lineage, V.comment} =
   let origin = case lineage of
         V.Pure{ V.col } -> Just col
         V.None -> Nothing
-  in Metadata {databounds=bounds, sizebound=count, name, origin, comment}
+  in Metadata {databounds=bounds,
+               sizebound=count,
+               name,
+               displaytype=dt,
+               origin,
+               comment=C.intercalate " " [notes, comment]}
 
 type VoodooMinus = Vd W
 type Voodoo = (Vd W, Maybe Metadata)

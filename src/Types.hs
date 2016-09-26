@@ -5,6 +5,7 @@ module Types( MType(..)
             , sizeOf
             , bitwidthOf
             , getSTypeOfMType
+            , getDTypeOfMType
             , boundsOf
             , withinBounds
             ) where
@@ -73,11 +74,12 @@ instance NFData SType
 -- as an integer?. 1<=P<=18. 0<=S<=P. -- useful in order to understand
 -- how to display the results (also how to do decimal arithmetic)
 data DType = -- higher level types (eg dates etc)
-  DDecimal {point::Int} -- position of the decimal point (0 is equivalent to an integer)
-  | DString {dict::Name} -- name of the dictionary needed to decode this encoded string
+  DDecimal {point::Int} -- todo. track decimal point.
+  | DString -- todo. add dictionary
   | DDate
   deriving (Eq,Show,Generic,Data)
 instance Hashable DType
+instance NFData DType
 
 sizeOf :: SType -> Integer
 sizeOf (SDecimal {}) = 8
@@ -136,6 +138,19 @@ getSTypeOfMType mtype = case mtype of
   MTinyint -> SInt32
   MBigInt -> SInt64
   ow -> error $ "we don't expect reading this type from the monet columns/queries at the moment: " ++ (show ow)
+
+getDTypeOfMType :: MType -> DType
+getDTypeOfMType mtype = case mtype of
+  MInt -> DDecimal {point=0}
+  MSmallint -> DDecimal {point=0}
+  MTinyint -> DDecimal {point=0}
+  MBigInt -> DDecimal {point=0}
+  MDecimal _ scale  -> DDecimal {point=fromInteger scale}
+  MOid -> DDecimal {point=0}
+  MDate -> DDate
+  MChar _ -> DString
+  MVarchar _ -> DString
+  ow -> error $ "not handling this type on its ownn" ++ (show ow)
 
 -- capitalized forms come from schema file.
 resolveTypeSpec :: TypeSpec -> MType

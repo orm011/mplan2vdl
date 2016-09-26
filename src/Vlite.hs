@@ -259,7 +259,7 @@ inferMetadata (Load _) = error "at the moment, should not be called with Load. T
 inferMetadata VShuffle {varg=Vexp{info}} = info -- same, just no ordering if there was
 
 inferMetadata Like { ldata=Vexp{info=ColInfo{count}} }
-  = ColInfo { bounds=(0,1), count, stype=SInt32, trailing_zeros=0 }
+  = ColInfo { bounds=(0,1), count, stype=SInt32, trailing_zeros=0, dtype=(DDecimal{point=0},"") }
 
 inferMetadata RangeV {rmin=rstart,rstep,rref=Vexp {info=ColInfo {count}}}
   =  let extremes = [rstart, rstart + count*rstep]
@@ -267,6 +267,7 @@ inferMetadata RangeV {rmin=rstart,rstep,rref=Vexp {info=ColInfo {count}}}
      in ColInfo { bounds
                 , count
                 , stype=SInt64
+                , dtype=(DDecimal{point=0},"")
                 , trailing_zeros = 0}
 
 inferMetadata RangeC {rmin=rstart, rstep, rcount}
@@ -274,41 +275,46 @@ inferMetadata RangeC {rmin=rstart, rstep, rcount}
      in ColInfo { bounds=(minimum extremes, maximum extremes)
                 , count=rcount
                 , stype=SInt64
+                , dtype=(DDecimal{point=0},"")
                 , trailing_zeros = 0}
 
 inferMetadata Shuffle { shop=Scatter
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, trailing_zeros}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, dtype, trailing_zeros}}
                       , shpos=Vexp {info=ColInfo {bounds=(_,posmax)}}
                       }
-  = ColInfo { bounds=sourcebounds, count=posmax, stype, trailing_zeros }
+  = ColInfo { bounds=sourcebounds, count=posmax, stype, dtype, trailing_zeros }
 
 inferMetadata Shuffle { shop=Gather
-                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, trailing_zeros}}
+                      , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, dtype, trailing_zeros}}
                       , shpos=Vexp {info=ColInfo {count}}
                       }
-  = ColInfo { bounds=sourcebounds, count, stype, trailing_zeros }
+  = ColInfo { bounds=sourcebounds, count, stype, dtype, trailing_zeros }
 
 inferMetadata Fold { foldop=FSel
                    , fgroups=_
                    , fdata=Vexp {info=ColInfo {count}}
                    }
-  = ColInfo {bounds=(0, count-1), count, stype=SInt64, trailing_zeros=0 } -- positions always int64
+  = ColInfo {bounds=(0, count-1), count, stype=SInt64, dtype=(DDecimal{point=0},""), trailing_zeros=0 } -- positions always int64
 
 inferMetadata Fold { foldop
                    , fgroups = Vexp { info=ColInfo {bounds=(glower,gupper), count=gcount} }
-                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, stype, trailing_zeros} }
+                   , fdata = Vexp { info=ColInfo {bounds=(dlower,dupper), count=dcount, stype, dtype=(dt,_), trailing_zeros} }
                    } =
   -- "suspicious: group and data count bounds dont match"
   --assert (gcount == dcount) $ -- TODO is this assert correct?
   let count_bound = min (gupper - glower + 1) gcount -- cannot be more outputs than distinct group values
   in case foldop of
     FSum -> let extremes = [dlower, dlower*dcount, dupper, dupper*dcount]
+                dtypeout = case dt of
+                  DDecimal {point} -> DDecimal{point}
+                  DDate  -> DDecimal{point=0} -- reinterpret
+                  DString -> DDecimal{point=0} -- reinterpret
                   -- for positive dlower, dlower is the minimum.
                   -- for negative dlower, dlower*dcount is the minimum, and so on.
-            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype, trailing_zeros }
-    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, stype, trailing_zeros }
-    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, trailing_zeros }
-    FChoose -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, trailing_zeros }
+            in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype, dtype=(dtypeout,""), trailing_zeros }
+    FMax -> ColInfo { bounds=(dlower, dupper), count=count_bound, stype, dtype=(dt,""), trailing_zeros}
+    FMin -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, dtype=(dt,""), trailing_zeros }
+    FChoose -> ColInfo { bounds=(dlower, dupper),  count=count_bound, stype, dtype=(dt,""), trailing_zeros }
     FSel -> error "use different handler for select (should be above this one)"
 
 -- the result of partition is a list of indices that, for each pdata
@@ -319,12 +325,12 @@ inferMetadata Fold { foldop
 inferMetadata Partition
   { pivots=Vexp { info=ColInfo {count=pivotcount} }
   , pdata=Vexp { info=ColInfo {count=datacount} }
-  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, stype=SInt64, trailing_zeros=0 }
+  } = ColInfo {bounds=(0,pivotcount-1), count=datacount, stype=SInt64, dtype=(DDecimal{point=0},""), trailing_zeros=0 }
 
 
 inferMetadata arg@Binop { binop
-                        , left=Vexp { info=ColInfo {count=c1 , stype=ltype, trailing_zeros=ltrail } }
-                        , right=Vexp { info=ColInfo {count=c2, stype=rtype, bounds=(_, upper)} }
+                        , left=Vexp { info=ColInfo {count=c1 , stype=ltype, dtype=(ldtype,_), trailing_zeros=ltrail } }
+                        , right=Vexp { info=ColInfo {count=c2, stype=rtype, dtype=(rdtype,_), bounds=(_, upper)} }
                         } =
     let count = min c1 c2
         bounds = inferBounds arg
@@ -343,9 +349,30 @@ inferMetadata arg@Binop { binop
             let diff = ls - rs
             in if diff >= 0
                then SDecimal {precision = max lp rp, scale=diff} -- why max?
-               else error "implement case there numerator has smaller precision (need to also modify operation)"
+               else error "implement division where numerator dec. point is less than denominator"
           _ -> ltype
-    in ColInfo {bounds, count, stype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
+        errMsg msg cs = C.intercalate " " ["ERROR", msg, C.pack $ show cs]
+        warnMsg msg cs =  C.intercalate " " ["WARNING", msg, C.pack $ show cs]
+        dtype = let cs = (binop,ldtype,rdtype) in
+          case cs of
+            (Mul,DDecimal{point=ls},DDecimal{point=rs}) -> (DDecimal{point=ls + rs},"")
+            (Div,DDecimal{point=ls},DDecimal{point=rs}) ->
+              let diff = ls - rs
+              in if diff >= 0
+                 then (DDecimal {point=diff}, "")
+                 else error "need to implement conversion for this division"
+            (cmp,_,_)
+              | cmp `elem` [Gt, Lt, Leq, Geq, Eq, Neq]
+                -> if ldtype == rdtype
+                   then (DDecimal{point=0},"")
+                   else (ldtype, errMsg "comparing across types without conversion" cs)
+            (arith,DDecimal{point=ls},DDecimal{point=rs})
+              | arith `elem` [Sub, Add]
+                -> if ls == rs then (ldtype,"")
+                   else (ldtype,
+                         errMsg "addition across different types without conversion" cs)
+            _ -> (ldtype, warnMsg "case not implemented:" cs)
+    in ColInfo {bounds, count, stype, dtype, trailing_zeros=trailing_zeros'} -- arbitrary choice of type right now.
          -- until we need more precision, we're conservative on the trailing zeros...
 
 inferBounds :: Vx -> (Integer, Integer)
