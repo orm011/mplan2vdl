@@ -1299,13 +1299,13 @@ xform fn vexps = let merge (accm,accl) vexp  = let (newm,newv) = transform fn ve
                  in reverse outr
 
 transform :: (Vx -> Maybe Vexp) -> Vexp -> Memoized -> (Memoized, Vexp)
-transform fn vexp@(Vexp {vx, name, comment}) mp  =
+transform fn vexp@(Vexp {vx, name, comment, info}) mp  =
   case Map.lookup vexp mp of
     Nothing ->
       let (mp', anon) = case vx of
             Load _ -> (mp, vexp) -- hack: we cannot deduce info for load without the config, so just keep it.
             _ ->  transformVx fn vx mp
-          ans = anon {name=name, comment=comment} -- try to preserve names across optimizations
+          ans = anon {name=name, comment=comment, info=info} -- try to preserve names across optimizations
           mp'' = Map.insert vexp ans mp'
       in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
     Just x -> (mp, x)
