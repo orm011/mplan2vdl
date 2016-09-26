@@ -117,6 +117,7 @@ resolveUnopOpcode nm =
 data ScalarExpr =
   Ref Name
   | Literal DType Integer -- the integer encodes the representation of the value.
+  | Identity { e::ScalarExpr } -- returns a rowid.
   | Unary { unop:: UnaryOp, arg::ScalarExpr }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
@@ -366,11 +367,12 @@ sc config P.Call { P.fname = Name [op]
      in sc config newexpr
 
 -- TODO: doublecheck this is correct
--- (see query 17 for an example plan using it)
+-- (see query 17 and query 20 for an example plan using it)
 sc config P.Call { P.fname=Name ["identity"]
-          , P.args = [ P.Expr { P.expr } ]
-          } = -- rewrite into just inner expression
-  sc config expr
+                 , P.args = [ P.Expr { P.expr } ]
+                 } = -- rewrite into just inner expression
+  do e <- (sc config expr)
+     return $ Identity { e }
 
 
 -- one of two versions of like in the plans:

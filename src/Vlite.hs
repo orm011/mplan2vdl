@@ -883,6 +883,7 @@ sc env (M.Cast {M.mtype = MDouble, M.arg}) = sc env arg -- ignore this cast. it 
 -- to correctly produce code here.
 -- We need the input type bc, for example Decimal(10,2) -> Decimal(10,3) = *10
 -- but Decimal(10,1) -> Decimal(10,3) = * 100. Right now, that input type is not explicitly given.
+
 sc env (M.Cast { M.mtype, M.arg }) =
   let vexp@Vexp{info=ColInfo{dtype=(inputtype,_)}} = sc env arg
       outputtype = getSTypeOfMType mtype
@@ -925,6 +926,9 @@ sc env M.In { M.left, M.set } =
 
 sc (Env (vref : _ ) _) (M.Literal dt n)
   = typedconst_ n vref dt
+
+sc (Env (vref:_)_) (M.Identity {})
+  = pos_ vref
 
 sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
