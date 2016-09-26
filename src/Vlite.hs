@@ -362,10 +362,11 @@ inferMetadata arg@Binop { binop
                  then (DDecimal {point=diff}, "")
                  else error "need to implement conversion for this division"
             (cmp,_,_)
+              | cmp `elem` [Gt, Lt, Leq, Geq, Eq, Neq] && ldtype == rdtype
+                -> (DDecimal{point=0},"")
+            (cmp,_,_)
               | cmp `elem` [Gt, Lt, Leq, Geq, Eq, Neq]
-                -> if ldtype == rdtype
-                   then (DDecimal{point=0},"")
-                   else (ldtype, errMsg "comparing across types without conversion" cs)
+                -> (ldtype, errMsg "comparing across types without conversion" cs)
             (arith,DDecimal{point=ls},DDecimal{point=rs})
               | arith `elem` [Sub, Add]
                 -> if ls == rs then (ldtype,"")
@@ -908,11 +909,18 @@ sc env cast@(M.Cast { M.mtype, M.arg }) =
      -- makes sure the new type is okay. this ensures future casts don't
      -- multiply things by more than needed.
 
-
 sc env (M.Binop { M.binop, M.left, M.right }) =
-  let l = sc env left
-      r = sc env right
-  in complete $ Binop {binop, left=l, right=r}
+  let l@Vexp {info=ColInfo{dtype=(lty,_)}} = sc env left
+      r@Vexp {info=ColInfo{dtype=(rty,_)}} = sc env right
+  in let ans = case (binop,lty,rty) of
+           (_, DDecimal{point=lp}, DDecimal{point=rp}) -- handle non-implicit conversions
+             | binop `elem` [Gt,Lt,Eq,Neq,Geq,Leq]
+               -> let dest = DDecimal{point=max lp rp}
+                      newl = transformCast l dest
+                      newr = transformCast r dest
+                  in Binop {binop, left=newl, right=newr}
+           _ -> Binop {binop, left=l, right=r}
+     in complete ans
 
 sc env M.In { M.left, M.set } =
   let sleft  = sc env left
@@ -959,6 +967,17 @@ sc env (M.Unary { M.unop=M.Neg, M.arg }) =
   in ones_ slarg -. slarg
 
 sc _ e = error $ "unhandled mplan scalar expression: " ++ show e -- clean this up. requires non empty list
+
+transformCast :: Vexp -> DType -> Vexp
+transformCast vexp@Vexp{info=ColInfo{dtype=(DDecimal{point=cpoint},_)}}  dest@DDecimal{point=dpoint}
+  = let diff = dpoint - cpoint
+    in case signum diff of
+       0 -> vexp -- noop
+       -1 -> error "negative cast"
+       1 -> let mul@Vexp{info=mulinfo} = vexp *. (const_ (10^diff) vexp)
+            in mul{info=mulinfo{dtype=(dest,"decimal cast")}}
+       _ -> error "signum"
+transformCast _ _ = error "implement this before calling"
 
 solveAgg :: Config -> Env -> Env -> Vexp -> M.GroupAgg -> Vexp
 
