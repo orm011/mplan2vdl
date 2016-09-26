@@ -157,9 +157,9 @@ const_ :: Integer -> Vexp -> Vexp
 const_ k v = complete $ RangeV {rmin=k, rstep=0, rref=v}
 
 -- used for literals, so they don't lose their type info.
-typedconst_ :: Integer -> Vexp -> SType -> Vexp
-typedconst_ k v st = let partial@Vexp{info} = const_ k v
-                         newinfo = checkColInfo $ info{stype=st}
+typedconst_ :: Integer -> Vexp -> DType -> Vexp
+typedconst_ k v dt = let partial@Vexp{info} = const_ k v
+                         newinfo = checkColInfo $ info{stype=SInt32, dtype=(dt, "literal")}
                      in partial {info=newinfo}
 zeros_ :: Vexp -> Vexp
 zeros_ = const_ 0
@@ -883,29 +883,21 @@ sc env (M.Cast {M.mtype = MDouble, M.arg}) = sc env arg -- ignore this cast. it 
 -- to correctly produce code here.
 -- We need the input type bc, for example Decimal(10,2) -> Decimal(10,3) = *10
 -- but Decimal(10,1) -> Decimal(10,3) = * 100. Right now, that input type is not explicitly given.
-sc env cast@(M.Cast { M.mtype, M.arg }) =
-  let vexp@Vexp{info=ColInfo{stype=inputtype}} = sc env arg
+sc env (M.Cast { M.mtype, M.arg }) =
+  let vexp@Vexp{info=ColInfo{dtype=(inputtype,_)}} = sc env arg
       outputtype = getSTypeOfMType mtype
-      outrep@Vexp{info} = case (inputtype,outputtype) of
+      outdtype = getDTypeOfMType mtype
+      outrep@Vexp{info} = case (inputtype,outdtype) of
         (a,b) | a == b -> vexp
         -- semantic cast of int to decimal: eg. 1 -> 1.0 which is repr as 10
-        (intt, SDecimal {scale})
-          | intt == SInt64 || intt == SInt32
-            -> let factor = (10 ^ scale)
-               in const_ factor vexp *. vexp
-         -- adjust the type so a future cast is not wrong
-        (SDecimal {scale}, intt) -- cast from decimal to int i assume is lossy.
-          | intt == SInt64 || intt == SInt32
-            -> let factor = (10 ^ scale)
-               in vexp /. (const_ factor vexp)
-        (SDecimal {scale=sfrom}, SDecimal{scale=sto}) ->
+        (DDecimal {point=sfrom}, DDecimal{point=sto}) ->
           if sto == sfrom then vexp
           else let factor = (10 ^ abs (sto - sfrom))
                in if sto > sfrom
                   then vexp *. const_ factor vexp
                   else vexp /. const_ factor vexp
-        _ -> error $  "unsupported type cast: from: " ++ show inputtype ++ " to: " ++ show outputtype ++ " in: " ++ show cast
-  in outrep {info=info{stype=outputtype}}
+        _ -> vexp
+  in outrep {info=info{stype=outputtype, dtype=(outdtype,"")}}
      -- makes sure the new type is okay. this ensures future casts don't
      -- multiply things by more than needed.
 
@@ -931,8 +923,8 @@ sc env M.In { M.left, M.set } =
         a:b -> (a,b)
   in foldl' (||.) first rest
 
-sc (Env (vref : _ ) _) (M.Literal st n)
-  = typedconst_ n vref st
+sc (Env (vref : _ ) _) (M.Literal dt n)
+  = typedconst_ n vref dt
 
 sc env (M.Unary { M.unop=M.Year, M.arg }) =
   --assuming input is well formed and the column is an integer representing
@@ -991,7 +983,7 @@ solveAgg config env after gkeyvec (M.GAvg expr) =
 
 -- count is rewritten to summing a one for every row
 solveAgg config env after gkeyvec (M.GCount) =
-  let rewrite = (M.GFold M.FSum (M.Literal SInt64 1))
+  let rewrite = (M.GFold M.FSum (M.Literal DDecimal{point=0} 1))
   in solveAgg config env after gkeyvec rewrite
 
 solveAgg config env (Env _ aftermap) gkeyvec g@(M.GFold op expr) =

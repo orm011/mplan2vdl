@@ -18,7 +18,6 @@ import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import GHC.Generics (Generic)
 import Data.Hashable
-import Control.Exception.Base
 import Debug.Trace
 import Data.Time.Format
 import Data.Data
@@ -117,7 +116,7 @@ resolveUnopOpcode nm =
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
   Ref Name
-  | Literal SType Integer -- the integer encodes the representation of the value.
+  | Literal DType Integer -- the integer encodes the representation of the value.
   | Unary { unop:: UnaryOp, arg::ScalarExpr }
   | Binop { binop :: BinaryOp, left :: ScalarExpr, right :: ScalarExpr  }
   | IfThenElse { if_::ScalarExpr, then_::ScalarExpr, else_::ScalarExpr }
@@ -439,28 +438,21 @@ sc config arg@P.Literal { P.tspec, P.stringRep } =
            -- lineitem.l_shipdate NOT NULL <= sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000").
            -- if shipdate is stored as an integer representing days.
            -- then, if
-           MDate -> (SInt32, resolveDateString stringRep)
-           MMillisec -> let r = readIntLiteral stringRep
-                            millis_in_a_day = (1000 * 60* 60* 24)
-                            days = r `quot` millis_in_a_day
-                            leftover = r `rem` millis_in_a_day
-                        in assert (r > 0) (assert (leftover == 0)  (SInt32, days))
-           MMonth  -> let months = readIntLiteral stringRep
-                      in (SInt32, months * 30)
-           MDecimal a b -> (SDecimal{precision=a, scale=b}, readIntLiteral stringRep)
+           MDate -> (DDate, resolveDateString stringRep)
+           MDecimal _ b -> (DDecimal{point=fromInteger b}, readIntLiteral stringRep)
            -- sql 0.06 shows up
            -- as mplan Decimal (,2) "6", so just reinterpret int as decimal.
            MBoolean  -> (case stringRep of
-                            "true" -> (SInt32, 1)
-                            "false" -> (SInt32, 0)
+                            "true" -> (DDecimal{point=0}, 1)
+                            "false" -> (DDecimal{point=0}, 0)
                             _ -> error $ "unknown invalid boolean literal: " ++ show arg)
-           MTinyint -> (SInt32, readIntLiteral stringRep)
-           MSmallint -> (SInt32, readIntLiteral stringRep)
-           MInt -> (SInt32, readIntLiteral stringRep)
-           MBigInt -> (SInt64, readIntLiteral stringRep)
+           MTinyint -> (DDecimal{point=0}, readIntLiteral stringRep)
+           MSmallint -> (DDecimal{point=0}, readIntLiteral stringRep)
+           MInt -> (DDecimal{point=0}, readIntLiteral stringRep)
+           MBigInt -> (DDecimal{point=0}, readIntLiteral stringRep)
            -- the problem here is that we don't really know the bitwidth...
            -- so assume the worst (likely it won't match columns it is used against)
-           MChar _ -> (SInt64, resolveCharLiteral config stringRep) -- assume 8 bytes is enough...
+           MChar _ -> (DString, resolveCharLiteral config stringRep) -- assume 8 bytes is enough...
            _ -> error $ "need to support literal of this type: " ++ show arg
      return $ Literal stype repr
 
