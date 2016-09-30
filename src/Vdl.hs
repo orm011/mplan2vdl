@@ -3,11 +3,12 @@ module Vdl (vdlFromVexps) where
 import Types
 
 import Control.Monad.Reader hiding (join)
+import Control.Monad.State hiding (join)
 import Data.Foldable(foldl')
 import Config
 import Name(Name(..), get_last, concat_name)
 --import Data.Int
-import Debug.Trace
+--import Debug.Trace
 --import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join, replace)
@@ -198,91 +199,100 @@ makeload n =
              , inname
              , vec = completeW $ (Load n, Nothing) }
 
-voodooFromVexpMemo :: MemoTable -> V.Vexp -> (MemoTable, Voodoo)
-voodooFromVexpMemo s vexp@(V.Vexp vx _ _ _ _ _ _) =
-  case HMap.lookup vexp s of
-    Nothing -> let (s',r) = voodooFromVxNoMemo s vx
-                   ans = (r, Just $ getMetadata vexp)
-                   s'' = HMap.insert vexp ans s'
-               in  (s'', ans)
-    Just ans -> (s, ans)
 
-voodooFromVxNoMemo :: MemoTable -> V.Vx -> (MemoTable, VoodooMinus)
+voodooFromVexpMemo :: V.Vexp -> State MemoTable Voodoo
+voodooFromVexpMemo vexp@(V.Vexp vx _ _ _ _ _ _) =
+  do s <- get -- used to access the state for a lookup.
+     case HMap.lookup vexp s of -- must be of type State MemoTable Voodoo. but the state must be updated.
+       Nothing -> do r <- voodooFromVxNoMemo vx -- State MemoTable VoodooMinus
+                     let completed = (r, Just $ getMetadata vexp)
+                     modify $ HMap.insert vexp completed -- type is MemoTable -> MemoTable
+                     return completed
+       Just ans -> return ans
 
-voodooFromVxNoMemo st (V.Load n) = (st, makeload n)
+voodooFromVxNoMemo :: V.Vx -> State MemoTable VoodooMinus
 
-voodooFromVxNoMemo s (V.RangeV {V.rmin, V.rstep, V.rref}) =
-  let (s',v) = voodooFromVexpMemo s rref
-  in (s', RangeV {rmin, rstep, rvec=completeW v})
+voodooFromVxNoMemo (V.Load n) = return $ makeload n
 
-voodooFromVxNoMemo s (V.RangeC {V.rmin, V.rstep, V.rcount}) =
-  (s, RangeC {rmin, rstep, rcount })
+voodooFromVxNoMemo (V.RangeV {V.rmin, V.rstep, V.rref}) =
+  do v <- voodooFromVexpMemo rref -- State MemoTable Voodo
+     return $ RangeV {rmin, rstep, rvec=completeW v}
 
-voodooFromVxNoMemo s (V.Binop { V.binop, V.left, V.right}) =
-  let (s', l) = voodooFromVexpMemo s left
-      (s'', r) = voodooFromVexpMemo s' right
-      (t,_) = case binop of
-              V.Gt -> l >. r
-              V.Eq -> l ==. r
-              V.Mul -> l *. r
-              V.Sub -> l -. r
-              V.Add -> l +. r
-              V.Lt -> l <. r
-              V.Leq -> l <=. r
-              V.Geq -> l >=. r
-              V.Min -> (l <=. r) ?. (l, r)
-              V.Max -> (l >=. r) ?. (l, r)
-              V.LogAnd -> (l &&. r)
-              V.LogOr -> (l ||. r)
-              V.Div -> (l /. r)
-              V.BitShift ->  (l >>. r)
-              V.Neq ->  (l !=. r)
-              V.BitOr -> (l |. r)
-              V.BitAnd -> (l &. r)
-              V.Mod -> (l %. r)
-  in (s'',t)
 
-voodooFromVxNoMemo s (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
-  let (s', source) = voodooFromVexpMemo s shsource
-      (s'', positions) = voodooFromVexpMemo s' shpos
-      scatter = case shop of
-        V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
-        V.Scatter -> let scatterfold = case source of
-                           (RangeV {rmin=0,rstep=1},_) -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
-                           _ -> completeW $ pos_ source
-                     in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions }
-  in (s'', scatter)
+-- 1. removed state from the signature (only shows up once, can even give an alias )
+-- 2. removed also from arguments, no need to mention it.
+-- 3. case where it is not changed: return of thing that does not mention it. (implicitly returns the one we had)
+-- 4. case where it must be changed because of a call to another function that returns a State MemoTable X:
+       -- do x <- myFun.  If the function implicitly takes in the current state (eg because it is a state action in itself)
+       --    return $ f x -- wont it
+voodooFromVxNoMemo (V.RangeC {V.rmin, V.rstep, V.rcount}) =
+  return RangeC {rmin, rstep, rcount }
 
-voodooFromVxNoMemo s (V.Like { V.ldata, V.lpattern, V.lcol }) =
-  let (s', newldata)  = voodooFromVexpMemo s ldata
-      ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
-  in (s', Like {ldata=completeW newldata, ldict=completeW (ldict, Nothing), lpattern})
+voodooFromVxNoMemo (V.Binop { V.binop, V.left, V.right}) =
+  do l <- voodooFromVexpMemo left
+     r <- voodooFromVexpMemo right
+     let (t,_) = case binop of
+           V.Gt -> l >. r
+           V.Eq -> l ==. r
+           V.Mul -> l *. r
+           V.Sub -> l -. r
+           V.Add -> l +. r
+           V.Lt -> l <. r
+           V.Leq -> l <=. r
+           V.Geq -> l >=. r
+           V.Min -> (l <=. r) ?. (l, r)
+           V.Max -> (l >=. r) ?. (l, r)
+           V.LogAnd -> (l &&. r)
+           V.LogOr -> (l ||. r)
+           V.Div -> (l /. r)
+           V.BitShift ->  (l >>. r)
+           V.Neq ->  (l !=. r)
+           V.BitOr -> (l |. r)
+           V.BitAnd -> (l &. r)
+           V.Mod -> (l %. r)
+     return t
 
-voodooFromVxNoMemo _ (V.Like { }) = error "like needs a lineage for the dictionary"
 
-voodooFromVxNoMemo s (V.VShuffle { V.varg }) =
-  let (s', newarg) = voodooFromVexpMemo s varg
-  in (s', VShuffle $ completeW newarg)
+voodooFromVxNoMemo (V.Shuffle { V.shop,  V.shsource, V.shpos }) =
+  do source <- voodooFromVexpMemo shsource
+     positions <- voodooFromVexpMemo shpos
+     return $ case shop of
+       V.Gather -> Binary { op=Gather, arg1=completeW source, arg2=completeW positions }
+       V.Scatter -> let scatterfold = case source of
+                          (RangeV {rmin=0,rstep=1},_) -> completeW source -- avoid duplicating ranges, or else it looks like passes do not work.
+                          _ -> completeW $ pos_ source
+                    in Scatter { scattersource=completeW source, scatterfold, scatterpos=completeW positions }
 
-voodooFromVxNoMemo s (V.Fold { V.foldop, V.fgroups, V.fdata}) =
-  let (s', arg1) = voodooFromVexpMemo s fgroups
-      (s'', arg2) = voodooFromVexpMemo s' fdata
-      op = case foldop of
-        V.FChoose -> FoldChoose
-        V.FSum -> FoldSum
-        V.FMax -> FoldMax
-        V.FMin -> FoldMin
-        V.FSel -> FoldSelect
-  in (s'', Binary { op, arg1=completeW arg1, arg2=completeW arg2 })
+voodooFromVxNoMemo (V.Like { V.ldata, V.lpattern, V.lcol }) =
+  do newldata <- voodooFromVexpMemo ldata
+     let ldict = let Name ns = lcol in makeload $ Name (ns ++ ["heap"])
+     return $ Like {ldata=completeW newldata, ldict=completeW (ldict, Nothing), lpattern}
 
-voodooFromVxNoMemo s (V.Partition {V.pdata, V.pivots}) =
-  let (s', arg1) = voodooFromVexpMemo s pdata
-      (s'', arg2) = voodooFromVexpMemo s' pivots
-  in (s'', Binary {op=Partition, arg1=completeW arg1, arg2=completeW arg2 })
+voodooFromVxNoMemo (V.Like { }) = error "like needs a lineage for the dictionary"
+
+voodooFromVxNoMemo (V.VShuffle { V.varg }) =
+  do newarg <- voodooFromVexpMemo varg
+     return $ VShuffle $ completeW newarg
+
+voodooFromVxNoMemo (V.Fold { V.foldop, V.fgroups, V.fdata}) =
+  do arg1 <- voodooFromVexpMemo fgroups
+     arg2 <- voodooFromVexpMemo fdata
+     let op = case foldop of
+           V.FChoose -> FoldChoose
+           V.FSum -> FoldSum
+           V.FMax -> FoldMax
+           V.FMin -> FoldMin
+           V.FSel -> FoldSelect
+     return $ Binary { op, arg1=completeW arg1, arg2=completeW arg2 }
+
+voodooFromVxNoMemo (V.Partition {V.pdata, V.pivots}) =
+  do arg1 <- voodooFromVexpMemo pdata
+     arg2 <- voodooFromVexpMemo pivots
+     return $ Binary {op=Partition, arg1=completeW arg1, arg2=completeW arg2 }
 
 voodoosFromVexps :: [V.Vexp] -> [Voodoo]
 voodoosFromVexps vexps =
-  let solve (s, res) v =  let (s', v') = voodooFromVexpMemo s v
+  let solve (s, res) v =  let (v',s') = runState (voodooFromVexpMemo v) s
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
       rename_value vec@(_, meta@(Just (Metadata { name, origin }))) =
@@ -298,76 +308,75 @@ voodoosFromVexps vexps =
       rename_value vec@(_, _) = vec -- in case not found
   in map (\r -> ((MaterializeCompact .  completeW . rename_value) r, Nothing)) ans
 
+
 vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =
-  let log0 = [(0, Load $ Name ["dummy"], Nothing)]
-      state0 = ((HMap.empty, log0), undefined)
-      ((_, finalLog),_) = foldl' process state0 vecs
-      post = tail $ reverse $ finalLog -- remove dummy, reverse
-     --let tr = "\n--Vref output:\n" ++ groom post
-     --return $ trace tr post
-  in trace (show $ length post) post
-  where process (state, _) v  = memVrefFromVoodoo state v
+  let action = sequence $ map memVrefFromVoodoo vecs
+      state0 = (0,HMap.empty,[])
+      (_,_,log) = execState action state0
+  in reverse log
 
-type LookupTable = HMap.HashMap Voodoo Int
-type Log = [(Int, Vref, Maybe Metadata)]
-type State = (LookupTable, Log)
+type LookupTable = HMap.HashMap Voodoo Int -- memoizes resolved vectors to line numbers
+type Log = [(Int, Vref, Maybe Metadata)] -- a numbered list of expressions using numbers to refer to previous ones
+type SStat = (Int, LookupTable, Log) -- int is the 'last log number' used. or 0.
 
-addToLog :: Log -> (Vref, Maybe Metadata) -> (Log, Int)
-addToLog log (v,info) = let (n, _, _) = head log
-                 in ((n+1, v, info) : log, n+1)
+updateState :: Voodoo -> (Vref, Maybe Metadata) -> State SStat Int
+updateState vd (vref,info) =
+  do (n,tab,log) <- get
+     let n' = n+1
+     let tab' = HMap.insert vd n' tab
+     let log' = (n+1, vref, info) : log
+     put (n', tab', log')
+     return n'
 
 --used to remember common expressions from before
-memVrefFromVoodoo :: State -> Voodoo -> (State, Int)
-memVrefFromVoodoo state@(tab, log) vd@(vdminus, info) =
-  case HMap.lookup vd tab of
-    Nothing -> let ((tab', log'), vref) = vrefFromVoodoo state vdminus
-                   (log'', iden) = addToLog log' (vref, info)
-                   tab'' = HMap.insert vd iden tab'
-               in ((tab'', log''), iden)
-    Just iden -> ((tab, log), iden) -- nothing changes
+memVrefFromVoodoo :: Voodoo -> State SStat Int
+memVrefFromVoodoo vd@(vdminus, info) =
+  do (_,tab,_) <- get -- note there isn't even a name to refer to the state (other than get..)
+     case HMap.lookup vd tab of
+       Nothing -> do vref <- vrefFromVoodoo vdminus
+                     updateState vd (vref, info)
+       Just iden -> return iden
 
-vrefFromVoodoo :: State -> VoodooMinus -> (State, Vref)
+vrefFromVoodoo :: VoodooMinus -> State SStat Vref
 
-vrefFromVoodoo state (Load n) = (state, Load n)
+vrefFromVoodoo (Load n) = return (Load n)
 
-vrefFromVoodoo state (RangeC {rmin,rstep,rcount} ) =
-  (state, RangeC {rmin,rstep,rcount})
+vrefFromVoodoo (RangeC {rmin,rstep,rcount}) = return $ RangeC {rmin,rstep,rcount}
 
-vrefFromVoodoo state (RangeV  {rmin,rstep,rvec=W (rvec,_)}) =
-  let (state', n') = memVrefFromVoodoo state rvec
-  in (state', RangeV { rmin,rstep, rvec= n' })
+vrefFromVoodoo (RangeV  {rmin,rstep,rvec=W (rvec,_)}) =
+  do rvec <- memVrefFromVoodoo rvec
+     return $ RangeV { rmin,rstep, rvec }
 
-vrefFromVoodoo state (Scatter {scattersource=W (scattersource,_)
+vrefFromVoodoo (Scatter {scattersource=W (scattersource,_)
                               , scatterfold=W (scatterfold,_)
                               , scatterpos=W (scatterpos,_) }) =
-  let (state', n') = memVrefFromVoodoo state scattersource
-      (state'', n'') = memVrefFromVoodoo state' scatterfold
-      (state''', n''') = memVrefFromVoodoo state'' scatterpos
-  in (state''', Scatter {scattersource= n', scatterfold= n'', scatterpos= n'''})
+  do scattersource <- memVrefFromVoodoo scattersource
+     scatterfold <- memVrefFromVoodoo scatterfold
+     scatterpos <- memVrefFromVoodoo scatterpos
+     return $ Scatter {scattersource, scatterfold, scatterpos}
 
-vrefFromVoodoo state (Project {outname, inname, vec=W (vec,_)}) =
-  let (state', n') = memVrefFromVoodoo state vec
-  in (state', Project { outname, inname, vec=n' })
+vrefFromVoodoo (Project {outname, inname, vec=W (vec,_)}) =
+  do vec <- memVrefFromVoodoo vec
+     return $ Project { outname, inname, vec }
 
+vrefFromVoodoo (Binary { op, arg1=W (arg1,_) , arg2=W (arg2,_) }) =
+  do arg1 <-  memVrefFromVoodoo arg1
+     arg2 <-  memVrefFromVoodoo arg2
+     return $ Binary {op, arg1, arg2}
 
-vrefFromVoodoo state (Binary { op, arg1=W (arg1,_) , arg2=W (arg2,_) }) =
-  let (state', n1) = memVrefFromVoodoo state arg1
-      (state'', n2) = memVrefFromVoodoo state' arg2
-  in  (state'', Binary { op, arg1=n1, arg2=n2})
+vrefFromVoodoo (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
+  do ldata <- memVrefFromVoodoo ldata
+     ldict <- memVrefFromVoodoo ldict
+     return $ Like { ldata, ldict, lpattern }
 
-vrefFromVoodoo state (Like { ldata=W (ldata,_), ldict=W (ldict,_),  lpattern}) =
-  let (state', n1) = memVrefFromVoodoo state ldata
-      (state'', n2) = memVrefFromVoodoo state' ldict
-  in (state'', Like { ldata=n1, ldict=n2, lpattern})
+vrefFromVoodoo (VShuffle { varg=W(varg,_)}) =
+  do varg <- memVrefFromVoodoo varg
+     return $ VShuffle {varg}
 
-vrefFromVoodoo state (VShuffle { varg=W(varg,_)}) =
-  let  (state', n1) = memVrefFromVoodoo state varg
-  in (state', VShuffle {varg=n1})
-
-vrefFromVoodoo state (MaterializeCompact {mout=W (mout,_)}) =
-  let (state', n') = memVrefFromVoodoo state mout
-  in (state', MaterializeCompact n' )
+vrefFromVoodoo (MaterializeCompact {mout=W (mout,_)}) =
+  do mout <- memVrefFromVoodoo mout
+     return $ MaterializeCompact mout
 
 {- now a list of strings -}
 toList :: Vref -> [String]
@@ -414,7 +423,7 @@ toList (MaterializeCompact x) =
 
 printLine :: (Int, Vref, Maybe Metadata) -> Reader Config String
 printLine (iden, vref, info) =
-  do display <- asks show_metadata
+  do display <- asks show_metadata -- Reader Config Boolean. actually need to use the boolean here.
      let strs = toList vref
      let dispinfo = case info of
            Nothing -> ""
