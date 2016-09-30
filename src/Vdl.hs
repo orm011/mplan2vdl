@@ -118,75 +118,29 @@ data Voodop =
 instance NFData Voodop
 instance Hashable Voodop
 
--- (.^.) :: (Int,Int) -> (Int,Int) -> (Int,Int)
--- (a,b) .^. (a',b') = (max a a', b + b')
-
--- size :: Voodoo -> (Int, Int)
--- size (Load _) = (1,1)
--- size (Scatter (W ch1) (V ch2) (V ch3)) = let (a,b) = (size ch1) .^. (size ch2) .^. (size ch3) in (a + 1, b + 1)
--- size (RangeV _ _ _) = (1,1)
--- size (RangeC _ _ _) = (1,1)
--- size (Project _ _ (V ch)) = let (a,b) = (size ch) .^. (1,1) in (a+1, b+1)
--- size (Binary _ (V ch1) (V ch2)) = let (a,b) = (size ch1) .^. (size ch2) in (a+1,b+1)
-
--- dagSize :: [Voodoo] -> (Int,Int)
--- dagSize outputs = let (a,b) = foldl' (.^.) (0,0) (map size outputs) in (a+1,b+(length outputs))
-
--- convenience expression library to translate more complex
--- all have type Voodoo -> Voodoo -> Voodoo
-(>.) :: Voodoo -> Voodoo -> Voodoo
+-- convenience expression ops
+(>.),(==.),(<.),(||.),(>>.),(&&.),(<=.),(>=.),(+.),(-.),(*.),(/.),(%.),(|.),(&.),(!=.) :: Voodoo -> Voodoo -> Voodoo
 a >.  b = (Binary { op=Greater, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(==.) :: Voodoo -> Voodoo -> Voodoo
 a ==. b = (Binary { op=Equals, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(<.) :: Voodoo -> Voodoo -> Voodoo
 a <.  b = (Binary { op=Greater, arg1=completeW b, arg2=completeW a }, Nothing) --notice argument swap
-
-(||.) :: Voodoo -> Voodoo -> Voodoo
 a ||. b = (Binary { op=LogicalOr, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(>>.) :: Voodoo -> Voodoo -> Voodoo
 a >>. b = (Binary { op=BitShift, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(&&.) :: Voodoo -> Voodoo -> Voodoo
 a &&. b = (Binary { op=LogicalAnd, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(<=.) :: Voodoo -> Voodoo -> Voodoo
 a <=. b = (a <. b) ||. (a ==. b)
-
-(>=.) :: Voodoo -> Voodoo -> Voodoo
 a >=. b = (a >. b) ||. (a ==. b)
-
-(+.) :: Voodoo -> Voodoo -> Voodoo
 a +. b =( Binary { op=Add, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(-.) :: Voodoo -> Voodoo -> Voodoo
 a -. b =( Binary { op=Subtract, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(*.) :: Voodoo -> Voodoo -> Voodoo
 a *. b = (Binary { op=Multiply, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(/.) :: Voodoo -> Voodoo -> Voodoo
 a /. b = (Binary { op=Divide, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(%.) :: Voodoo -> Voodoo -> Voodoo
 a %. b = (Binary { op=Modulo, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(|.) :: Voodoo -> Voodoo -> Voodoo
 a |. b = (Binary { op=BitwiseOr, arg1=completeW a, arg2=completeW b }, Nothing)
-
-(&.) :: Voodoo -> Voodoo -> Voodoo
 a &. b = (Binary { op=BitwiseAnd, arg1=completeW a, arg2=completeW b }, Nothing)
+a !=. b = (const_ 1 a) -. (a ==. b) -- NOTE: equals check needed to make sure we
+-- only have 0 or 1 in the multiplication.
 
 (?.) :: Voodoo -> (Voodoo,Voodoo) -> Voodoo
 cond ?. (a,b) = ((const_ 1 a  -. negcond) *. a) +. (negcond *. b)
   where negcond = (cond ==. const_ 0 a)
-
-(!=.) :: Voodoo -> Voodoo -> Voodoo
-a !=. b = (const_ 1 a) -. (a ==. b)
--- NOTE: check needed to make sure we
--- only have 0 or 1 in the multiplication.
 
 type MemoTable = HMap.HashMap V.Vexp Voodoo
 
