@@ -42,7 +42,7 @@ import qualified Data.List.NonEmpty as N
 
 --type VexpTable = Map Vexp Vexp  --used to dedup Vexps
 import Text.Printf
-import Control.Exception.Base hiding (mask)
+import Control.Exception.Base (assert)
 --import qualified Data.Map.Strict as Map
 --import qualified Data.Set as Set
 

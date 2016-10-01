@@ -169,15 +169,13 @@ compile apply_passes push_fk_joins planstring config =
   do parseTree <- case P.fromString planstring config of
                     Left err -> Left $ "(at Parse stage)" ++ err
                     other -> other
-     mplan <- case M.mplanFromParseTree parseTree config of
-                  Left err -> Left $ "(at Mplan stage)" ++ err
-                  other -> other
+     let mplan = M.mplanFromParseTree parseTree config
      --apply logical plan transforms here
      let rel_passes = if push_fk_joins then
                       (M.fuseSelects . M.pushFKJoins)
                       else (\x -> x)
      let mplan' = rel_passes mplan
-     let vexps = Vl.vexpsFromMplan mplan' config 
+     let vexps = Vl.vexpsFromMplan mplan' config
      let passes = if apply_passes then
                    (Vl.algebraicIdentitiesPass . Vl.loweringPass . Vl.redundantRangePass)  else (\x -> x)
      let vexps' =  passes vexps

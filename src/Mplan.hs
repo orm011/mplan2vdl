@@ -16,6 +16,7 @@ import Name(Name(..),TypeSpec(..))
 
 import Data.Time.Calendar
 import Control.DeepSeq(NFData)
+import Control.Exception.Base(assert)
 import GHC.Generics (Generic)
 import Data.Hashable
 import Debug.Trace
@@ -24,7 +25,6 @@ import Data.Data
 import Data.Generics.Uniplate.Data
 import Config
 import qualified Error as E
-import Error(check)
 import Data.List(foldl')
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
@@ -68,35 +68,35 @@ data BinaryOp =
 instance NFData BinaryOp
 instance Hashable BinaryOp
 
-resolveInfix :: B.ByteString -> Either String BinaryOp
+resolveInfix :: B.ByteString -> BinaryOp
 resolveInfix str =
   case str of
-    "<" -> Right Lt
-    ">" -> Right Gt
-    "<=" -> Right Leq
-    ">=" -> Right Geq
-    "=" -> Right Eq
-    "!=" -> Right Neq
-    "or" -> Right LogOr
-    _ -> Left $ E.unexpected "infix symbol" str
+    "<" -> Lt
+    ">" -> Gt
+    "<=" ->  Leq
+    ">=" ->  Geq
+    "=" ->  Eq
+    "!=" ->  Neq
+    "or" ->  LogOr
+    _ -> error $ E.unexpected "infix symbol" str
 
 
-resolveBinopOpcode :: Name -> Either String BinaryOp
+resolveBinopOpcode :: Name -> BinaryOp
 resolveBinopOpcode nm =
   case nm of
-    Name ["sql_add"] -> Right Add
-    Name ["sql_sub"] -> Right Sub
-    Name ["sql_mul"] -> Right Mul
-    Name ["sql_div"] -> Right Div
-    Name ["sql_min"] -> Right Min
-    Name ["sql_max"] -> Right Max
-    Name ["="] -> Right Eq
-    Name ["or"] -> Right LogOr
-    Name ["and"] -> Right LogAnd
-    Name [">"] -> Right Gt
-    Name ["<>"] -> Right Neq
-    Name ["scale_down"] -> Right Div
-    _ -> Left $ E.unexpected "binary function" nm
+    Name ["sql_add"] ->  Add
+    Name ["sql_sub"] ->  Sub
+    Name ["sql_mul"] ->  Mul
+    Name ["sql_div"] ->  Div
+    Name ["sql_min"] ->  Min
+    Name ["sql_max"] ->  Max
+    Name ["="] ->  Eq
+    Name ["or"] ->  LogOr
+    Name ["and"] ->  LogAnd
+    Name [">"] ->  Gt
+    Name ["<>"] ->  Neq
+    Name ["scale_down"] ->  Div
+    _ -> error $ E.unexpected "binary function" nm
 
 
   {- they must be semantically for a single tuple (see aggregates otherwise) -}
@@ -105,13 +105,13 @@ data UnaryOp =
   deriving (Eq, Show, Generic, Data)
 instance NFData UnaryOp
 
-resolveUnopOpcode :: Name -> Either String UnaryOp
+resolveUnopOpcode :: Name -> UnaryOp
 resolveUnopOpcode nm =
   case nm of
-    Name ["year"] -> Right Year
-    Name ["sql_neg"] -> Right Neg
-    Name ["isnull"] -> Right IsNull
-    _ -> Left $ E.unexpected "scalar function " nm
+    Name ["year"] ->  Year
+    Name ["sql_neg"] ->  Neg
+    Name ["isnull"] ->  IsNull
+    _ -> error $ E.unexpected "scalar function " nm
 
  {- a Ref can be a column or a previously bound name for an intermediate -}
 data ScalarExpr =
@@ -135,7 +135,7 @@ instance NFData FoldOp
 data GroupAgg = GAvg ScalarExpr | GCount | GFold FoldOp ScalarExpr deriving (Eq,Show,Generic,Data)
 instance NFData GroupAgg
 
-solveGroupOutput :: Config -> P.Expr -> Either String (GroupAgg, Maybe Name)
+solveGroupOutput :: Config -> P.Expr -> (GroupAgg, Maybe Name)
 
 solveGroupOutput _ P.Expr
   { P.expr = P.Ref {P.rname} {- output key -}
@@ -143,7 +143,7 @@ solveGroupOutput _ P.Expr
   = let outname = case alias of
           Nothing -> Just rname
           Just _ -> alias
-    in Right $ (GFold FChoose (Ref rname), outname)
+    in (GFold FChoose (Ref rname), outname)
 
 
 -- this is count(*). counts everything. equal to a sum of 1s.
@@ -151,7 +151,7 @@ solveGroupOutput _ P.Expr
   { P.expr = P.Call { P.fname=Name ["count"]
                     , P.args=[] }
   , P.alias }
-  = Right $ (GCount, alias)
+  = (GCount, alias)
 
 solveGroupOutput config P.Expr
   { P.expr = P.Call{  P.fname
@@ -162,21 +162,23 @@ solveGroupOutput config P.Expr
                              ]
                     }
   , P.alias }
-  = do inner <- sc config singlearg
-       case fname of
-         Name ["sum"] -> Right $ (GFold FSum inner, alias)
-         Name ["avg"] -> Right $ (GAvg inner, alias)
-         Name ["max"] -> Right $ (GFold FMax inner, alias)
-         Name ["min"] -> Right $ (GFold FMin inner, alias)
-         Name ["count"]
-           | P.Ref _ _ <- singlearg -> Right $ (GCount, alias) -- this is count(col). counts only non null...
-             -- For now, deal with counting this way, which is incorrect.
+  = let inner = sc config singlearg
+    in case fname of
+  Name ["sum"] -> (GFold FSum inner, alias)
+  Name ["avg"] -> (GAvg inner, alias)
+  Name ["max"] -> (GFold FMax inner, alias)
+  Name ["min"] -> (GFold FMin inner, alias)
+  Name ["count"]
+    | P.Ref _ _ <- singlearg -> (GCount, alias)
+  _ -> error $ E.unexpected  "unary aggregate" fname
+
+-- this is count(col). counts only non null...
+-- For now, deal with counting this way, which is incorrect.
 -- In truth, We would need to have a separate vector to know which entries of this vector are null.
 -- the only query using this (q 16?) seems to have it be not-null anyway.
-             -- monet does not seem to give an answer if the inner expression is not a column name.
-         _ -> Left $ E.unexpected  "unary aggregate" fname
+-- monet does not seem to give an answer if the inner expression is not a column name.
 
-solveGroupOutput  _ s_ = Left $ E.unexpected "group_by output expression" s_
+solveGroupOutput  _ s_ = error $ E.unexpected "group_by output expression" s_
 
 data JoinVariant = Plain | LeftSemi | LeftOuter | LeftAnti deriving (Show,Eq, Generic,Data)
 instance NFData JoinVariant
@@ -211,14 +213,12 @@ instance NFData RelExpr
 
 {-helper function uesd in multiple operators that introduce output
 columns -}
-solveOutputs :: Config -> [P.Expr] -> Either String [(ScalarExpr, Maybe Name)]
-solveOutputs config explist = sequence $ map f explist
-  where f P.Expr { P.expr, P.alias } =
-          do scalar <- sc config expr
-             return (scalar, alias)
+solveOutputs :: Config -> [P.Expr] -> [(ScalarExpr, Maybe Name)]
+solveOutputs config explist =
+  let f P.Expr { P.expr, P.alias } = (sc config expr, alias)
+  in map f explist
 
-
-solve :: Config -> P.Rel -> Either String RelExpr
+solve :: Config -> P.Rel -> RelExpr
 
 {- Leaf (aka Table) invariants /checks:
   -tablecolumns must not be empty.
@@ -228,24 +228,22 @@ solve :: Config -> P.Rel -> Either String RelExpr
    for concrete resolution to things like partsupp.%partsupp_fk1
 -}
 solve _ P.Leaf { P.source, P.columns  } =
-  do pcols <- sequence $ map split columns
-     check pcols ( /= []) "list of table columns must not be empty"
-     return $ Table { tablename = source, tablecolumns = pcols}
+  let pcols = map split columns
+  in assert (pcols /= []) $ Table { tablename = source, tablecolumns = pcols}
   where
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs } --no alias. then use attr or name
                  , P.alias=Nothing } =
       case getJoinIdx attrs of
-        [fkcol] -> Right  (fkcol, Just rname) -- notice reversal
-        [] -> Right (rname, Nothing)
-        s_ -> Left $ E.unexpected " multiple fkey indices" s_
+        [fkcol] -> (fkcol, Just rname) -- notice reversal
+        [] -> (rname, Nothing)
+        s_ -> error $ E.unexpected " multiple fkey indices" s_
     split P.Expr { P.expr = P.Ref { P.rname, P.attrs }
                  , P.alias=as@(Just _) } =
       case getJoinIdx attrs of
-        [] -> Right (rname, as) --
-        [fkcol] -> Right (fkcol, as)  -- here, we have both an alias and joinidx (eg q8 nation_fk1)
-        _ -> Left $ E.unexpected " multiple fkey indices" attrs
-    split _ = Left "table outputs should only have reference expressions"
-
+        [] -> (rname, as) --
+        [fkcol] ->  (fkcol, as)  -- here, we have both an alias and joinidx (eg q8 nation_fk1)
+        _ -> error $ E.unexpected " multiple fkey indices" attrs
+    split _ = error "table outputs should only have reference expressions"
 
 {- Project invariants
 - single child node
@@ -258,12 +256,12 @@ solve config P.Node { P.relop = "project"
                     , P.children = [ch] -- only one child rel allowed for project
                     , P.arg_lists = out : rest -- not dealing with order by right now.
                     } =
-  do child <- solve config ch
-     projectout <- solveOutputs config out
-     order <- (case rest of
-                 [] -> Right []
-                 _ -> Left $ E.unexpected "order-by clauses" rest)
-     return $ Project {child, projectout, order }
+  let child = solve config ch
+      projectout = solveOutputs config out
+      order = (case rest of
+                 [] -> []
+                 _ -> error $ E.unexpected "order-by clauses" rest)
+  in  Project {child, projectout, order }
 
 
   {- Group invariants:
@@ -275,10 +273,10 @@ solve config P.Node { P.relop = "group by"
                     , P.children = [ch] -- only one child rel allowed for group by
                     , P.arg_lists =  igroupkeys : igroupvalues : []
                     } =
-  do child <- solve config ch
-     let inputkeys = map extractKey igroupkeys
-     outputaggs  <- mapM (solveGroupOutput config) igroupvalues
-     return $ GroupBy {child, inputkeys, outputaggs}
+  let child = solve config ch
+      inputkeys = map extractKey igroupkeys
+      outputaggs = map (solveGroupOutput config) igroupvalues
+  in GroupBy {child, inputkeys, outputaggs}
        where extractKey P.Expr { P.expr = P.Ref { P.rname }
                                , P.alias } = (rname, alias)
              extractKey _ = error "non-ref in group by key"
@@ -291,9 +289,9 @@ solve config P.Node { P.relop = "select"
                     , P.children = [ch]
                     , P.arg_lists = props : []
                     } =
-  do child <- solve config ch
-     predicate <- conjunction config props
-     return $ Select { child, predicate }
+  let child = solve config ch
+      predicate = conjunction config props
+  in Select { child, predicate }
 
 
 solve config P.Node { P.relop
@@ -303,19 +301,19 @@ solve config P.Node { P.relop
                  {- remember : its a list of lists -}
                     }
   | ("semijoin" == relop || "join" == relop || "antijoin" == relop || "left outer join" == relop) =
-    do leftch  <- solve config l
-       rightch <- solve config r
-       let joinvariant = case relop of
+  let leftch  = solve config l
+      rightch = solve config r
+      joinvariant = case relop of
              "join" -> Plain
              "semijoin" -> LeftSemi
              "antijoin" -> LeftAnti
              "left outer join" -> LeftOuter
              _ -> error $ "no other joins expected: "  ++ C.unpack relop
-       prelim_conds <- mapM ( (sc config) . P.expr) conditions
-       let conds = case prelim_conds of
+      prelim_conds = map ( (sc config) . P.expr) conditions
+      conds = case prelim_conds of
              [] -> error " empty join condition list is invalid "
              first : rest -> first :| rest
-       return $ Join { leftch, rightch, conds, joinvariant }
+   in Join { leftch, rightch, conds, joinvariant }
 
 solve config  P.Node { P.relop = "top N"
              , P.children = [ch]
@@ -329,15 +327,15 @@ solve config  P.Node { P.relop = "top N"
                                  }
                              ] : []
              } =
-  do let n = readIntLiteral stringRep
-     child <- solve config ch
-     return $ TopN { child , n }
+  let n = readIntLiteral stringRep
+      child = solve config ch
+  in TopN { child , n }
 
-solve _ P.Node { P.relop } = Left $ E.unexpected "relational operator not implemented" relop
+solve _ P.Node { P.relop } = error $ E.unexpected "relational operator not implemented" relop
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
-sc :: Config -> P.ScalarExpr -> Either String ScalarExpr
-sc _ P.Ref { P.rname  } = Right $ Ref rname
+sc :: Config -> P.ScalarExpr -> ScalarExpr
+sc _ P.Ref { P.rname  } = Ref rname
 
 
 -- reweites things like
@@ -371,8 +369,8 @@ sc config P.Call { P.fname = Name [op]
 sc config P.Call { P.fname=Name ["identity"]
                  , P.args = [ P.Expr { P.expr } ]
                  } = -- rewrite into just inner expression
-  do e <- (sc config expr)
-     return $ Identity { e }
+  let e = sc config expr
+  in Identity { e }
 
 
 -- one of two versions of like in the plans:
@@ -393,26 +391,26 @@ sc config P.Call { P.fname=Name ["like"]
                          }
                      ]
           } =
-  do ldata <- sc config likearg
-     return $ Like { ldata, lpattern=likepattern }
+  let ldata = sc config likearg
+  in Like { ldata, lpattern=likepattern }
 
 sc _ P.Call { P.fname=Name ["like"] } = error "implement this 'like' case"
 
 {- for now, we are ignoring the aliases within calls -}
 sc config P.Call { P.fname, P.args = [ P.Expr { P.expr = singlearg, P.alias = _ } ] } =
-  do sub <- sc config singlearg
-     unop <- resolveUnopOpcode fname
-     return $ Unary { unop, arg=sub }
+  let sub = sc config singlearg
+      unop = resolveUnopOpcode fname
+  in Unary { unop, arg=sub }
 
 sc config P.Call { P.fname
           , P.args = [ P.Expr { P.expr = firstarg, P.alias = _ }
                      , P.Expr { P.expr = secondarg, P.alias = _ }
                      ]
           } =
-  do left <- sc config firstarg
-     right <- sc config secondarg
-     binop <- resolveBinopOpcode fname
-     return $ Binop { binop, left, right }
+  let left = sc config firstarg
+      right = sc config secondarg
+      binop = resolveBinopOpcode fname
+  in Binop { binop, left, right }
 
 
 sc config P.Call { P.fname=Name ["ifthenelse"]
@@ -421,21 +419,21 @@ sc config P.Call { P.fname=Name ["ifthenelse"]
                      , P.Expr { P.expr = melse, P.alias = _ }
                      ]
           } =
-  do if_ <- sc config mif
-     then_ <- sc config mthen
-     else_ <- sc config melse
-     return $ IfThenElse { if_, then_, else_ }
+  let if_ = sc config mif
+      then_ = sc config mthen
+      else_ = sc config melse
+  in IfThenElse { if_, then_, else_ }
 
 sc config P.Cast { P.tspec
           , P.value = P.Expr { P.expr = parg, P.alias = _  }
           } =
-  do let mtype = resolveTypeSpec tspec
-     arg <- sc config parg
-     return $ Cast { mtype, arg }
+  let mtype = resolveTypeSpec tspec
+      arg = sc config parg
+  in Cast { mtype, arg }
 
 sc config arg@P.Literal { P.tspec, P.stringRep } =
-  do let mtype = resolveTypeSpec tspec
-     let (stype,repr) = case mtype of
+  let mtype = resolveTypeSpec tspec
+      (stype,repr) = case mtype of
            -- eg q1:
            -- lineitem.l_shipdate NOT NULL <= sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000").
            -- if shipdate is stored as an integer representing days.
@@ -456,15 +454,15 @@ sc config arg@P.Literal { P.tspec, P.stringRep } =
            -- so assume the worst (likely it won't match columns it is used against)
            MChar _ -> (DString, resolveCharLiteral config stringRep) -- assume 8 bytes is enough...
            _ -> error $ "need to support literal of this type: " ++ show arg
-     return $ Literal stype repr
+  in Literal stype repr
 
 sc config P.Infix {P.infixop
            ,P.left
            ,P.right} =
-  do l <- sc config (P.expr left)
-     r <- sc config (P.expr right)
-     binop <- resolveInfix infixop
-     return $ Binop { binop, left=l, right=r }
+  let l = sc config (P.expr left)
+      r = sc config (P.expr right)
+      binop = resolveInfix infixop
+  in Binop { binop, left=l, right=r }
 
 sc config P.Interval {P.ifirst=P.Expr {P.expr=first }
               ,P.firstop
@@ -472,25 +470,24 @@ sc config P.Interval {P.ifirst=P.Expr {P.expr=first }
               ,P.secondop
               ,P.ilast=P.Expr {P.expr=lastel }
               } =
-  do sfirst <- sc config first
-     smiddle <- sc config middle
-     slast <- sc config lastel
-     fop <- resolveInfix firstop
-     sop <- resolveInfix secondop
-     let left = Binop { binop=fop, left=sfirst, right=smiddle }
-     let right = Binop { binop=sop, left=smiddle, right=slast }
-     return $ Binop { binop=LogAnd, left, right}
+  let sfirst = sc config first
+      smiddle = sc config middle
+      slast = sc config lastel
+      fop = resolveInfix firstop
+      sop = resolveInfix secondop
+      left = Binop { binop=fop, left=sfirst, right=smiddle }
+      right = Binop { binop=sop, left=smiddle, right=slast }
+  in Binop { binop=LogAnd, left, right}
 
 
 sc config P.In { P.arg = P.Expr { P.expr, P.alias = _}
         , P.negated = False
         , P.set } =
-  do sleft <- sc config expr
-     sset <- mapM ((sc config) . P.expr) set
-     return $ In { left=sleft, set=sset }
+  let sleft = sc config expr
+      sset = map ((sc config) . P.expr) set
+  in In { left=sleft, set=sset }
 
 sc config (P.Nested exprs) = conjunction config exprs
-
 
 sc config P.Filter { P.oper="like"
                    , P.arg=P.Expr {P.expr=arg}
@@ -507,25 +504,23 @@ sc config P.Filter { P.oper="like"
                    , P.escape=P.Literal { P.tspec=TypeSpec { tname="char", tparams=[] }
                                         , P.stringRep = "" } --aka char ""
                    }  =
-  do sarg <- sc config arg
-     let like = Like { ldata=sarg, lpattern }
-     return $ if negated then Unary { unop=Neg, arg=like } else like
+  let sarg = sc config arg
+      like = Like { ldata=sarg, lpattern }
+  in if negated then Unary { unop=Neg, arg=like } else like
 
-sc _ P.Filter { P.oper } =
-  Left $ E.unexpected "operator" oper
+sc _ P.Filter { P.oper } = error $ E.unexpected "operator" oper
 
-sc _ s_ = Left $ E.unexpected "scalar operator" s_
+sc _ s_ = error $ E.unexpected "scalar operator" s_
 
 {- converts a list into ANDs -}
-conjunction :: Config -> [P.Expr] -> Either String ScalarExpr
+conjunction :: Config -> [P.Expr] -> ScalarExpr
 conjunction config exprs =
-  do solved <- mapM ((sc config ). P.expr) exprs
-     case solved of
-       [] -> Left $ E.unexpected  "empty conjunction list" exprs
-       [x] -> return x
-       x : y : rest -> return $ foldl' makeAnd (makeAnd x y) rest
-       where makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
-
+  let solved = map ((sc config ). P.expr) exprs
+      makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
+  in case solved of
+        [] -> error $ E.unexpected  "empty conjunction list" exprs
+        [x] -> x
+        x : y : rest -> foldl' makeAnd (makeAnd x y) rest
 
 readIntLiteral :: B.ByteString -> Integer
 readIntLiteral str =
@@ -533,7 +528,7 @@ readIntLiteral str =
     Just (num, "") -> num
     _ -> error $  "unrecognizable integer literal: " ++ (C.unpack str)
 
-mplanFromParseTree :: P.Rel -> Config -> Either String RelExpr
+mplanFromParseTree :: P.Rel -> Config -> RelExpr
 mplanFromParseTree _1 config  = solve config _1
 
 -- The predicate output names are legal when moved up, bc
