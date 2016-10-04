@@ -1,5 +1,7 @@
 #! /bin/bash
-DIR=$1  # the dir with the query mplans and the metadata files
+
+META=$1
+DIR=$2  # the dir with the query mplans and the metadata files
 shift
 
 OUT=/tmp/vdlresults/$(basename $DIR)
@@ -13,7 +15,7 @@ for test in $(ls $DIR/*plan)
 do
     COUNT=$((COUNT+1))
     FILE=$(basename $test)
-    COMMAND="./tpchrun $DIR $@ $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err"
+    COMMAND="./tpchrun $META $@ $test 1>/$OUT/$FILE.vdl 2>/$OUT/$FILE.err"
     #echo $COMMAND
     eval $COMMAND
     EXIT_STATUS=$?

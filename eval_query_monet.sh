@@ -1,6 +1,6 @@
 #!/bin/bash
 set -o pipefail
-DB=clone01
+DB=$1
 
 cat \
 | grep -v 'default substitutions' \
