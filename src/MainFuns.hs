@@ -31,7 +31,6 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Dot
 
-
 data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , boundsfile :: String
                             , storagefile :: String
@@ -45,6 +44,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , agg_strategy :: AggStrategy
                             , grainsize :: Int
                             , sparsity :: Double
+                            , output_format :: OutputFormat
                             } deriving (Show, Data, Typeable)
 
 cmdTemplate :: Mplan2Vdl
@@ -65,6 +65,9 @@ cmdTemplate = Mplan2Vdl
   , metadata = False &= typ "Bool" &= help "show inferred metadata in output"
   , sparsity = 1.0 &= typ "Double" &= help "threshold for (max - min + 1)/count: aggregations with more sparsity get a shuffle oper added always rather than the default strategy"
   , goffset = (0::Integer) &= typ "Integer" &= help "offset for synthesized group-by keys. defaults to 0"
+  , output_format = enum [VdlFormat &= help "for voodoo ./Driver vdl interpreter"
+                         ,VliteFormat &= help "lighter syntax (one value per vector)"
+                         ]
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -145,7 +148,7 @@ mainf = do
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                let config  = makeConfig threshold (metadata cmdargs) (goffset cmdargs) strat boundslist storagelist tables dictlist
+                let config  = makeConfig (output_format cmdargs) threshold (metadata cmdargs) (goffset cmdargs) strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage

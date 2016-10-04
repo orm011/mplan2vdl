@@ -42,7 +42,7 @@ resolveCharLiteral  :: Config -> B.ByteString -> Integer
 resolveCharLiteral config ch = case HashMap.lookup ch (dictionary config) of
   Nothing -> error $  "not found in dictionary: " ++ (C.unpack ch)
   Just x -> trace (",," ++ C.unpack ch ++"," ++ show x)  $ x
-
+    
 parseDate :: C.ByteString -> Day
 parseDate datestr =
   parseTimeOrError True defaultTimeLocale "%Y-%m-%d" (C.unpack datestr)

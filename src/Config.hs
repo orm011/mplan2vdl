@@ -8,6 +8,7 @@ module Config ( Config(..)
               , isPartialFk
               , isPartialPk
               , AggStrategy(..)
+              , OutputFormat(..)
               , FKCols
               , PKCols
               , BoundsRec
@@ -37,7 +38,7 @@ import qualified Data.HashMap.Strict as HashMap
 type HashMap = HashMap.HashMap
 type Map = Map.Map
 
-
+data OutputFormat = VdlFormat | VliteFormat deriving (Eq,Show,Data)
 --type Set = Set.Set
 
 
@@ -143,9 +144,10 @@ addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing
      then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
      else plain
 
-makeConfig :: Double -> Bool -> Integer -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
-makeConfig sparsity_threshold metadata gboffset aggregation_strategy boundslist storagelist tables dictlist =
-  let show_metadata = metadata
+makeConfig :: OutputFormat -> Double -> Bool -> Integer -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
+makeConfig output_format sparsity_threshold metadata gboffset aggregation_strategy boundslist storagelist tables dictlist =
+  let format = output_format
+      show_metadata = metadata
       dictionary = makeDictionary dictlist
       constraints = foldMap getTableConstraints tables
       tspecs = NameTable.fromList $ foldMap getTspecs tables
@@ -161,7 +163,7 @@ makeConfig sparsity_threshold metadata gboffset aggregation_strategy boundslist 
       partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
       pktable = map pkpair tables
-  in Config { sparsity_threshold, show_metadata, gboffset, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+  in Config { format, sparsity_threshold, show_metadata, gboffset, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
               tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -215,6 +217,7 @@ data Config =  Config  { sparsity_threshold :: Double
                        , aggregation_strategy :: AggStrategy
                        , show_metadata :: Bool
                        , gboffset :: Integer
+                       , format :: OutputFormat
                        , dictionary :: HashMap C.ByteString Integer
                        , colinfo :: NameTable ColInfo
                        , fkrefs :: Map FKCols (FKJoinOrder,Name)

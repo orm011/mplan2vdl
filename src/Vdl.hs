@@ -85,7 +85,12 @@ getMetadata V.Vexp {V.info=ColInfo {bounds, count, dtype=(dt,notes)}, V.name, V.
 type VoodooMinus = Vd W
 type Voodoo = (Vd W, Maybe Metadata)
 
-type Vref = Vd Int -- used for ref version that can be printed as a series of expressions
+newtype Id = Id Int
+instance Show Id where
+  show (Id n) = "Id " ++ show n
+
+type Vref = Vd Id -- used for ref version that can be printed as a series of expressions
+
 
 const_ :: Integer -> Voodoo -> Voodoo
 const_ k v  = (RangeV { rmin=k, rstep=0, rvec=completeW v }, Nothing)
@@ -266,25 +271,24 @@ voodoosFromVexps vexps =
 vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =
   let action = sequence $ map memVrefFromVoodoo vecs
-      state0 = (0,HMap.empty,[])
+      state0 = (Id 0,HMap.empty,[])
       (_,_,log) = execState action state0
   in reverse log
 
-type LookupTable = HMap.HashMap Voodoo Int -- memoizes resolved vectors to line numbers
-type Log = [(Int, Vref, Maybe Metadata)] -- a numbered list of expressions using numbers to refer to previous ones
-type SStat = (Int, LookupTable, Log) -- int is the 'last log number' used. or 0.
+type Log = [(Id, Vref, Maybe Metadata)] -- a numbered list of expressions using numbers to refer to previous ones
+type SStat = (Id, HMap.HashMap Voodoo Id, Log) -- int is the 'last log number' used. or 0.
 
-updateState :: Voodoo -> (Vref, Maybe Metadata) -> State SStat Int
+updateState :: Voodoo -> (Vref, Maybe Metadata) -> State SStat Id
 updateState vd (vref,info) =
-  do (n,tab,log) <- get
-     let n' = n+1
-     let tab' = HMap.insert vd n' tab
-     let log' = (n+1, vref, info) : log
-     put (n', tab', log')
-     return n'
+  do (Id n,tab,log) <- get
+     let id' = Id $ n+1
+     let tab' = HMap.insert vd id' tab
+     let log' = (id', vref, info) : log
+     put (id', tab', log')
+     return id'
 
 --used to remember common expressions from before
-memVrefFromVoodoo :: Voodoo -> State SStat Int
+memVrefFromVoodoo :: Voodoo -> State SStat Id
 memVrefFromVoodoo vd@(vdminus, info) =
   do (_,tab,_) <- get -- note there isn't even a name to refer to the state (other than get..)
      case HMap.lookup vd tab of
@@ -332,53 +336,85 @@ vrefFromVoodoo (MaterializeCompact {mout=W (mout,_)}) =
   do mout <- memVrefFromVoodoo mout
      return $ MaterializeCompact mout
 
+toVList :: Vref -> [String]
+-- for printing: remove sys (really, we want the prefix only_
+toVList (Load n) = ["Load", show n]
+toVList (Project {vec}) = ["Project",show vec]
+toVList (RangeV { rmin, rstep, rvec }) = ["RangeV", show rmin, show rvec, show rstep]
+toVList (RangeC { rmin, rstep, rcount }) = ["RangeC", show rmin, show rcount, show rstep]
+toVList (Binary { op, arg1, arg2 }) =
+  case op of
+    Gather -> [sop, id1, id2]
+    _ -> [sop, id1, id2]
+  where sop = show op
+        id1 = show arg1
+        id2 = show arg2
+
+toVList (Scatter { scattersource, scatterfold, scatterpos } ) =
+  ["Scatter", id1, id2, id3]
+  where id1 = show scattersource
+        id2 = show scatterfold
+        id3 = show scatterpos
+
+toVList (Like { ldata, ldict, lpattern } ) =
+  ["Like", id1, id2, C.unpack lpattern]
+  where id1 = show ldata
+        id2 = show ldict
+
+toVList (VShuffle {varg}) =
+  ["Shuffle", show varg]
+
+toVList (MaterializeCompact x) =
+  ["MaterializeCompact", show x]
+
+toVList _ = error "implement me"
+
+
 {- now a list of strings -}
-toList :: Vref -> [String]
+toVoodooList :: Vref -> [String]
 
 -- for printing: remove sys (really, we want the prefix only_
-toList (Load (Name lst)) = ["Load", show cleanname]
+toVoodooList (Load (Name lst)) = ["Load", show cleanname]
   where cleanname = Name (if head lst == "sys" then tail lst else lst)
 
-toList (Project {outname, inname, vec}) =
-  ["Project",show outname, "Id " ++ show vec, show inname ]
+toVoodooList (Project {outname, inname, vec}) =
+  ["Project",show outname, show vec, show inname ]
 
-toList (RangeV { rmin, rstep, rvec }) =
+toVoodooList (RangeV { rmin, rstep, rvec }) =
   {- for printing: hardcoded length 2 billion right now,
   since backend only materializes what's needed -}
-  ["RangeV", "val", show rmin, "Id " ++ show rvec, show rstep]
+  ["RangeV", "val", show rmin, show rvec, show rstep]
 
-toList (RangeC { rmin, rstep, rcount }) =
+toVoodooList (RangeC { rmin, rstep, rcount }) =
   ["RangeC", "val", show rmin, show rcount, show rstep]
 
-toList (Binary { op, arg1, arg2}) =
+toVoodooList (Binary { op, arg1, arg2}) =
   case op of
-    Gather -> [sop, id1, id2, "val"]
-    _ ->      [sop, "val", id1, "val", id2, "val" ]
-  where sop = show op
-        id1 = "Id " ++ show arg1
-        id2 = "Id " ++ show arg2
+    Gather -> [show op, show arg1, show arg2, "val"]
+    _ ->      [show op, "val", show arg1, "val", show arg2, "val" ]
 
-toList (Scatter { scattersource, scatterfold, scatterpos } ) =
-  ["Scatter", id1, id2, "val", id3, "val"]
-  where id1 = "Id " ++ show scattersource
-        id2 = "Id " ++ show scatterfold
-        id3 = "Id " ++ show scatterpos
+toVoodooList (Scatter { scattersource, scatterfold, scatterpos } ) =
+  ["Scatter", show scattersource, show scatterfold, "val", show scatterpos, "val"]
 
-toList (Like { ldata, ldict, lpattern } ) =
+toVoodooList (Like { ldata, ldict, lpattern } ) =
   ["Like", "val",id1, "val",id2,"val", C.unpack lpattern]
-  where id1 = "Id " ++ show ldata
-        id2 = "Id " ++ show ldict
+  where id1 = show ldata
+        id2 = show ldict
 
-toList (VShuffle {varg}) =
-  ["Shuffle", "Id " ++ show varg]
+toVoodooList (VShuffle {varg}) =
+  ["Shuffle", show varg]
 
-toList (MaterializeCompact x) =
-  ["MaterializeCompact","Id " ++ show x]
+toVoodooList (MaterializeCompact x) =
+  ["MaterializeCompact",show x]
 
-printLine :: (Int, Vref, Maybe Metadata) -> Reader Config String
-printLine (iden, vref, info) =
+printLine :: (Id, Vref, Maybe Metadata) -> Reader Config String
+printLine (Id iden, vref, info) =
   do display <- asks show_metadata -- Reader Config Boolean. actually need to use the boolean here.
-     let strs = toList vref
+     format <- asks format
+     let printer = case format of
+           VdlFormat -> toVoodooList
+           VliteFormat -> toVList
+     let strs = printer vref
      let dispinfo = case info of
            Nothing -> ""
            Just x -> "  ;; " ++ show x
