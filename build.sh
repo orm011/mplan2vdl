@@ -12,4 +12,4 @@ stack build -j 4 --test --no-run-tests --ghc-options="-O0" --executable-profilin
 #doesn't work with stack: --alex-options="--ghc --template=\"$TOP/alex\"" --happy-options="-g --info"
 set +x
 rm -f mplan2vdl
-ln -s $(find ./.stack-work/install/x86_64-linux-tinfo6/ -name 'mplan2vdl' -a -type f) mplan2vdl
+ln -s $(find ./.stack-work/install/ -name 'mplan2vdl' -a -type f) mplan2vdl
