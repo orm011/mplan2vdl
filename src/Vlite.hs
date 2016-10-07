@@ -1063,13 +1063,17 @@ addScatterSizeHint vec@Vexp{info=ColInfo {bounds=(vmin,vmax)}} =
 makeCompositeKey :: NonEmpty Vexp -> Reader Config Vexp
 makeCompositeKey (firstvexp :| rest) =
   do offset <- asks gboffset
+     oformat <- asks format
      let shifted = shiftToZero firstvexp -- needed bc empty list won't shift
      let out = foldl' composeKeys shifted rest
      let plusoffset@Vexp{info=originfo@ColInfo{bounds=(_,mx)}} =
            if offset > 0
            then (out +. const_ offset out){comment="offset added by goffset"}
            else out
-     return $ addSizeHint $ plusoffset {info=originfo {bounds=(0,mx)}} -- override the lower bound.
+     let hintFun = case oformat of
+           VliteFormat -> \x -> x -- identity
+           VdlFormat -> addSizeHint
+     return $ hintFun $ plusoffset {info=originfo {bounds=(0,mx)}} -- override the lower bound.
 
 --- makes the vector min be at 0 if it isnt yet.
 shiftToZero :: Vexp -> Vexp
@@ -1148,7 +1152,10 @@ handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJo
    M.LeftSemi -> case whichisleft of -- semantics: left side
      FactDim -> cleaned_factcols
      DimFact -> let scattermask = gathermask{comment="dim semijoin fact scattermask"}
-                    qualified = (ones_ scattermask) `scatteredToWithHint` scattermask
+                    scatterFun = case format config of
+                      VliteFormat -> scatteredTo
+                      VdlFormat -> scatteredToWithHint
+                    qualified = (ones_ scattermask) `scatterFun` scattermask
                     dimcolsselectmask = complete $ Fold { foldop=FSel
                                                         , fgroups=pos_ qualified
                                                         , fdata=qualified }
