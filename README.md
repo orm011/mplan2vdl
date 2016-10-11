@@ -6,10 +6,10 @@ This generated code is meant to be read by a voodoo implementation, and was used
 generate the Voodoo plans in http://www.vldb.org/pvldb/vol9/p1707-pirk.pdf for most tpc-H queries.
 
 ## Building it the first time:
-1) install the Stack package manager for your system (this is used to manage haskell dependencies)
-https://docs.haskellstack.org/en/stable/install_and_upgrade/
-2) run 'stack setup'
-3) you can now use ./build.sh 
+* install the Stack package manager for your system (this is used to manage haskell dependencies)
+by following the instructions @ https://docs.haskellstack.org/en/stable/install_and_upgrade/#installupgrade
+* run 'stack setup'
+* you can now use ./build.sh 
 
 ## Running it:
 The main executable is linked to through ./mplan2vdl. You can use --help to see the options.
