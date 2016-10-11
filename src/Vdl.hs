@@ -8,7 +8,7 @@ import Data.Foldable(foldl')
 import Config
 import Name(Name(..), get_last, concat_name)
 --import Data.Int
-import Debug.Trace
+--import Debug.Trace
 --import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join, replace)
@@ -249,22 +249,25 @@ voodooFromVxNoMemo (V.Partition {V.pdata, V.pivots}) =
      arg2 <- voodooFromVexpMemo pivots
      return $ Binary {op=Partition, arg1=completeW arg1, arg2=completeW arg2 }
 
-voodoosFromVexps :: [V.Vexp] -> [Voodoo]
-voodoosFromVexps vexps =
-  traceShow vexps $ traceShowId $
+voodoosFromVexps :: [V.Vexp] -> Config -> [Voodoo]
+voodoosFromVexps vexps config =
+  -- traceShow vexps $
   let solve (s, res) v =  let (v',s') = runState (voodooFromVexpMemo v) s
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
       rename_value vec@(_, meta@(Just (Metadata { name, origin }))) =
-        let catted = case (name,origin) of
-              (Just n, Just y) -> (concat_name (get_last n) y)
-              (Just n, Nothing) -> get_last n
-              (Nothing, Just y) -> (concat_name (Name ["val"]) y)
-              (_,_) -> Name ["val"]
-            disp = show catted
-            newname = replace ("."::String) "__" disp
-            outname = Name [C.pack newname]
-        in (Project { outname, inname=Name ["val"], vec=completeW vec }, fmap (\m -> m {comment="rename for output"}) meta)
+        case format config of
+          VliteFormat -> vec
+          VdlFormat ->
+            let catted = case (name,origin) of
+                  (Just n, Just y) -> (concat_name (get_last n) y)
+                  (Just n, Nothing) -> get_last n
+                  (Nothing, Just y) -> (concat_name (Name ["val"]) y)
+                  (_,_) -> Name ["val"]
+                disp = show catted
+                newname = replace ("."::String) "__" disp
+                outname = Name [C.pack newname]
+            in (Project { outname, inname=Name ["val"], vec=completeW vec }, fmap (\m -> m {comment="rename for output"}) meta)
       rename_value vec@(_, _) = vec -- in case not found
   in map (\r@(_,m) -> ((MaterializeCompact .  completeW . rename_value) r, m)) ans
 
@@ -445,6 +448,7 @@ instance Show Vdl where
 
 vdlFromVexps :: [V.Vexp] -> Reader Config Vdl
 vdlFromVexps vexps =
-  let voodoos = voodoosFromVexps vexps
-      log  = vrefsFromVoodoos voodoos
-  in Vdl <$> dumpVref log
+  do conf <- ask
+     let voodoos = voodoosFromVexps vexps conf
+     let log  = vrefsFromVoodoos voodoos
+     Vdl <$> dumpVref log
