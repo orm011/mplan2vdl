@@ -8,7 +8,7 @@ import Data.Foldable(foldl')
 import Config
 import Name(Name(..), get_last, concat_name)
 --import Data.Int
---import Debug.Trace
+import Debug.Trace
 --import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join, replace)
@@ -251,6 +251,7 @@ voodooFromVxNoMemo (V.Partition {V.pdata, V.pivots}) =
 
 voodoosFromVexps :: [V.Vexp] -> [Voodoo]
 voodoosFromVexps vexps =
+  traceShow vexps $
   let solve (s, res) v =  let (v',s') = runState (voodooFromVexpMemo v) s
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
