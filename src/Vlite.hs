@@ -1311,7 +1311,15 @@ transform fn vexp@(Vexp {vx, name, comment, info}) mp  =
           ans = anon {name=name, comment=comment, info=info} -- try to preserve names across optimizations
           mp'' = Map.insert vexp ans mp'
       in transform fn vexp mp'' -- should return. ensuring we are actually memozing.
-    Just x -> (mp, x)
+    Just x@(Vexp {name=name'}) ->
+      let new_name = case (name, name') of
+            (Just a, _) -> Just a -- preserve it if it exists
+            (Nothing, something) -> something
+          newx = x {name=new_name}
+          mp'' = Map.insert vexp newx mp
+      in (mp'', newx)
+
+
 
 transformVx :: (Vx -> Maybe Vexp) -> Vx -> Memoized -> (Memoized, Vexp)
 transformVx fn vx mp =
