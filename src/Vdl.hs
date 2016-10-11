@@ -8,7 +8,7 @@ import Data.Foldable(foldl')
 import Config
 import Name(Name(..), get_last, concat_name)
 --import Data.Int
---import Debug.Trace
+import Debug.Trace
 --import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join, replace)
@@ -269,7 +269,7 @@ voodoosFromVexps vexps config =
                 outname = Name [C.pack newname]
             in (Project { outname, inname=Name ["val"], vec=completeW vec }, fmap (\m -> m {comment="rename for output"}) meta)
       rename_value vec@(_, _) = vec -- in case not found
-  in map (\r@(_,m) -> ((MaterializeCompact .  completeW . rename_value) r, m)) ans
+  in map (\r@(_,m) -> traceShow m $ ((MaterializeCompact .  completeW . rename_value) r, m)) ans
 
 
 vrefsFromVoodoos :: [Voodoo] -> Log
