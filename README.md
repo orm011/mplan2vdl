@@ -12,8 +12,16 @@ https://docs.haskellstack.org/en/stable/install_and_upgrade/
 2) you can now build it with ./build.sh
 
 ## Running it:
-The main executable is ./mplan2vdl. You can use --help to see the options.
-In addition to the input plan, ./mplan2vdl needs multiple metadata files obtainable via MonetDB.
+The main executable is linked to through ./mplan2vdl. You can use --help to see the options.
+
+In addition to the input plan ./mplan2vdl needs multiple (4) metadata files obtainable via MonetDB.
+These are:
+* A schema of the tables (obtained msqldump -D) used to get the data types, column names, primary and foreign key relations.
+* Storage information (obtained though "select * from storage;") to obtain internal column names and storage types (type widths)
+* Bound information (obtained through the Resolver code with the --bounds flag) to get data bounds and counts for each column in the database.
+* Dictionary (obtained through the Resolver code) to translate string literals in the query into their internal representation.
+
+
 There are several wrapper scripts to help use the translator that pass the necessary paths for 
-a sample tpch01 database.
+a sample tpch01 database. (TODO add these to the repo)
 
