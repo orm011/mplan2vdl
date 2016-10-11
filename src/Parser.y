@@ -187,7 +187,7 @@ BasicExprBare
   { Call { fname = $1, args = $3 } }
 | QualifiedName notnil '(' ExprList ')' AttrList
   { Call { fname = $1, args = $4 } }
-| TypeSpec '[' Expr ']' { traceShowId $ Cast { tspec=$1, value=$3 } }
+| TypeSpec '[' Expr ']' { Cast { tspec=$1, value=$3 } }
 | TypeSpec literal  { Literal {tspec=$1
                              ,stringRep = B.reverse $ B.tail $ B.reverse $ B.tail $2
                              }

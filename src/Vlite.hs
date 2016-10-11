@@ -31,7 +31,7 @@ import Data.Either
 --import qualified Error as E
 --import Error(check)
 import Data.Bits
-import Debug.Trace
+--import Debug.Trace
 import Text.Groom
 import qualified Data.HashMap.Strict as Map
 --import qualified Data.Map.Strict as Map
@@ -637,7 +637,7 @@ solve' config M.Join { M.leftch
                      } =
   let sleft@(Env colsleft _) = solve config leftch
       sright@(Env colsright _) = solve config rightch
-  in case traceShowId (separateFKJoinable config (N.toList conds) sleft sright) of
+  in case separateFKJoinable config (N.toList conds) sleft sright of
        ([jspec@FKJoinSpec{joinorder}],[]) -> case joinorder of
          FactDim -> handleGatherJoin config sleft sright joinvariant jspec
          DimFact -> handleGatherJoin config sright sleft joinvariant jspec
@@ -1106,7 +1106,7 @@ composeKeys l r =
       oldbits = getBitWidth sleft
       deltabits = getBitWidth sright
       newbits = oldbits + deltabits
-  in traceShow (sleft, sright, oldbits, deltabits) $ assert (newbits < 65) $
+  in assert (newbits < 65) $
      (sleft <<. (const_  deltabits sleft)) |. sright
 
 -- Assumes the fgroups are alrady sorted
@@ -1138,7 +1138,7 @@ data JoinIdx = JoinIdx {selectmask::Vexp, gathermask::Vexp} deriving (Eq,Show)
 
 handleGatherJoin :: Config -> Env -> Env -> M.JoinVariant -> JoinSpec -> [Vexp]
 handleGatherJoin config (Env factcols _) (Env dimcols _) joinvariant jspec@(FKJoinSpec{joinorder=whichisleft}) =
- let JoinIdx {selectmask=selectboolean, gathermask} = traceShowId $ deduceMasks config jspec
+ let JoinIdx {selectmask=selectboolean, gathermask} = deduceMasks config jspec
      selectmask = (complete $ Fold { foldop=FSel
                                   , fgroups=pos_ selectboolean
                                   , fdata= selectboolean

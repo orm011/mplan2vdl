@@ -361,7 +361,7 @@ sc config P.Call { P.fname = Name [op]
                               in addDays days date
            _ -> error "unknown interval type"
          stringRep = C.pack $ show outdate
-         newexpr = traceShowId $ P.Literal {P.tspec=TypeSpec {tname="date", tparams=[]}, P.stringRep}
+         newexpr = P.Literal {P.tspec=TypeSpec {tname="date", tparams=[]}, P.stringRep}
      in sc config newexpr
 
 -- TODO: doublecheck this is correct
