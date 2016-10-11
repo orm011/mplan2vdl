@@ -251,7 +251,7 @@ voodooFromVxNoMemo (V.Partition {V.pdata, V.pivots}) =
 
 voodoosFromVexps :: [V.Vexp] -> [Voodoo]
 voodoosFromVexps vexps =
-  traceShow vexps $
+  traceShow vexps $ traceShowId $
   let solve (s, res) v =  let (v',s') = runState (voodooFromVexpMemo v) s
                           in  (s', v':res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
