@@ -8,7 +8,7 @@ generate the Voodoo plans in http://www.vldb.org/pvldb/vol9/p1707-pirk.pdf for m
 ## Building it:
 1) install the Stack package manager for your system (this is used to manage haskell dependencies)
 https://docs.haskellstack.org/en/stable/install_and_upgrade/
-
+1.1) run 'stack setup'
 2) you can now build it with ./build.sh
 
 ## Running it:
