@@ -2,7 +2,7 @@
 Mplan2vdl translates  monetdb logical plans (mplans) to voodoo vector expressions (aka vdl).
 The logical plans are what you get from prepending the word 'plan' to a sql query in MonetDb.
 
-This generated code is meant to be read by a voodooo compiler, and was used to 
+This generated code is meant to be read by a voodoo implementation, and was used to 
 generate the Voodoo plans in http://www.vldb.org/pvldb/vol9/p1707-pirk.pdf for most tpc-H queries.
 
 ## Building it:
