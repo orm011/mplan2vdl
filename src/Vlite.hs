@@ -1296,10 +1296,11 @@ redundantRangePass :: [Vexp] -> [Vexp]
 redundantRangePass = xform redundantRangePattern
 
 xform :: (Vx -> Maybe Vexp) -> [Vexp] -> [Vexp]
-xform fn vexps = let merge (accm,accl) vexp  = let (newm,newv) = transform fn vexp accm
-                                               in (newm, newv:accl)
-                     (_,outr) = foldl' merge (Map.empty, []) vexps
-                 in reverse outr
+xform fn vexps = -- preserve top level names
+  let merge (accm,accl) vexp@Vexp {name}  = let (newm,newv) = transform fn vexp accm
+                                            in (newm, newv{name=name}:accl)
+      (_,outr) = foldl' merge (Map.empty, []) vexps
+  in reverse outr
 
 transform :: (Vx -> Maybe Vexp) -> Vexp -> Memoized -> (Memoized, Vexp)
 transform fn vexp@(Vexp {vx, name, comment, info}) mp  =
