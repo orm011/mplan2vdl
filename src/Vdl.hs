@@ -252,8 +252,9 @@ voodooFromVxNoMemo (V.Partition {V.pdata, V.pivots}) =
 voodoosFromVexps :: [V.Vexp] -> Config -> [Voodoo]
 voodoosFromVexps vexps config =
   -- traceShow vexps $
-  let solve (s, res) v =  let (v',s') = runState (voodooFromVexpMemo v) s
-                          in  (s', v':res)
+  let solve (s, res) v =  let meta = Just $ getMetadata v -- preserve output metadata
+                              ((v',_),s') = runState (voodooFromVexpMemo v) s
+                          in  (s', (v',meta):res)
       (_, ans)  = foldl' solve (HMap.empty,[]) vexps
       rename_value vec@(_, meta@(Just (Metadata { name, origin }))) =
         case format config of
