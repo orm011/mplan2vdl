@@ -265,7 +265,7 @@ voodoosFromVexps vexps =
             outname = Name [C.pack newname]
         in (Project { outname, inname=Name ["val"], vec=completeW vec }, fmap (\m -> m {comment="rename for output"}) meta)
       rename_value vec@(_, _) = vec -- in case not found
-  in map (\r -> ((MaterializeCompact .  completeW . rename_value) r, Nothing)) ans
+  in map (\r@(_,m) -> ((MaterializeCompact .  completeW . rename_value) r, m)) ans
 
 
 vrefsFromVoodoos :: [Voodoo] -> Log
@@ -365,7 +365,7 @@ toVList (VShuffle {varg}) =
   ["Shuffle", show varg]
 
 toVList (MaterializeCompact x) =
-  ["MaterializeCompact", show x]
+  ["Output", show x]
 
 toVList _ = error "implement me"
 
@@ -417,9 +417,19 @@ printLine (Id iden, vref, info) =
      let strs = printer vref
      let dispinfo = case info of
            Nothing -> ""
-           Just x -> "  ;; " ++ show x
+           Just x -> " ;; " ++ show x
      let meta = if display then dispinfo else ""
-     return $ (join "," $ (show iden) : strs) ++ meta
+     let fstrs = case (format, vref, info) of
+           (VliteFormat, (MaterializeCompact _), (Just (Metadata { name=Just n, displaytype }))) ->
+             let typstring = case displaytype of
+                   DDecimal {point} -> "decimal_" ++ show point
+                   DString -> "string"
+                   DDate -> "date"
+                 prettyN = case n of
+                   Name alist -> last alist
+             in [C.unpack prettyN, "Output", typstring] ++ tail strs  --
+           _ -> [show iden] ++ strs
+     return $ (join "," $ fstrs) ++ meta
 
 dumpVref :: Log -> Reader Config String
 dumpVref tuples = let lns = mapM printLine tuples
