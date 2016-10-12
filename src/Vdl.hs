@@ -39,13 +39,13 @@ data Vd a =
   | Like { ldata::a, ldict::a, lpattern::C.ByteString }
   | VShuffle { varg::a }
   | MaterializeCompact { mout::a }
-  deriving (Eq,Generic)
+  deriving (Eq,Generic,Show)
 
-instance Show (Vd a) where
-  show (MaterializeCompact {}) = "MaterializeCompact {}"
-  show (Load n) = "Load " ++ show n
-  show (RangeC{rmin,rstep,rcount}) = "RangeC { " ++ show rmin ++ ", " ++ show rstep ++ ", " ++ show rcount ++ " }"
-  show _ = error "showing non materialize"
+-- instance Show (Vd a) where
+--   show (MaterializeCompact {}) = "MaterializeCompact {}"
+--   show (Load n) = "Load " ++ show n
+--   show (RangeC{rmin,rstep,rcount}) = "RangeC { " ++ show rmin ++ ", " ++ show rstep ++ ", " ++ show rcount ++ " }"
+--   show _ = error "showing non materialize"
 
 instance (NFData a) => NFData (Vd a)
 instance (Hashable a) => Hashable (Vd a)
@@ -284,7 +284,7 @@ vrefsFromVoodoos vecs =
   let action = sequence $ map (\v -> traceShow v $ memVrefFromVoodoo v) vecs
       state0 = (Id 0,HMap.empty,[])
       (_,_,log) = execState action state0
-  in reverse log
+  in traceShow log $ reverse log
 
 type Log = [(Id, Vref, Maybe Metadata)] -- a numbered list of expressions using numbers to refer to previous ones
 type SStat = (Id, HMap.HashMap Voodoo Id, Log) -- int is the 'last log number' used. or 0.
