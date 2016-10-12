@@ -8,7 +8,7 @@ import Data.Foldable(foldl')
 import Config
 import Name(Name(..), get_last, concat_name)
 --import Data.Int
-import Debug.Trace
+--import Debug.Trace
 --import Text.Groom
 import GHC.Generics
 import Data.String.Utils(join, replace)
@@ -281,10 +281,10 @@ voodoosFromVexps vexps config =
 
 vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =
-  let action = sequence $ map (\v -> traceShow v $ memVrefFromVoodoo v) vecs
+  let action = sequence $ map (\v -> memVrefFromVoodoo v) vecs
       state0 = (Id 0,HMap.empty,[])
       (_,_,log) = execState action state0
-  in traceShow log $ reverse log
+  in reverse log
 
 type Log = [(Id, Vref, Maybe Metadata)] -- a numbered list of expressions using numbers to refer to previous ones
 type SStat = (Id, HMap.HashMap Voodoo Id, Log) -- int is the 'last log number' used. or 0.
