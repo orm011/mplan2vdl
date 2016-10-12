@@ -270,12 +270,11 @@ voodoosFromVexps vexps config =
                 outname = Name [C.pack newname]
             in (Project { outname, inname=Name ["val"], vec=completeW vec }, fmap (\m -> m {comment="rename for output"}) meta)
       rename_value vec@(_, _) = vec -- in case not found
-  in map (\r@(_,m) -> traceShow m $ ((MaterializeCompact .  completeW . rename_value) r, m)) ans
-
+  in map (\r@(_,m) -> ((MaterializeCompact .  completeW . rename_value) r, m)) ans
 
 vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =
-  let action = sequence $ map memVrefFromVoodoo vecs
+  let action = sequence $ map (\v@(_,info) ->traceShow info $ memVrefFromVoodoo v) vecs
       state0 = (Id 0,HMap.empty,[])
       (_,_,log) = execState action state0
   in reverse log
