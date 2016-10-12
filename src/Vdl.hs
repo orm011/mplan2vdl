@@ -43,6 +43,8 @@ data Vd a =
 
 instance Show (Vd a) where
   show (MaterializeCompact {}) = "MaterializeCompact {}"
+  show (Load n) = "Load " ++ show n
+  show (RangeC{rmin,rstep,rcount}) = "RangeC { " ++ show rmin ++ ", " ++ show rstep ++ ", " ++ show rcount ++ " }"
   show _ = error "showing non materialize"
 
 instance (NFData a) => NFData (Vd a)
