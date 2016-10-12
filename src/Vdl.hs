@@ -39,7 +39,12 @@ data Vd a =
   | Like { ldata::a, ldict::a, lpattern::C.ByteString }
   | VShuffle { varg::a }
   | MaterializeCompact { mout::a }
-  deriving (Eq,Show,Generic)
+  deriving (Eq,Generic)
+
+instance Show (Vd a) where
+  show (MaterializeCompact {}) = "MaterializeCompact {}"
+  show _ = error "showing non materialize"
+
 instance (NFData a) => NFData (Vd a)
 instance (Hashable a) => Hashable (Vd a)
 
@@ -274,7 +279,7 @@ voodoosFromVexps vexps config =
 
 vrefsFromVoodoos :: [Voodoo] -> Log
 vrefsFromVoodoos vecs =
-  let action = sequence $ map (\v@(_,info) ->traceShow info $ memVrefFromVoodoo v) vecs
+  let action = sequence $ map (\v -> traceShow v $ memVrefFromVoodoo v) vecs
       state0 = (Id 0,HMap.empty,[])
       (_,_,log) = execState action state0
   in reverse log
