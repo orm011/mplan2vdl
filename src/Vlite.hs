@@ -690,7 +690,9 @@ getRefVector config tablename =
   let pkname = lookupPkey config tablename
       (_,pkinfo) = NameTable.lookup_err pkname (colinfo config)
       pkvx=Load pkname
-  in Vexp{vx=pkvx, info=pkinfo, lineage=None, memoized_hash=sha1vx pkvx, quant=Unique, name=Nothing, comment="ref vector"} -- this vector is used only for the ref part of other columns
+  in case format config of
+    VliteFormat -> complete $ RangeC {rmin=0, rcount=count pkinfo, rstep=1}
+    VdlFormat -> Vexp{vx=pkvx, info=pkinfo, lineage=None, memoized_hash=sha1vx pkvx, quant=Unique, name=Nothing, comment="ref vector"} -- this vector is used only for the ref part of other columns
 
 loadAs :: Config -> Name -> Name -> Maybe Name -> Vexp
 loadAs config tablename colname alias =
