@@ -136,10 +136,11 @@ checkColInfo i@(ColInfo {bounds=(l,u), count, stype, trailing_zeros}) =
 addEntry :: [Name] -> NameTable StorageInfo -> NameTable ColInfo -> BoundsRec -> NameTable ColInfo
 addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing_zeros) =
   let StorageInfo {mtype}  = snd $ NameTable.lookup_err (Name [tab,col]) storagetab
+      name = Name [tab,col]
       stype = getSTypeOfMType mtype
-      dtype = (getDTypeOfMType mtype,"from storage file")
+      dtype = (getDTypeOfMType  mtype name,"from storage file")
       colinfo = checkColInfo $ ColInfo { bounds=(colmin, colmax), count=colcount, stype, trailing_zeros, dtype }
-      plain = NameTable.insert (Name [tab,col]) colinfo nametab
+      plain = NameTable.insert name colinfo nametab
   in if elem (Name[tab,col]) constraints
      then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
      else plain

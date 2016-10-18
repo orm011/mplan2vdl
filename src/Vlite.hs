@@ -308,7 +308,7 @@ inferMetadata Fold { foldop
                 dtypeout = case dt of
                   DDecimal {point} -> DDecimal{point}
                   DDate  -> DDecimal{point=0} -- reinterpret
-                  DString -> DDecimal{point=0} -- reinterpret
+                  DString {} -> DDecimal{point=0} -- reinterpret
                   -- for positive dlower, dlower is the minimum.
                   -- for negative dlower, dlower*dcount is the minimum, and so on.
             in ColInfo { bounds=(minimum extremes, maximum extremes), count=count_bound, stype, dtype=(dtypeout,""), trailing_zeros }
@@ -889,7 +889,10 @@ sc env (M.Cast {M.mtype = MDouble, M.arg}) = sc env arg -- ignore this cast. it 
 sc env (M.Cast { M.mtype, M.arg }) =
   let vexp@Vexp{info=ColInfo{dtype=(inputtype,_)}} = sc env arg
       outputtype = getSTypeOfMType mtype
-      outdtype = getDTypeOfMType mtype
+      nm = case inputtype of
+        DString {decoder} -> decoder
+        _ -> undefined -- we cannot handle casting non-strings to strings (bc what is their dictionary?)
+      outdtype = getDTypeOfMType mtype nm
       outrep@Vexp{info} = case (inputtype,outdtype) of
         (a,b) | a == b -> vexp
         -- semantic cast of int to decimal: eg. 1 -> 1.0 which is repr as 10

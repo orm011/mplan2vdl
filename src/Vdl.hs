@@ -434,7 +434,7 @@ printLine (Id iden, vref, info) =
            (VliteFormat, (MaterializeCompact _), (Just (Metadata { name=Just n, displaytype }))) ->
              let typstring = case displaytype of
                    DDecimal {point} -> "decimal_" ++ show point
-                   DString -> "string"
+                   DString {decoder} -> "string_" ++ show decoder
                    DDate -> "date"
                  prettyN = case n of
                    Name alist -> last alist

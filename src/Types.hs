@@ -75,7 +75,7 @@ instance NFData SType
 -- how to display the results (also how to do decimal arithmetic)
 data DType = -- higher level types (eg dates etc)
   DDecimal {point::Int} -- todo. track decimal point.
-  | DString -- todo. add dictionary
+  | DString {decoder::Name}
   | DDate
   deriving (Eq,Show,Generic,Data)
 instance Hashable DType
@@ -139,8 +139,8 @@ getSTypeOfMType mtype = case mtype of
   MBigInt -> SInt64
   ow -> error $ "we don't expect reading this type from the monet columns/queries at the moment: " ++ (show ow)
 
-getDTypeOfMType :: MType -> DType
-getDTypeOfMType mtype = case mtype of
+getDTypeOfMType :: MType -> Name -> DType
+getDTypeOfMType mtype nm = case mtype of
   MInt -> DDecimal {point=0}
   MSmallint -> DDecimal {point=0}
   MTinyint -> DDecimal {point=0}
@@ -148,8 +148,8 @@ getDTypeOfMType mtype = case mtype of
   MDecimal _ scale  -> DDecimal {point=fromInteger scale}
   MOid -> DDecimal {point=0}
   MDate -> DDate
-  MChar _ -> DString
-  MVarchar _ -> DString
+  MChar _ -> DString { decoder=nm }
+  MVarchar _ -> DString { decoder=nm }
   ow -> error $ "not handling this type on its ownn" ++ (show ow)
 
 -- capitalized forms come from schema file.

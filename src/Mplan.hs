@@ -12,8 +12,8 @@ module Mplan( mplanFromParseTree
 
 import qualified Parser as P
 import Types
-import Name(Name(..),TypeSpec(..))
-
+import Name(Name(..),TypeSpec(..),lookup_err)
+import Control.Monad.Reader
 import Data.Time.Calendar
 import Control.DeepSeq(NFData)
 import Control.Exception.Base(assert)
@@ -38,11 +38,11 @@ isJoinIdx _ = []
 getJoinIdx :: [P.Attr] -> [Name]
 getJoinIdx attrs = foldl' (++) [] (map isJoinIdx attrs)
 
-resolveCharLiteral  :: Config -> B.ByteString -> Integer
-resolveCharLiteral config ch = case HashMap.lookup ch (dictionary config) of
+resolveCharLiteral  :: Name -> Config -> B.ByteString -> Integer
+resolveCharLiteral _ config ch = case HashMap.lookup ch (dictionary config) of
   Nothing -> error $  "not found in dictionary: " ++ (C.unpack ch)
   Just x -> trace (",," ++ C.unpack ch ++"," ++ show x)  $ x
-    
+
 parseDate :: C.ByteString -> Day
 parseDate datestr =
   parseTimeOrError True defaultTimeLocale "%Y-%m-%d" (C.unpack datestr)
@@ -154,15 +154,15 @@ solveGroupOutput _ P.Expr
   = (GCount, alias)
 
 solveGroupOutput config P.Expr
-  { P.expr = P.Call{  P.fname
-                    , P.args=[ P.Expr
-                               { P.expr=singlearg,
-                                 P.alias = _ -- ignoring this inner alias.
-                                 }
-                             ]
-                    }
+  { P.expr = P.Call {  P.fname
+                     , P.args=[ P.Expr
+                                { P.expr=singlearg,
+                                  P.alias = _ -- ignoring this inner alias.
+                                }
+                              ]
+                     }
   , P.alias }
-  = let inner = sc config singlearg
+  = let inner = rsc config singlearg
     in case fname of
   Name ["sum"] -> (GFold FSum inner, alias)
   Name ["avg"] -> (GAvg inner, alias)
@@ -179,6 +179,10 @@ solveGroupOutput config P.Expr
 -- monet does not seem to give an answer if the inner expression is not a column name.
 
 solveGroupOutput  _ s_ = error $ E.unexpected "group_by output expression" s_
+
+rsc :: Config -> P.ScalarExpr -> ScalarExpr
+rsc config exp = runReader (sc exp) (Context {conf=config,dt=Nothing})
+
 
 data JoinVariant = Plain | LeftSemi | LeftOuter | LeftAnti deriving (Show,Eq, Generic,Data)
 instance NFData JoinVariant
@@ -215,7 +219,7 @@ instance NFData RelExpr
 columns -}
 solveOutputs :: Config -> [P.Expr] -> [(ScalarExpr, Maybe Name)]
 solveOutputs config explist =
-  let f P.Expr { P.expr, P.alias } = (sc config expr, alias)
+  let f P.Expr { P.expr, P.alias } = (rsc config expr, alias)
   in map f explist
 
 solve :: Config -> P.Rel -> RelExpr
@@ -309,7 +313,7 @@ solve config P.Node { P.relop
              "antijoin" -> LeftAnti
              "left outer join" -> LeftOuter
              _ -> error $ "no other joins expected: "  ++ C.unpack relop
-      prelim_conds = map ( (sc config) . P.expr) conditions
+      prelim_conds = map ( (rsc config) . P.expr) conditions
       conds = case prelim_conds of
              [] -> error " empty join condition list is invalid "
              first : rest -> first :| rest
@@ -334,19 +338,20 @@ solve config  P.Node { P.relop = "top N"
 solve _ P.Node { P.relop } = error $ E.unexpected "relational operator not implemented" relop
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
-sc :: Config -> P.ScalarExpr -> ScalarExpr
-sc _ P.Ref { P.rname  } = Ref rname
+data Context = Context {conf::Config, dt::Maybe DType}
 
+sc :: P.ScalarExpr -> Reader Context ScalarExpr
+sc P.Ref { P.rname  } = return $ Ref rname
 
 -- reweites things like
 -- sys.sql_add(date "1996-01-01", month_interval "3")
 -- sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000") that show up in tpch mplans.
 -- into a date literal that then gets handled like other plain date literals
-sc config P.Call { P.fname = Name [op]
-                 , P.args = [ P.Expr { P.expr=P.Literal {P.tspec=TypeSpec {tname="date"}, P.stringRep=datestr} },
-                              P.Expr { P.expr=P.Literal {P.tspec=TypeSpec {tname}, P.stringRep=intervalstr} }
-                            ]
-                 }
+sc P.Call { P.fname = Name [op]
+          , P.args = [ P.Expr { P.expr=P.Literal {P.tspec=TypeSpec {tname="date"}, P.stringRep=datestr} },
+                       P.Expr { P.expr=P.Literal {P.tspec=TypeSpec {tname}, P.stringRep=intervalstr} }
+                     ]
+          }
   | (tname `elem` ["month_interval","sec_interval"]) && (op `elem` ["sql_add", "sql_sub"]) =
      let date = parseDate datestr
          rawnum = readIntLiteral intervalstr
@@ -362,19 +367,18 @@ sc config P.Call { P.fname = Name [op]
            _ -> error "unknown interval type"
          stringRep = C.pack $ show outdate
          newexpr = P.Literal {P.tspec=TypeSpec {tname="date", tparams=[]}, P.stringRep}
-     in sc config newexpr
+     in sc newexpr
 
 -- TODO: doublecheck this is correct
 -- (see query 17 and query 20 for an example plan using it)
-sc config P.Call { P.fname=Name ["identity"]
-                 , P.args = [ P.Expr { P.expr } ]
-                 } = -- rewrite into just inner expression
-  let e = sc config expr
-  in Identity { e }
-
+sc P.Call { P.fname=Name ["identity"]
+          , P.args = [ P.Expr { P.expr } ]
+          } = -- rewrite into just inner expression
+  do e <- sc expr
+     return $ Identity { e }
 
 -- one of two versions of like in the plans:
-sc config P.Call { P.fname=Name ["like"]
+sc P.Call { P.fname=Name ["like"]
           , P.args = [ P.Expr { P.expr=likearg }
                      , P.Expr {
                          P.expr=P.Cast {
@@ -391,53 +395,56 @@ sc config P.Call { P.fname=Name ["like"]
                          }
                      ]
           } =
-  let ldata = sc config likearg
-  in Like { ldata, lpattern=likepattern }
+  do ldata <- sc likearg
+     return $ Like { ldata, lpattern=likepattern }
 
-sc _ P.Call { P.fname=Name ["like"] } = error "implement this 'like' case"
+sc P.Call { P.fname=Name ["like"] } = error "implement this 'like' case"
+
 
 {- for now, we are ignoring the aliases within calls -}
-sc config P.Call { P.fname, P.args = [ P.Expr { P.expr = singlearg, P.alias = _ } ] } =
-  let sub = sc config singlearg
-      unop = resolveUnopOpcode fname
-  in Unary { unop, arg=sub }
+sc P.Call { P.fname, P.args = [ P.Expr { P.expr = singlearg, P.alias = _ } ] } =
+  do sub <- sc singlearg
+     let unop = resolveUnopOpcode fname
+     return $ Unary { unop, arg=sub }
 
-sc config P.Call { P.fname
+
+sc P.Call { P.fname
           , P.args = [ P.Expr { P.expr = firstarg, P.alias = _ }
                      , P.Expr { P.expr = secondarg, P.alias = _ }
                      ]
           } =
-  let left = sc config firstarg
-      right = sc config secondarg
-      binop = resolveBinopOpcode fname
-  in Binop { binop, left, right }
+  do config <- asks conf
+     left <- sc firstarg
+     let newdt = case left of
+           Ref n -> Just $ fst $ dtype $ snd $ Name.lookup_err n (colinfo config)
+           _ -> Nothing
+     right <- local (\ctx -> ctx {dt=newdt}) (sc secondarg) -- sys.= is a function .
+     let binop = resolveBinopOpcode fname
+     return $ Binop { binop, left, right }
 
-
-sc config P.Call { P.fname=Name ["ifthenelse"]
+sc P.Call { P.fname=Name ["ifthenelse"]
           , P.args = [ P.Expr { P.expr = mif, P.alias = _ }
                      , P.Expr { P.expr = mthen, P.alias = _ }
                      , P.Expr { P.expr = melse, P.alias = _ }
                      ]
           } =
-  let if_ = sc config mif
-      then_ = sc config mthen
-      else_ = sc config melse
-  in IfThenElse { if_, then_, else_ }
+  do if_ <- sc mif
+     then_ <- sc mthen
+     else_ <- sc melse
+     return $ IfThenElse { if_, then_, else_ }
 
-sc config P.Cast { P.tspec
+sc P.Cast { P.tspec
           , P.value = P.Expr { P.expr = parg, P.alias = _  }
           } =
-  let mtype = resolveTypeSpec tspec
-      arg = sc config parg
-  in Cast { mtype, arg }
+  do let mtype = resolveTypeSpec tspec
+     arg <- sc parg
+     return $ Cast { mtype, arg }
 
-sc config arg@P.Literal { P.tspec, P.stringRep } =
-  let mtype = resolveTypeSpec tspec
-      (stype,repr) = case mtype of
-           -- eg q1:
-           -- lineitem.l_shipdate NOT NULL <= sys.sql_sub(date "1998-12-01", sec_interval(4) "7776000000").
-           -- if shipdate is stored as an integer representing days.
-           -- then, if
+sc arg@P.Literal { P.tspec, P.stringRep } =
+  do context_type <- asks dt
+     cfg <- asks conf
+     let mtype = resolveTypeSpec tspec
+     let (dtype,repr) = case mtype of
            MDate -> (DDate, resolveDateString stringRep)
            MDecimal _ b -> (DDecimal{point=fromInteger b}, readIntLiteral stringRep)
            -- sql 0.06 shows up
@@ -452,70 +459,81 @@ sc config arg@P.Literal { P.tspec, P.stringRep } =
            MBigInt -> (DDecimal{point=0}, readIntLiteral stringRep)
            -- the problem here is that we don't really know the bitwidth...
            -- so assume the worst (likely it won't match columns it is used against)
-           MChar _ -> (DString, resolveCharLiteral config stringRep) -- assume 8 bytes is enough...
-           _ -> error $ "need to support literal of this type: " ++ show arg
-  in Literal stype repr
+           MChar _ -> case context_type of
+             Just (t@DString { decoder }) -> (t, resolveCharLiteral decoder cfg stringRep)
+             _ -> error $ "need more information to assign type to char literal: " ++ show context_type ++ show arg
+           _ -> error $ "unexpected literal: " ++ show arg
+     return $ Literal dtype repr
 
-sc config P.Infix {P.infixop
+sc P.Infix {P.infixop
            ,P.left
            ,P.right} =
-  let l = sc config (P.expr left)
-      r = sc config (P.expr right)
-      binop = resolveInfix infixop
-  in Binop { binop, left=l, right=r }
+  do config <- asks conf
+     l <- sc (P.expr left)
+     let newdt = case l of
+           Ref n -> Just $ fst $ dtype $ snd $ Name.lookup_err n (colinfo config)
+           _ -> Nothing
+     r <- local (\ctx -> ctx {dt=newdt}) $ sc (P.expr right)
+     let binop = resolveInfix infixop
+     return $ Binop { binop, left=l, right=r }
 
-sc config P.Interval {P.ifirst=P.Expr {P.expr=first }
+sc P.Interval {P.ifirst=P.Expr {P.expr=first }
               ,P.firstop
               ,P.imiddle=P.Expr {P.expr=middle }
               ,P.secondop
               ,P.ilast=P.Expr {P.expr=lastel }
               } =
-  let sfirst = sc config first
-      smiddle = sc config middle
-      slast = sc config lastel
-      fop = resolveInfix firstop
-      sop = resolveInfix secondop
-      left = Binop { binop=fop, left=sfirst, right=smiddle }
-      right = Binop { binop=sop, left=smiddle, right=slast }
-  in Binop { binop=LogAnd, left, right}
+  do sfirst <- sc first
+     smiddle <- sc middle
+     slast <- sc lastel
+     let fop = resolveInfix firstop
+     let sop = resolveInfix secondop
+     let left = Binop { binop=fop, left=sfirst, right=smiddle }
+     let right = Binop { binop=sop, left=smiddle, right=slast }
+     return $ Binop { binop=LogAnd, left, right}
 
 
-sc config P.In { P.arg = P.Expr { P.expr, P.alias = _}
-        , P.negated = False
-        , P.set } =
-  let sleft = sc config expr
-      sset = map ((sc config) . P.expr) set
-  in In { left=sleft, set=sset }
+sc s@(P.In { P.arg = P.Expr { P.expr = e@P.Ref {P.rname}, P.alias = _}
+           , P.negated = False
+           , P.set }) =
+  do (left_dtype,_)  <- traceShow s $ asks $ dtype . snd . (Name.lookup_err rname) . colinfo . conf
+     sleft <-  traceShow left_dtype $ sc e
+     sset <- sequence $ map ((local (\ctx -> ctx {dt=Just left_dtype})) . sc . P.expr) set
+     return $ In { left=sleft, set=sset }
 
-sc config (P.Nested exprs) = conjunction config exprs
+sc s@(P.In {}) = error $ "implement this case of IN operator" ++ show s
 
-sc config P.Filter { P.oper="like"
-                   , P.arg=P.Expr {P.expr=arg}
-                   , P.negated -- aka ! or nothing
-                   , P.pattern=P.Expr { P.expr=P.Cast {
-                                          P.tspec = TypeSpec {tname="char", tparams=[]}
-                                          , P.value= P.Expr { P.expr=P.Literal {
-                                                                P.tspec=TypeSpec {tname="char", tparams=[_]}
-                                                                , P.stringRep=lpattern
-                                                                }
-                                                            } -- aka char [char($_) "$1"]
-                                          }
-                                      , P.alias=Nothing }
-                   , P.escape=P.Literal { P.tspec=TypeSpec { tname="char", tparams=[] }
-                                        , P.stringRep = "" } --aka char ""
-                   }  =
-  let sarg = sc config arg
-      like = Like { ldata=sarg, lpattern }
-  in if negated then Unary { unop=Neg, arg=like } else like
+sc (P.Nested exprs) =
+  do cf <- asks conf
+     return $ conjunction cf exprs
 
-sc _ P.Filter { P.oper } = error $ E.unexpected "operator" oper
+sc P.Filter { P.oper="like"
+            , P.arg=P.Expr {P.expr=arg}
+            , P.negated -- aka ! or nothing
+            , P.pattern=P.Expr { P.expr=P.Cast {
+                                   P.tspec = TypeSpec {tname="char", tparams=[]}
+                                   , P.value= P.Expr { P.expr=P.Literal {
+                                                         P.tspec=TypeSpec {tname="char", tparams=[_]}
+                                                         , P.stringRep=lpattern
+                                                         }
+                                                     } -- aka char [char($_) "$1"]
+                                   }
+                               , P.alias=Nothing }
+            , P.escape=P.Literal { P.tspec=TypeSpec { tname="char", tparams=[] }
+                                 , P.stringRep = "" } --aka char ""
+            }  =
+  do sarg <- sc arg
+     let like = Like { ldata=sarg, lpattern }
+     return $ if negated then Unary { unop=Neg, arg=like } else like
 
-sc _ s_ = error $ E.unexpected "scalar operator" s_
+sc P.Filter { P.oper } = error $ E.unexpected "operator" oper
+
+sc s_ = error $ E.unexpected "scalar operator" s_
 
 {- converts a list into ANDs -}
 conjunction :: Config -> [P.Expr] -> ScalarExpr
 conjunction config exprs =
-  let solved = map ((sc config ). P.expr) exprs
+  let solved = map ((rsc config ). P.expr) exprs
       makeAnd a b = Binop { binop=LogAnd, left=a, right=b }
   in case solved of
         [] -> error $ E.unexpected  "empty conjunction list" exprs
