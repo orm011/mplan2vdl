@@ -39,6 +39,7 @@ data Vd a =
   | Like { ldata::a, ldict::a, lpattern::C.ByteString }
   | VShuffle { varg::a }
   | MaterializeCompact { mout::a }
+  | Semisort { sdata::a }
   deriving (Eq,Generic,Show)
 
 -- instance Show (Vd a) where
@@ -194,6 +195,10 @@ voodooFromVxNoMemo (V.RangeV {V.rmin, V.rstep, V.rref}) =
 voodooFromVxNoMemo (V.RangeC {V.rmin, V.rstep, V.rcount}) =
   return RangeC {rmin, rstep, rcount }
 
+voodooFromVxNoMemo (V.Semisort {V.sdata} ) =
+  do sdata' <- voodooFromVexpMemo sdata
+     return Semisort {sdata=completeW sdata'}
+
 voodooFromVxNoMemo (V.Binop { V.binop, V.left, V.right}) =
   do l <- voodooFromVexpMemo left
      r <- voodooFromVexpMemo right
@@ -311,6 +316,10 @@ vrefFromVoodoo :: VoodooMinus -> State SStat Vref
 
 vrefFromVoodoo (Load n) = return (Load n)
 
+vrefFromVoodoo (Semisort {sdata=W (sdata,_)}) =
+  do sdata <- memVrefFromVoodoo sdata
+     return $ Semisort {sdata}
+
 vrefFromVoodoo (RangeC {rmin,rstep,rcount}) = return $ RangeC {rmin,rstep,rcount}
 
 vrefFromVoodoo (RangeV  {rmin,rstep,rvec=W (rvec,_)}) =
@@ -353,6 +362,7 @@ toVList (Load n) = ["Load", show n]
 toVList (Project {vec}) = ["Project",show vec]
 toVList (RangeV { rmin, rstep, rvec }) = ["RangeV", show rmin, show rvec, show rstep]
 toVList (RangeC { rmin, rstep, rcount }) = ["RangeC", show rmin, show rcount, show rstep]
+toVList (Semisort { sdata }) = ["Semisort", show sdata]
 toVList (Binary { op, arg1, arg2 }) =
   case op of
     Gather -> [sop, id1, id2]
@@ -390,6 +400,9 @@ toVoodooList (Load (Name lst)) = ["Load", show cleanname]
 
 toVoodooList (Project {outname, inname, vec}) =
   ["Project",show outname, show vec, show inname ]
+
+toVoodooList (Semisort {sdata}) =
+  ["Semisort",show sdata]
 
 toVoodooList (RangeV { rmin, rstep, rvec }) =
   {- for printing: hardcoded length 2 billion right now,

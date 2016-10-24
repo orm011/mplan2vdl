@@ -82,6 +82,9 @@ values `scatteredToWithHint` positions =
 scatteredTo :: Vexp -> Vexp -> Vexp
 values `scatteredTo` positions = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions }
 
+(@@) :: Vexp -> Vexp -> Vexp
+values @@ positions  = complete $ Shuffle { shop=Gather, shsource=values, shpos=positions }
+
 data Vx =
   Load Name
   | RangeV { rmin :: Integer, rstep :: Integer, rref::Vexp }
@@ -89,6 +92,8 @@ data Vx =
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
   | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
+  | Semisort { sdata :: Vexp }
+    -- returns a permutation such that when the input is gathered with it, the output has all instances of an equal value be contiguous
   | Partition { pivots:: Vexp, pdata::Vexp }
   | Like { ldata::Vexp, lpattern::C.ByteString, lcol::Name }
   | VShuffle { varg :: Vexp }
@@ -105,6 +110,7 @@ instance Show Vx where
   show Partition {} = "Partition {pivots=..., pdata=...}"
   show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
   show VShuffle {} = "VShuffle{...}"
+  show Semisort {} = "Semisort{...}"
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
@@ -283,6 +289,9 @@ inferMetadata Shuffle { shop=Scatter
                       , shpos=Vexp {info=ColInfo {bounds=(_,posmax)}}
                       }
   = ColInfo { bounds=sourcebounds, count=posmax, stype, dtype, trailing_zeros }
+
+inferMetadata Semisort { sdata = Vexp {info} } -- keeps all current metadata the same.
+  = info
 
 inferMetadata Shuffle { shop=Gather
                       , shsource=Vexp {info=ColInfo {bounds=sourcebounds, stype, dtype, trailing_zeros}}
@@ -996,17 +1005,22 @@ solveAgg config env after gkeyvec (M.GCount) =
   in solveAgg config env after gkeyvec rewrite
 
 solveAgg config env (Env _ aftermap) gkeyvec g@(M.GFold op expr) =
-  let defaultSolution =
-        let (scattermask, sparsity) = getScatterMask config gkeyvec
-            sortedGroups = gkeyvec `scatteredTo` scattermask
-            gdata = sc env expr
-            sortedData = gdata `scatteredTo` scattermask
-            foldop = case op of
-              M.FSum -> FSum
-              M.FMax -> FMax
-              M.FMin -> FMin
-              M.FChoose -> FChoose
-        in make2LevelFold sparsity config foldop sortedGroups sortedData
+  let foldop = case op of
+        M.FSum -> FSum
+        M.FMax -> FMax
+        M.FMin -> FMin
+        M.FChoose -> FChoose
+      gdata = sc env expr
+      defaultSolution = case format config of
+        VdlFormat ->
+          let (scattermask, sparsity) = getScatterMask config gkeyvec
+              sortedGroups = gkeyvec `scatteredTo` scattermask
+              sortedData = gdata `scatteredTo` scattermask
+          in make2LevelFold sparsity config foldop sortedGroups sortedData
+        VliteFormat -> let gmask = complete $ Semisort { sdata=gkeyvec }
+                           fdata = gdata @@ gmask
+                           fgroups = gkeyvec @@ gmask
+                       in complete $ Fold {foldop, fdata, fgroups}
   in case g of
     (M.GFold M.FChoose (M.Ref nm)) ->
       case NameTable.lookup nm aftermap of
@@ -1332,6 +1346,9 @@ transformVx fn vx mp =
   let (outmp, prelim) = case vx of
         Load _ -> (mp, vx)
         RangeC {} -> (mp, vx)
+        Semisort {sdata} ->
+          let (mp', sdata') = transform fn sdata mp
+          in (mp', Semisort {sdata=sdata'})
         RangeV a b rref ->
           let (mp',rref') = transform fn rref mp
           in (mp', RangeV a b rref')
