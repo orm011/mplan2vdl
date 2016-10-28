@@ -77,23 +77,27 @@ sha1vx vx = sha1hack vx
 scatteredToWithHint :: Vexp -> Vexp -> Vexp
 values `scatteredToWithHint` positions =
   let shpos = addScatterSizeHint positions
-  in complete $ Shuffle { shop=Scatter, shsource=values, shpos }
+  in complete $ Shuffle { shop=Scatter, shsource=values, shpos, shshape=Nothing }
 
 scatteredTo :: Vexp -> Vexp -> Vexp
-values `scatteredTo` positions = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions }
+values `scatteredTo` positions = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions, shshape=Nothing }
 
 (@@) :: Vexp -> Vexp -> Vexp
-values @@ positions  = complete $ Shuffle { shop=Gather, shsource=values, shpos=positions }
+values @@ positions  = complete $ Shuffle { shop=Gather, shsource=values, shpos=positions, shshape=Nothing }
+
+tfScatterTo :: Vexp -> (Vexp,Vexp) -> Vexp
+values `tfScatterTo` (positions,shape) = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions, shshape=Just shape }
 
 data Vx =
   Load Name
   | RangeV { rmin :: Integer, rstep :: Integer, rref::Vexp }
   | RangeC { rmin :: Integer, rstep :: Integer, rcount::Integer}
   | Binop { binop :: BinaryOp, left :: Vexp, right :: Vexp }
-  | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp }
+  | Shuffle { shop :: ShOp, shsource :: Vexp, shpos :: Vexp, shshape :: Maybe Vexp } -- shape used for TF
   | Fold { foldop :: FoldOp, fgroups :: Vexp, fdata :: Vexp }
   | Semisort { sdata :: Vexp }
-    -- returns a permutation such that when the input is gathered with it, the output has all instances of an equal value be contiguous
+    -- returns a permutation such that when the input is gathered with it,
+    -- the output has all instances of an equal value be contiguous
   | Partition { pivots:: Vexp, pdata::Vexp }
   | Like { ldata::Vexp, lpattern::C.ByteString, lcol::Name }
   | VShuffle { varg :: Vexp }
@@ -443,11 +447,14 @@ inferLineage :: Vx -> Lineage
 -- gather and scatter preserve lineage.
 inferLineage Shuffle { shop
                      , shsource=Vexp {lineage=Pure{col, mask=lineagev}}
-                     , shpos } =
+                     , shpos
+                     , shshape
+                     } =
   Pure  { col
         , mask=complete $ Shuffle { shop
                                   , shsource=lineagev
                                   , shpos
+                                  , shshape
                                   }
         }
 
@@ -657,7 +664,7 @@ solve' config M.Join { M.leftch
          | keycol_left <- sc sleft leftexpr
          , keycol_right <- sc sright rightexpr
          , (1, [_]) <- (count $ info keycol_left, colsleft)
-           -> let broadcastcol_left = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_right, shsource=keycol_left } -- left is val
+           -> let broadcastcol_left = keycol_left @@ (zeros_ keycol_right)
                   boolean = complete $ Binop {binop, left=broadcastcol_left, right=keycol_right}
                   gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
               in gatherAll colsright gathermask
@@ -667,7 +674,7 @@ solve' config M.Join { M.leftch
          | keycol_left <- sc sleft leftexpr
          , keycol_right <- sc sright rightexpr
          , (1,[_]) <- (count $ info keycol_right, colsright)
-           ->  let broadcastcol_right = complete $ Shuffle {shop=Gather, shpos=zeros_ keycol_left, shsource=keycol_right } -- right is val
+           ->  let broadcastcol_right = keycol_right @@ zeros_ keycol_left 
                    boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
                    gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
                in addComment "join output" $ gatherAll colsleft gathermask
@@ -687,9 +694,7 @@ solve' config M.Select { M.child -- can be derived rel
       fgroups = pos_ fdata
       idx = complete $ Fold {foldop=FSel, fgroups, fdata}
   in do unfiltered@Vexp { name=preserved }  <- childcols -- list monad
-        return $ let sel = complete $ Shuffle { shop=Gather
-                                              , shsource=unfiltered
-                                              , shpos=idx }
+        return $ let sel = unfiltered @@ idx
                  in ( sel {name=preserved} )
 
 solve' _ r_  = error $ "unsupported M.rel:  " ++ groom r_
@@ -735,11 +740,14 @@ separateFKJoinable config conds (Env _ leftEnv) (Env _ rightEnv) =
         let (partials', mexp) = classifyExpr config partials joinEnv expr
         in (partials', mexp ++ non)
       (finalpartial, finalnon) = foldl' foldFun (Map.empty, []) conds
+      -- pcols in partial fk joinspec holds the full set of pairs of columns needed to complete the join
+      -- pjoinorder holds how fact and dim map to our left and right arguments (they could go either way)
       partialSpecToJoinSpec (PartialFKJoinSpec {pfactmask, pcols, pdimmask, pjoinorder}, (AccFK (kp,quant),origs)) =
         if kp == pcols
         then case isFKRef config kp of
-          Just (whichl, joinidx) ->
-            let final = FKJoinSpec {factmask=pfactmask {comment="factmask"}, dimmask=pdimmask{comment="dimmmask"}, factunique=quant, joinorder=pjoinorder, joinidx}
+          Just (FKInstance {fkjoinorder=whichl, idxname=joinidx, dim=dimname}) ->
+            let final = FKJoinSpec { factmask=pfactmask {comment="factmask"}, dimmask=pdimmask{comment="dimmmask"}, factunique=quant, joinorder=pjoinorder, joinidx,
+                                     dimref = getRefVector config dimname }
             in assert (whichl == FactDim) $ Left final
                 --because we keep fact on left, then at this point lookup should alwasy by left child. Who was the actual
                 --left child is kept in the joinorder field.
@@ -785,6 +793,7 @@ data JoinSpec
                , joinidx::Name
                , dimmask::Vexp
                , joinorder::FKJoinOrder
+               , dimref :: Vexp
                }
   | SelfJoinSpec { leftmask::Vexp
                  , rightmask::Vexp
@@ -1205,7 +1214,7 @@ handleGatherJoin _ (Env leftcols _) (Env rightcols _) joinvariant  (SelfJoinSpec
     _ -> error $ "TODO: not a plain selfjoin: " ++ show joinvariant
 
 deduceMasks :: Config -> JoinSpec -> JoinIdx
-deduceMasks config (FKJoinSpec { factmask=fprime_fact_idx, factunique=quantf, dimmask=dimprime_dim_idx, joinidx=fact_dim_idx_name }) =
+deduceMasks config (FKJoinSpec { factmask=fprime_fact_idx, factunique=quantf, dimmask=dimprime_dim_idx, joinidx=fact_dim_idx_name, dimref }) =
   let fact_dim_idx = let vx = Load fact_dim_idx_name
                      in Vexp { vx
                              , info = snd $ NameTable.lookup_err fact_dim_idx_name (colinfo config)
@@ -1220,24 +1229,20 @@ deduceMasks config (FKJoinSpec { factmask=fprime_fact_idx, factunique=quantf, di
       -- so if we have a unique subset of FK, then it maps to a unique subset of fact_dim_idx_name
       -- so we use that information here, to label fprime_dim_idx accordingly.
       -- Query 18 makes this reasoning necessary.
-      prelim_fprime_dim_idx = complete $ Shuffle { shop=Gather
-                                                 , shpos=fprime_fact_idx
-                                                 , shsource=fact_dim_idx }
+      prelim_fprime_dim_idx = fact_dim_idx @@ fprime_fact_idx
       fprime_dim_idx = prelim_fprime_dim_idx {quant=quantf}
   in case dimprime_dim_idx of
     Vexp { quant=Unique } -> -- scattering back only works for columns with unique entries
       let ones = ones_ dimprime_dim_idx
           pos = pos_ dimprime_dim_idx
-          dim_dimprime_valid = ones `scatteredTo` dimprime_dim_idx
-          dim_dimprime_idx = pos `scatteredTo` dimprime_dim_idx
-          fprime_dimprime_valid = complete $ Shuffle  { shop=Gather
-                                                      , shsource=dim_dimprime_valid
-                                                      , shpos=fprime_dim_idx
-                                                      }
-          fprime_dimprime_pos = complete $ Shuffle { shop=Gather
-                                                   , shsource=dim_dimprime_idx
-                                                   , shpos=fprime_dim_idx
-                                                   }
+          dim_dimprime_valid = case format config of
+            VdlFormat -> ones `scatteredTo` dimprime_dim_idx
+            VliteFormat -> ones `tfScatterTo` (dimprime_dim_idx, dimref)
+          dim_dimprime_idx = case format config of
+            VdlFormat -> pos `scatteredTo` dimprime_dim_idx
+            VliteFormat -> pos `tfScatterTo` (dimprime_dim_idx, dimref)
+          fprime_dimprime_valid = dim_dimprime_valid @@ fprime_dim_idx
+          fprime_dimprime_pos = dim_dimprime_idx @@ fprime_dim_idx
       in JoinIdx{selectmask=fprime_dimprime_valid, gathermask=fprime_dimprime_pos}
 
     Vexp {quant=Any} -> error $ "the dimension column is not known to be unique\n"
@@ -1248,10 +1253,7 @@ deduceMasks _ _  = error "not an fkjoinspec"
 gatherAll :: [Vexp] -> Vexp -> [Vexp]
 gatherAll cols shpos =
   do shsource <- cols
-     return $ complete $ Shuffle { shop=Gather
-                                 , shsource
-                                 , shpos
-                                 }
+     return $ shsource @@ shpos
 
 type Memoized = Map Vexp Vexp
 
@@ -1356,10 +1358,10 @@ transformVx fn vx mp =
           let (mp',left') = transform fn left mp
               (mp'', right') = transform fn right mp'
           in (mp'', Binop a left' right')
-        Shuffle a shsource  shpos ->
+        Shuffle a shsource  shpos shshape ->
           let (mp',shsource') = transform fn shsource mp
               (mp'',shpos') = transform fn shpos mp'
-          in (mp'', Shuffle a shsource' shpos')
+          in (mp'', Shuffle a shsource' shpos' shshape)
         Fold a fgroups fdata ->
           let (mp',fgroups') = transform fn fgroups mp
               (mp'',fdata') = transform fn fdata mp'

@@ -15,6 +15,7 @@ module Config ( Config(..)
               , StorageRec
               , DictRec
               , FKJoinOrder(..)
+              , FKInstance(..)
               ) where
 
 import Types
@@ -158,13 +159,14 @@ makeConfig output_format sparsity_threshold metadata gboffset aggregation_strate
       straighten qual (a,b) = case qual of
         FactDim -> (a,b)
         DimFact -> (b,a)
-      make_partials (nelist,(qual,_)) = N.toList $ N.map (\n -> (n, (qual,N.map (straighten qual) nelist))) nelist
+      make_partials (FKInstance {cols=nelist, fkjoinorder=qual}) = N.toList $ N.map (\n -> (n, (qual,N.map (straighten qual) nelist))) nelist
       partialfks = Map.fromList $ foldMap make_partials allrefs
       allpkeys = map makePKeys tables -- sort the non-empty lists
       partialpks = Map.fromList $
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
       pktable = map pkpair tables
-  in Config { format, sparsity_threshold, show_metadata, gboffset, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList allrefs, pkeys=Map.fromList allpkeys,
+      fkpairs = zip (map cols allrefs) (allrefs)
+  in Config { format, sparsity_threshold, show_metadata, gboffset, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList fkpairs, pkeys=Map.fromList allpkeys,
               tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -192,7 +194,10 @@ makePKeys Table { name, pkey=PKey { pkcols, pkconstraint } } = (N.sort (N.map (c
 data FKJoinOrder = FactDim | DimFact deriving (Show,Eq,Generic,Ord)
 instance Hashable FKJoinOrder
 
-makeFKEntries :: Table -> [(FKCols, (FKJoinOrder, Name))]
+-- holds an instance of an fk and meta information about it
+data FKInstance = FKInstance { cols::FKCols, fkjoinorder::FKJoinOrder, fact::Name, dim::Name, idxname::Name } deriving (Eq, Show)
+
+makeFKEntries :: Table -> [FKInstance]
 makeFKEntries Table { name, fkeys } =
   do FKey { references, colmap, fkconstraint } <- fkeys
      let (local,remote) = N.unzip colmap
@@ -205,10 +210,11 @@ makeFKEntries Table { name, fkeys } =
      let explicit = ( joinidx
                     , tidname ) :|[]
      let explicit_back = (tidname, joinidx) :| []
-     let fkrefs = [ (implicit, (FactDim, joinidx))
-                  , (implicit_back, (DimFact, joinidx))
-                  , (explicit, (FactDim, joinidx))
-                  , (explicit_back, (DimFact, joinidx)) ]
+     let fkrefs = [ FKInstance {cols=implicit, fkjoinorder=FactDim, fact=name, dim=references, idxname=joinidx}
+                  , FKInstance {cols=implicit_back, fkjoinorder=DimFact, fact=name, dim=references, idxname=joinidx}
+                  , FKInstance {cols=explicit, fkjoinorder=FactDim, fact=name, dim=references, idxname=joinidx}
+                  , FKInstance {cols=explicit_back, fkjoinorder=DimFact, fact=name, dim=references, idxname=joinidx}
+                  ]
      fkrefs
 
 
@@ -221,7 +227,7 @@ data Config =  Config  { sparsity_threshold :: Double
                        , format :: OutputFormat
                        , dictionary :: HashMap C.ByteString Integer
                        , colinfo :: NameTable ColInfo
-                       , fkrefs :: Map FKCols (FKJoinOrder,Name)
+                       , fkrefs :: Map FKCols FKInstance
                                    -- shows the fact -> dimension direction of the dependence
                        , pkeys :: Map (NonEmpty Name) Name -- maps set of columns to pkconstraint if there is one
                                    -- fully qualifed column mames
@@ -244,7 +250,7 @@ lookupPkey config tab =
 
 -- if this list of pairs matches a known fk constraint, then the value shows is which is the dim/fact
 -- and what the name of the constraint is
-isFKRef :: Config -> FKCols -> Maybe (FKJoinOrder, Name)
+isFKRef :: Config -> FKCols -> Maybe FKInstance
 isFKRef conf cols = let canon = N.sort cols
                     in Map.lookup canon (fkrefs conf)
 
