@@ -1,0 +1,80 @@
+cleanup needed:
+
+1) infer Metadata for loads directly....
+4) remove SType, only Dtype from now on... (check which queries don't work)
+3) identity via hashes: use id + hashes? (hashes to identify potentially
+equal values, idendity to identify actual sharing)...
+2) boilerplate passes: can we use external libraries?
+5) sanity check?
+6) is semisort needed?
+
+---
+command line args vs config. should use a single object? or at least
+use same names for options that are just being forwarded?
+
+right now process for command line args is:
+
+add declaration to type
+add cmdargs defaults/help etc.
+add argument to makeConfig
+pass argument to makeconfig
+(one more annoying thing: name used in cmdargs is slightly different from that in config
+due to record name conflict problem...)
+make config passes it to config object.
+
+----------------
+
+
+Three representations (Vlite -> Vdl on Vecs -> Vdl on refs)
+
+When adding a new operation
+
+1) Add constructor and print method... (bc default print is bad here)
+2) add inferMetadata method for constructor
+2.5) add memoized optimizer traversal method for constructor (error prone, boilerplate)
+3) add translation step for constructor Vlite -> Vdl on vecs
+4) add translation step  for Vdl vec -> Vdl ref
+5) add printer method
+
+
+then:
+find location in Mplan that will emit operation.
+
+--------
+Building up a vector in level n requires the vectors in level n-1
+as well as metadata about them
+(eg, their lengths and bounds on their values)
+we would like to make sure after we are done building up level n-1
+the next level has the metadata available.
+(ie, call the function)
+this is already enforced by the types right now, but
+I have to remember to call the function everywhere.
+
+I do want the option of modifying the value if needed.
+
+Is it possible to do this in a more implicit way?
+
+ie I write fun :: CVec -> Vec. and chain with another
+function CVec -> Vec by having the completion happen
+
+------
+
+having a recursive data type parametrized on the nested type (in order to decorate it with extra info). seems more painful in haskell than I'd like it to be...
+
+Eg. Vd W vs Vd Int...
+
+-----
+records are tied to a constructor definition and cannot be used
+separately from the constructor.
+and any function taking in the full constructor + record must
+also handle any other variants of the same data type.
+this is annoying...
+
+records create a function for each member of type :: Type -> Member type.
+This allows multiple variants of the same type that have a same
+member name share the accessor (unless the return type is different)
+
+on the other hand, variants of different types 
+-------------
+
+
