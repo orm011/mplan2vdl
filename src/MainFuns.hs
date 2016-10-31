@@ -45,6 +45,7 @@ data Mplan2Vdl =  Mplan2Vdl { mplanfile :: String
                             , grainsize :: Int
                             , sparsity :: Double
                             , output_format :: OutputFormat
+                            , use_cross_product :: Bool
                             } deriving (Show, Data, Typeable)
 
 cmdTemplate :: Mplan2Vdl
@@ -68,6 +69,7 @@ cmdTemplate = Mplan2Vdl
   , output_format = enum [VdlFormat &= help "for voodoo ./Driver vdl interpreter"
                          ,VliteFormat &= help "lighter syntax (one value per vector)"
                          ]
+  , use_cross_product = False &= typ "Bool" &= help "True means use cross product by default for joins"
   }
   &= summary "Mplan2Vdl transforms monetDB logical plans to voodoo"
   &= program "mplan2vdl"
@@ -148,7 +150,7 @@ mainf = do
                 tables <- SP.fromString monetschema
                 storagelist <- mstoragelist
                 dictlist <- mdictlist
-                let config  = makeConfig (output_format cmdargs) threshold (metadata cmdargs) (goffset cmdargs) strat boundslist storagelist tables dictlist
+                let config  = makeConfig (use_cross_product cmdargs) (output_format cmdargs) threshold (metadata cmdargs) (goffset cmdargs) strat boundslist storagelist tables dictlist
                 action monetplan config)
   case res of
     Left errorMessage -> fatal errorMessage

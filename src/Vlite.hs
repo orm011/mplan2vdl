@@ -86,6 +86,12 @@ values `scatteredTo` positions = complete $ Shuffle { shop=Scatter, shsource=val
 (@@) :: Vexp -> Vexp -> Vexp
 values @@ positions  = complete $ Shuffle { shop=Gather, shsource=values, shpos=positions, shshape=Nothing }
 
+crossp :: Vexp -> Vexp -> (Vexp, Vexp)
+left `crossp` right =
+  let outer_idx = CrossProduct { left, right, variant=COuter }
+      inner_idx = CrossProduct { left, right, variant=CInner }
+  in (complete outer_idx, complete inner_idx)
+
 tfScatterTo :: Vexp -> (Vexp,Vexp) -> Vexp
 values `tfScatterTo` (positions,shape) = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions, shshape=Just shape }
 
@@ -663,7 +669,15 @@ solve' config M.GroupBy { M.child,
     Env [] _ -> error "empty env"
 
 
-
+solve' config M.CartesianProduct { M.leftch
+                                 , M.rightch
+                                 } =
+  let Env left_vecs _ = solve config leftch
+      Env right_vecs _  = solve config rightch
+      (outer_idx, inner_idx) = (head left_vecs) `crossp` (head right_vecs)
+      left_prod = gatherAll left_vecs outer_idx
+      right_prod = gatherAll right_vecs inner_idx
+  in left_prod ++ right_prod
 
 solve' config M.Join { M.leftch
                      , M.rightch
@@ -673,37 +687,36 @@ solve' config M.Join { M.leftch
   let sleft@(Env colsleft _) = solve config leftch
       sright@(Env colsright _) = solve config rightch
   in case separateFKJoinable config (N.toList conds) sleft sright of
-       ([jspec@FKJoinSpec{joinorder}],[]) -> case joinorder of
-         FactDim -> handleGatherJoin config sleft sright joinvariant jspec
-         DimFact -> handleGatherJoin config sright sleft joinvariant jspec
-       ([jspec@SelfJoinSpec{}],[]) -> handleGatherJoin config sleft sright joinvariant jspec
-       ([], [M.Binop{ M.binop
+    ([jspec@FKJoinSpec{joinorder}],[]) -> case joinorder of
+      FactDim -> handleGatherJoin config sleft sright joinvariant jspec
+      DimFact -> handleGatherJoin config sright sleft joinvariant jspec
+    ([jspec@SelfJoinSpec{}],[]) -> handleGatherJoin config sleft sright joinvariant jspec
+    ([], [M.Binop{ M.binop
                    , M.left=leftexpr
                    , M.right=rightexpr }])
-         | keycol_left <- sc sleft leftexpr
-         , keycol_right <- sc sright rightexpr
-         , (1, [_]) <- (count $ info keycol_left, colsleft)
-           -> let broadcastcol_left = keycol_left @@ (zeros_ keycol_right)
-                  boolean = complete $ Binop {binop, left=broadcastcol_left, right=keycol_right}
+        | keycol_left <- sc sleft leftexpr
+        , keycol_right <- sc sright rightexpr
+        , (1, [_]) <- (count $ info keycol_left, colsleft)
+          -> let broadcastcol_left = keycol_left @@ (zeros_ keycol_right)
+                 boolean = complete $ Binop {binop, left=broadcastcol_left, right=keycol_right}
+                 gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
+             in gatherAll colsright gathermask
+    ([], [M.Binop{ M.binop
+                  , M.left=leftexpr
+                  , M.right=rightexpr }])
+        | keycol_left <- sc sleft leftexpr
+        , keycol_right <- sc sright rightexpr
+        , (1,[_]) <- (count $ info keycol_right, colsright)
+          ->  let broadcastcol_right = keycol_right @@ zeros_ keycol_left
+                  boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
                   gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-              in gatherAll colsright gathermask
-       ([], [M.Binop{ M.binop
-                   , M.left=leftexpr
-                   , M.right=rightexpr }])
-         | keycol_left <- sc sleft leftexpr
-         , keycol_right <- sc sright rightexpr
-         , (1,[_]) <- (count $ info keycol_right, colsright)
-           ->  let broadcastcol_right = keycol_right @@ zeros_ keycol_left 
-                   boolean = complete $ Binop {binop, left=keycol_left, right=broadcastcol_right}
-                   gathermask = complete $ Fold {foldop=FSel, fgroups=pos_ boolean, fdata=boolean}
-               in addComment "join output" $ gatherAll colsleft gathermask
-       ([_],more@[extra]) -> -- single condition on each side. could do more on the right but need to AND them.
-         if joinvariant == M.Plain
-         then solve' config M.Select { M.child=M.Join {M.leftch=leftch, M.rightch=rightch, M.conds=N.fromList (N.toList conds \\ more), M.joinvariant=joinvariant}
-                                     , M.predicate=extra }
-         else error "can only do this rewrite for plain joins" -- left outer joins would be wrong.
-       ow -> error $ "not handling this join case right now: " ++ show ow
-
+              in addComment "join output" $ gatherAll colsleft gathermask
+    ([_],more@[extra]) -> -- single condition on each side. could do more on the right but need to AND them.
+        if joinvariant == M.Plain
+        then solve' config M.Select { M.child=M.Join {M.leftch=leftch, M.rightch=rightch, M.conds=N.fromList (N.toList conds \\ more), M.joinvariant=joinvariant}
+                                    , M.predicate=extra }
+        else error "can only do this rewrite for plain joins" -- left outer joins would be wrong.
+    ow -> error $ "not handling this join case right now: " ++ show ow
 
 solve' config M.Select { M.child -- can be derived rel
                        , M.predicate

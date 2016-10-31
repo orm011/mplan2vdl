@@ -146,8 +146,8 @@ addEntry constraints storagetab nametab (tab,col,colmin,colmax,colcount,trailing
      then NameTable.insert (Name [tab, B.append "%" col]) colinfo plain -- constraints get marked with % as well
      else plain
 
-makeConfig :: OutputFormat -> Double -> Bool -> Integer -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
-makeConfig output_format sparsity_threshold metadata gboffset aggregation_strategy boundslist storagelist tables dictlist =
+makeConfig :: Bool -> OutputFormat -> Double -> Bool -> Integer -> AggStrategy -> V.Vector BoundsRec -> (V.Vector StorageRec) -> [Table] -> V.Vector DictRec -> Config
+makeConfig cross_product output_format sparsity_threshold metadata gboffset aggregation_strategy boundslist storagelist tables dictlist =
   let format = output_format
       show_metadata = metadata
       dictionary = makeDictionary dictlist
@@ -166,7 +166,7 @@ makeConfig output_format sparsity_threshold metadata gboffset aggregation_strate
            foldMap (\(pkl,_) -> map (\col -> (col,pkl)) (N.toList pkl)) allpkeys
       pktable = map pkpair tables
       fkpairs = zip (map cols allrefs) (allrefs)
-  in Config { format, sparsity_threshold, show_metadata, gboffset, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList fkpairs, pkeys=Map.fromList allpkeys,
+  in Config { cross_product, format, sparsity_threshold, show_metadata, gboffset, aggregation_strategy, dictionary, colinfo, fkrefs=Map.fromList fkpairs, pkeys=Map.fromList allpkeys,
               tablePKeys=Map.fromList pktable, partialfks, partialpks }
 
 pkpair :: Table -> (Name,Name)
@@ -220,7 +220,8 @@ makeFKEntries Table { name, fkeys } =
 
 data AggStrategy = AggHierarchical Integer | AggSerial | AggShuffle deriving (Show, Eq, Data, Typeable)
 
-data Config =  Config  { sparsity_threshold :: Double
+data Config =  Config  { cross_product :: Bool
+                       , sparsity_threshold :: Double
                        , aggregation_strategy :: AggStrategy
                        , show_metadata :: Bool
                        , gboffset :: Integer

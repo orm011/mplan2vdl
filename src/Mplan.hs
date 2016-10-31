@@ -208,6 +208,8 @@ data RelExpr =
             , conds :: NonEmpty ScalarExpr
             , joinvariant :: JoinVariant
             }
+  | CartesianProduct { leftch :: RelExpr
+                     , rightch :: RelExpr }
   | TopN      { child :: RelExpr
               , n :: Integer
               }
@@ -298,26 +300,18 @@ solve config P.Node { P.relop = "select"
   in Select { child, predicate }
 
 
-solve config P.Node { P.relop
-                    , P.children = [l, r]
-                    , P.arg_lists =
-                      conditions:[]
-                 {- remember : its a list of lists -}
-                    }
+solve config arg@P.Node { P.relop
+                        , P.children = [l, r]
+                        , P.arg_lists =
+                          conditions:[]
+                          {- remember : its a list of lists -}
+                        }
   | ("semijoin" == relop || "join" == relop || "antijoin" == relop || "left outer join" == relop) =
-  let leftch  = solve config l
-      rightch = solve config r
-      joinvariant = case relop of
-             "join" -> Plain
-             "semijoin" -> LeftSemi
-             "antijoin" -> LeftAnti
-             "left outer join" -> LeftOuter
-             _ -> error $ "no other joins expected: "  ++ C.unpack relop
-      prelim_conds = map ( (rsc config) . P.expr) conditions
-      conds = case prelim_conds of
-             [] -> error " empty join condition list is invalid "
-             first : rest -> first :| rest
-   in Join { leftch, rightch, conds, joinvariant }
+    case (cross_product config, relop) of
+      (True, "join") -> -- not currently used for semijoin, antijoin, left outer.
+        let cross = CartesianProduct {leftch=solve config l, rightch=solve config r}
+        in Select {child=cross, predicate = conjunction config conditions}
+      _ -> classify_join config arg -- revert to older code for other joins.
 
 solve config  P.Node { P.relop = "top N"
              , P.children = [ch]
@@ -336,6 +330,30 @@ solve config  P.Node { P.relop = "top N"
   in TopN { child , n }
 
 solve _ P.Node { P.relop } = error $ E.unexpected "relational operator not implemented" relop
+
+classify_join :: Config -> P.Rel -> RelExpr
+classify_join config P.Node { P.relop
+                            , P.children = [l, r]
+                            , P.arg_lists =
+                              conditions:[]
+                 {- remember : its a list of lists -}
+                    }
+  | ("semijoin" == relop || "join" == relop || "antijoin" == relop || "left outer join" == relop) =
+  let leftch  = solve config l
+      rightch = solve config r
+      joinvariant = case relop of
+             "join" -> Plain
+             "semijoin" -> LeftSemi
+             "antijoin" -> LeftAnti
+             "left outer join" -> LeftOuter
+             _ -> error $ "no other joins expected: "  ++ C.unpack relop
+      prelim_conds = map ( (rsc config) . P.expr) conditions
+      conds = case prelim_conds of
+             [] -> error " empty join condition list is invalid "
+             first : rest -> first :| rest
+   in Join { leftch, rightch, conds, joinvariant }
+
+classify_join _ _ = error "only meant for joins"
 
 {- code to transform parser scalar sublanguage into Mplan scalar -}
 data Context = Context {conf::Config, dt::Maybe DType}

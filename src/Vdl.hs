@@ -400,8 +400,11 @@ toVList (VShuffle {varg}) =
 toVList (MaterializeCompact x) =
   ["Output", show x]
 
-toVList _ = error "implement me"
-
+toVList (CrossProduct {left,right,variant}) =
+  let op = case variant of
+        V.COuter -> "CrossProductOuter"
+        V.CInner -> "CrossProductInner"
+  in [op, show left, show right]
 
 {- now a list of strings -}
 toVoodooList :: Vref -> [String]
