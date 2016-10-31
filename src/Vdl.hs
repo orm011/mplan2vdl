@@ -40,6 +40,7 @@ data Vd a =
   | VShuffle { varg::a }
   | MaterializeCompact { mout::a }
   | Semisort { sdata::a }
+  | CrossProduct {left::a, right::a, variant::V.CPVariant}
   deriving (Eq,Generic,Show)
 
 -- instance Show (Vd a) where
@@ -179,6 +180,12 @@ voodooFromVexpMemo vexp@(V.Vexp vx _ _ _ _ _ _) =
 
 voodooFromVxNoMemo :: V.Vx -> State MemoTable VoodooMinus
 
+
+voodooFromVxNoMemo (V.CrossProduct {V.left, V.right, V.variant}) =
+  do l <- voodooFromVexpMemo left
+     r <- voodooFromVexpMemo right
+     return $ CrossProduct {left=completeW l, right=completeW r, variant}
+
 voodooFromVxNoMemo (V.Load n) = return $ makeload n
 
 voodooFromVxNoMemo (V.RangeV {V.rmin, V.rstep, V.rref}) =
@@ -314,6 +321,11 @@ memVrefFromVoodoo vd@(vdminus, info) =
 
 vrefFromVoodoo :: VoodooMinus -> State SStat Vref
 
+vrefFromVoodoo (CrossProduct {left=W (l,_),right=W(r,_),variant}) =
+  do left <- memVrefFromVoodoo l
+     right <- memVrefFromVoodoo r
+     return $ CrossProduct {left, right, variant}
+
 vrefFromVoodoo (Load n) = return (Load n)
 
 vrefFromVoodoo (Semisort {sdata=W (sdata,_)}) =
@@ -393,6 +405,12 @@ toVList _ = error "implement me"
 
 {- now a list of strings -}
 toVoodooList :: Vref -> [String]
+
+toVoodooList (CrossProduct {left,right,variant}) =
+  let op = case variant of
+        V.COuter -> "CrossProductOuter"
+        V.CInner -> "CrossProductInner"
+  in [op, show left, show right]
 
 -- for printing: remove sys (really, we want the prefix only_
 toVoodooList (Load (Name lst)) = ["Load", show cleanname]

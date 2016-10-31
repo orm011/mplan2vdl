@@ -6,6 +6,7 @@ module Vlite( vexpsFromMplan
             , ShOp(..)
             , FoldOp(..)
             , Lineage(..)
+            , CPVariant(..)
             , xformIden
             , redundantRangePass
             , algebraicIdentitiesPass
@@ -88,6 +89,10 @@ values @@ positions  = complete $ Shuffle { shop=Gather, shsource=values, shpos=
 tfScatterTo :: Vexp -> (Vexp,Vexp) -> Vexp
 values `tfScatterTo` (positions,shape) = complete $ Shuffle { shop=Scatter, shsource=values, shpos=positions, shshape=Just shape }
 
+data CPVariant = COuter | CInner deriving (Show,Eq,Generic)
+instance NFData CPVariant
+instance Hashable CPVariant
+
 data Vx =
   Load Name
   | RangeV { rmin :: Integer, rstep :: Integer, rref::Vexp }
@@ -101,6 +106,7 @@ data Vx =
   | Partition { pivots:: Vexp, pdata::Vexp }
   | Like { ldata::Vexp, lpattern::C.ByteString, lcol::Name }
   | VShuffle { varg :: Vexp }
+  | CrossProduct { left::Vexp, right::Vexp, variant::CPVariant  } -- can be the outer vec or the inner vec
   deriving (Eq,Generic)
 instance NFData Vx
 instance Hashable Vx
@@ -115,6 +121,7 @@ instance Show Vx where
   show Like {lpattern} = "Like {ldata=..., lpattern=" ++ show lpattern ++ " }"
   show VShuffle {} = "VShuffle{...}"
   show Semisort {} = "Semisort{...}"
+  show CrossProduct {} = "CrossProduct{...}"
 
 data UniqueSpec = Unique | Any deriving (Show,Eq,Generic)
 instance NFData UniqueSpec
@@ -263,6 +270,18 @@ inferMetadata :: Vx -> ColInfo
 --           then error "range does not fit in a 64 bit int"
 --        else SInt64
 --   else SInt32
+
+-- two arrays:
+-- 0,1,2,3 X 0,1 = 0,0,1,1,2,2,3,3 (outer)
+--                 0,1,0,1,0,1,0,1 (inner) length is the same. values range differently.
+inferMetadata CrossProduct { left, right, variant }
+  = let Vexp {info=ColInfo {bounds=outerbounds, count=outercount}} = (pos_ left)
+        Vexp {info=ColInfo {bounds=innerbounds, count=innercount}} = (pos_ right)
+        bounds = case variant of -- the max values depend on whether it is inner or outer
+          COuter -> outerbounds
+          CInner -> innerbounds
+    in ColInfo {bounds, count=outercount*innercount, stype=SInt32, dtype=(DDecimal{point=0}, ""), trailing_zeros=0}
+
 
 inferMetadata (Load _) = error "at the moment, should not be called with Load. TODO: need to pass config to address this case"
 
@@ -1342,10 +1361,13 @@ transform fn vexp@(Vexp {vx, name, comment, info}) mp  =
       in (mp'', newx)
 
 
-
 transformVx :: (Vx -> Maybe Vexp) -> Vx -> Memoized -> (Memoized, Vexp)
 transformVx fn vx mp =
   let (outmp, prelim) = case vx of
+        CrossProduct {left,right,variant} ->
+          let (mp', left') = transform fn left mp
+              (mp'', right') = transform fn right mp'
+          in (mp'', CrossProduct{left=left',right=right',variant})
         Load _ -> (mp, vx)
         RangeC {} -> (mp, vx)
         Semisort {sdata} ->
