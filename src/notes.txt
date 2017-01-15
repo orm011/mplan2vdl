@@ -7,6 +7,8 @@ equal values, idendity to identify actual sharing)...
 2) boilerplate passes: can we use external libraries?
 5) sanity check?
 6) is semisort needed?
+7) join path deduction for joins between tables that are indirectly
+related by fk constraints.
 
 ---
 command line args vs config. should use a single object? or at least
@@ -76,5 +78,3 @@ member name share the accessor (unless the return type is different)
 
 on the other hand, variants of different types 
 -------------
-
-
