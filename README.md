@@ -20,7 +20,8 @@ And produces this expression tree in text form:
 project (
 | group by (
 | | select (
-| | | table(sys.lineitem) [ lineitem.l_quantity,  lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate] COUNT 
+| | | table(sys.lineitem) [ lineitem.l_quantity,  lineitem.l_extendedprice, 
+lineitem.l_discount, lineitem.l_shipdate] COUNT 
 | | ) [ 
 date "1994-01-01" <= lineitem.l_shipdate < sys.sql_add(date "1994-01-01", month_interval "12"),
 sys.sql_sub("6", "1") <= lineitem.l_discount <= sys.sql_add("6", "1"), 
