@@ -74,3 +74,6 @@ These are:
 
 There are several wrapper scripts to help use the translator that pass the necessary paths for 
 a sample tpch01 database. (TODO add these to the repo)
+
+## code structure:
+The bulk of the functionality is in Vlite.hs and Mplan.hs.
